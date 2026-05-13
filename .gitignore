@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# Ephemeral sandbox state
+sandbox/builds/*/
+sandbox/sessions/*/
+!sandbox/builds/.gitkeep
+!sandbox/sessions/.gitkeep

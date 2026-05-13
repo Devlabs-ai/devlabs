@@ -1,0 +1,44 @@
+{
+  "id": "service-communication-breakdown-orders-to-users",
+  "title": "Service Communication Breakdown: Orders to Users",
+  "description": "The orders service is having trouble reaching the user service. Can you identify and fix the misconfiguration?",
+  "difficulty": "Easy",
+  "category": "Networking",
+  "tags": [
+    "microservices",
+    "networking",
+    "configuration"
+  ],
+  "finalized": true,
+  "sandboxType": "compose",
+  "problemStatement": {
+    "incident": "orders-service cannot communicate with user-service",
+    "severity": "P2",
+    "situation": "Recently, the orders-service has begun failing to retrieve user data, causing errors in processing orders. It's suspected that a recent configuration change may have introduced a service communication issue.",
+    "architecture": "user-facing-app -> orders-service -> user-service",
+    "tasks": [
+      "Inspect the orders-service logs to identify the error messages.",
+      "Check the API endpoint configurations in the orders-service.",
+      "Correct the endpoint URL to enable successful communication."
+    ],
+    "dbAccess": [],
+    "scoring": "orders-service successfully retrieves data from user-service without errors in logs"
+  },
+  "validationSpec": {
+    "steps": [
+      {
+        "type": "http",
+        "service": "orders-service",
+        "port": 8080,
+        "path": "/orders/1",
+        "check": {
+          "statusOk": true
+        }
+      }
+    ],
+    "metricsService": "load-generator",
+    "metricsPort": null,
+    "terminalService": "orders-service",
+    "metricLogFormat": "METRIC latency=<float> errors=<int> dbCpu=<float>"
+  }
+}

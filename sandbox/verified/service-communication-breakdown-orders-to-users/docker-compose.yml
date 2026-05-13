@@ -1,0 +1,22 @@
+version: '3.8'
+services:
+  user-service:
+    build:
+      context: ./services/user-service
+    ports:
+      - "${HOST_PORT_USER}:5000"
+
+  orders-service:
+    build:
+      context: ./services/orders-service
+    ports:
+      - "${HOST_PORT_ORDERS}:8080"
+    depends_on:
+      - user-service
+
+  load-generator:
+    image: python:3.11-alpine
+    command: python load_generator.py
+    volumes:
+      - ./scripts:/scripts
+    working_dir: /scripts
