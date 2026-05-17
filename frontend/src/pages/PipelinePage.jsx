@@ -3,17 +3,36 @@ import { streamBuild, getProblemSession } from '../services/problemApi.js';
 
 const PHASES = ['GENERATE', 'WRITE', 'START', 'VALIDATE'];
 
-function PhaseTracker({ phase, attempt, total, status }) {
+function PhaseTracker({ phase, attempt, total, status, validation, running }) {
+  // The run is finished once we know its terminal state. After this point
+  // there are no more `phase` events, so we must mark VALIDATE done ourselves
+  // (otherwise the pill stays stuck on "current"/blue even after the green
+  // PASSED card appears).
+  const finished = !running
+    && (status === 'review_ready' || status === 'failed' || !!validation);
+  const phaseIdx = PHASES.indexOf(phase || '');
+
   return (
     <div className="phase-tracker">
       <div className="phase-row">
-        {PHASES.map((p) => {
-          const isCurrent = p === phase;
-          const idx = PHASES.indexOf(p);
-          const phaseIdx = PHASES.indexOf(phase || '');
-          const done = phaseIdx > idx;
+        {PHASES.map((p, idx) => {
+          let done = phaseIdx > idx;
+          let isCurrent = !finished && p === phase;
+          if (finished) {
+            // VALIDATE: green if the LLM judge passed, red if it failed.
+            // Earlier phases: green if we reached them at all this iteration.
+            if (p === 'VALIDATE') {
+              done = !!validation?.passed || status === 'review_ready';
+            } else {
+              done = idx <= phaseIdx;
+            }
+          }
+          const failed = finished && p === 'VALIDATE' && validation && !validation.passed;
           return (
-            <div key={p} className={`phase-pill ${isCurrent ? 'current' : ''} ${done ? 'done' : ''}`}>
+            <div
+              key={p}
+              className={`phase-pill ${isCurrent ? 'current' : ''} ${done ? 'done' : ''} ${failed ? 'failed' : ''}`}
+            >
               <span className="dot" />
               {p}
             </div>
@@ -158,7 +177,14 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
           </div>
         </div>
         <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 14, overflow: 'auto' }}>
-          <PhaseTracker phase={phase} attempt={attempt} total={5} status={status} />
+          <PhaseTracker
+            phase={phase}
+            attempt={attempt}
+            total={5}
+            status={status}
+            validation={validation}
+            running={running}
+          />
           {err && <div className="alert">{err}</div>}
           {validation && <ValidationCard result={validation} />}
           <LogStream lines={logs} />

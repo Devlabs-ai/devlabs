@@ -1282,6 +1282,8 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
   box-shadow: 0 0 0 3px rgba(56,189,248,0.18);
   animation: pulse 1.2s ease-in-out infinite;
 }
+.phase-pill.failed { color: var(--danger); border-color: rgba(244,63,94,0.45); }
+.phase-pill.failed .dot { background: var(--danger); box-shadow: none; animation: none; }
 @keyframes pulse {
   50% { box-shadow: 0 0 0 6px rgba(56,189,248,0.06); }
 }

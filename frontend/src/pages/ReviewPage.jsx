@@ -66,7 +66,6 @@ function ReviewDetail({ r, onPush, onDismiss, busy }) {
             <div><span className="label">Incident</span><span>{c.problemStatement.incident}</span></div>
             <div><span className="label">Severity</span><span>{c.problemStatement.severity}</span></div>
             <div className="full"><span className="label">Situation</span><span>{c.problemStatement.situation}</span></div>
-            <div className="full"><span className="label">Architecture</span><span>{c.problemStatement.architecture}</span></div>
           </div>
           {Array.isArray(c.problemStatement.tasks) && (
             <>
