@@ -1,0 +1,27 @@
+version: '3.8'
+services:
+  spark-master:
+    image: bde2020/spark-master:3.1.1-hadoop3.2
+    container_name: unique_spark_master
+    ports:
+      - "${HOST_PORT_SPARK_MASTER}:8080"
+      - "7077:7077"
+    environment:
+      - INIT_DAEMON_STEP=setup_spark
+
+  spark-worker:
+    image: bde2020/spark-worker:3.1.1-hadoop3.2
+    container_name: unique_spark_worker
+    ports:
+      - "8081:8081"
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+    depends_on:
+      - spark-master
+
+  load-generator:
+    build:
+      context: ./services/load-generator
+    depends_on:
+      - spark-master
+      - spark-worker
