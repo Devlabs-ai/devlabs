@@ -26,6 +26,8 @@ const OpenAI = require('openai');
 
 const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5-20250929';
 const DEFAULT_OPENAI_MODEL = 'gpt-4o';
+const DEFAULT_OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
+const EMBEDDING_DIM = 1536;
 
 function getProvider() {
   const p = (process.env.LLM_PROVIDER || 'anthropic').toLowerCase();
@@ -164,12 +166,56 @@ async function completeMessage({ system, messages, maxTokens = 8192 }) {
   return completeWithAnthropic({ system, messages, maxTokens });
 }
 
+// --- embeddings ----------------------------------------------------------
+
+// Embeddings always use OpenAI's text-embedding-3-small. Anthropic does not
+// have a first-party embeddings API, so even when LLM_PROVIDER=anthropic
+// we route embeddings through OpenAI if OPENAI_API_KEY is set. Without an
+// OpenAI key, `embed()` returns null and the caller treats memory as cold.
+function getEmbeddingModel() {
+  return process.env.OPENAI_EMBEDDING_MODEL || DEFAULT_OPENAI_EMBEDDING_MODEL;
+}
+
+function isEmbeddingConfigured() {
+  return !!process.env.OPENAI_API_KEY;
+}
+
+// Hard cap on the input text we send to the embedding endpoint. The model
+// itself accepts ~8K tokens, but we don't want any single failure/exemplar
+// dragging more text into one vector than is useful.
+const EMBED_MAX_CHARS = 8000;
+
+async function embed(text) {
+  if (!isEmbeddingConfigured()) return null;
+  const input = String(text || '').slice(0, EMBED_MAX_CHARS).trim();
+  if (!input) return null;
+  try {
+    const client = getOpenAI();
+    const resp = await client.embeddings.create({
+      model: getEmbeddingModel(),
+      input,
+    });
+    const vec = resp.data?.[0]?.embedding;
+    if (!Array.isArray(vec) || vec.length !== EMBEDDING_DIM) return null;
+    return vec;
+  } catch (e) {
+    // Never let an embedding failure bubble up; memory is best-effort.
+    console.warn(`[llm] embed() failed: ${e.message}`);
+    return null;
+  }
+}
+
 module.exports = {
   isConfigured,
   getProvider,
   getModel,
   streamMessage,
   completeMessage,
+  embed,
+  isEmbeddingConfigured,
+  getEmbeddingModel,
+  EMBEDDING_DIM,
   DEFAULT_ANTHROPIC_MODEL,
   DEFAULT_OPENAI_MODEL,
+  DEFAULT_OPENAI_EMBEDDING_MODEL,
 };

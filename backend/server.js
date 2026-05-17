@@ -8,6 +8,7 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 
 const { runMigrations } = require('./db/migrate');
+const { seedCatalogIfEmpty } = require('./problems/seeds/runCatalogSeed');
 const sessionStore = require('./db/sessionStore');
 const draftStore = require('./problems/problemDraftStore');
 const { loadChallengesFromDB, seedChallengesFromDisk } = require('./challenges/loader');
@@ -78,6 +79,9 @@ server.on('upgrade', (req, socket, head) => {
 async function start() {
   console.log('[boot] running migrations...');
   await runMigrations();
+
+  const seeded = await seedCatalogIfEmpty({ onLog: (msg) => console.log(`[boot] ${msg}`) });
+  if (seeded > 0) console.log(`[boot] build_memory seeded ${seeded} catalog entries`);
 
   console.log('[boot] restoring active sessions from db...');
   await sessionStore.restoreFromDB();

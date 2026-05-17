@@ -27,6 +27,8 @@ npm run dev
 
 On startup the backend runs idempotent Postgres migrations, restores any in-flight sessions from the database, and seeds the `challenges` table from every `sandbox/verified/<slug>/challenge.json` it finds.
 
+If you have `OPENAI_API_KEY` set, the backend auto-seeds `build_memory` on first boot when the table is empty (~34 curated Docker image recipes: Postgres, Kafka, Nginx, Spark, etc.). The AI build pipeline retrieves them by semantic similarity plus category baselines on iteration 1. You can still run `make seed-memory` manually; re-runs are idempotent. Use `make seed-memory-force` to refresh entries after editing `backend/problems/seeds/imageCatalog.js`.
+
 ### 3. Frontend (port 5173)
 
 ```bash

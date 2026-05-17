@@ -18,7 +18,7 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 .PHONY: help install infra-up infra-down infra-reset backend frontend dev stop \
-        build clean reset
+        build clean reset seed-memory seed-memory-force seed-memory-dry
 
 help:
 	@printf "\nSystem Escape Room — make targets\n\n"
@@ -31,6 +31,7 @@ help:
 	@printf "  %-14s %s\n" "dev"         "infra + backend + frontend together; Ctrl-C stops all"
 	@printf "  %-14s %s\n" "stop"        "kill any stray dev servers and stop infra"
 	@printf "  %-14s %s\n" "build"       "production frontend build into frontend/dist/"
+	@printf "  %-14s %s\n" "seed-memory" "pre-seed build_memory with the curated image catalog"
 	@printf "  %-14s %s\n" "clean"       "remove node_modules, dist, ephemeral sandbox dirs"
 	@printf "  %-14s %s\n" "reset"       "clean + infra-reset (full wipe)"
 	@printf "\n"
@@ -106,6 +107,24 @@ stop:
 
 build:
 	cd frontend && npm run build
+
+# ---------------------------------------------------------------------------
+# build_memory seeding
+# ---------------------------------------------------------------------------
+#
+# Pre-populates the build_memory pgvector table with ~32 curated image
+# recipes (Postgres, Kafka, Nginx, Spark, ...). Idempotent: re-runs skip
+# unchanged entries without hitting the embedding API. Pass extra flags via
+# ARGS=... (e.g. `make seed-memory ARGS="--category=postgres"`).
+
+seed-memory:
+	cd backend && node scripts/seedMemory.js $(ARGS)
+
+seed-memory-force:
+	cd backend && node scripts/seedMemory.js --force $(ARGS)
+
+seed-memory-dry:
+	cd backend && node scripts/seedMemory.js --dry-run $(ARGS)
 
 clean:
 	@echo "==> removing node_modules + build output"

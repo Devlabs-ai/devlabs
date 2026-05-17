@@ -61,6 +61,33 @@ const STATEMENTS = [
      build_dir         TEXT,
      saved_at          BIGINT NOT NULL
    )`,
+  // pgvector for semantic memory retrieval. Runs idempotently; on a stock
+  // postgres image this will fail, which is why the infra compose now uses
+  // the pgvector/pgvector:pg15 image.
+  `CREATE EXTENSION IF NOT EXISTS vector`,
+  // One-time cleanup: the previous "kind"-based build_lessons table has been
+  // replaced by build_memory below. Safe to drop because dev DBs only ever
+  // held smoke rows.
+  `DROP TABLE IF EXISTS build_lessons`,
+  `CREATE TABLE IF NOT EXISTS build_memory (
+     id           SERIAL PRIMARY KEY,
+     signature    TEXT NOT NULL UNIQUE,
+     lesson_text  TEXT NOT NULL,
+     details      JSONB,
+     category     TEXT,
+     hit_count    INTEGER NOT NULL DEFAULT 1,
+     embedding    vector(1536),
+     created_at   BIGINT NOT NULL,
+     updated_at   BIGINT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_build_memory_category
+     ON build_memory (category)`,
+  `CREATE INDEX IF NOT EXISTS idx_build_memory_updated
+     ON build_memory (updated_at DESC)`,
+  // HNSW for fast cosine ANN over the embedding column. Only matters once
+  // we have ~hundreds of rows; harmless when empty.
+  `CREATE INDEX IF NOT EXISTS idx_build_memory_embedding
+     ON build_memory USING hnsw (embedding vector_cosine_ops)`,
 ];
 
 async function runMigrations() {
