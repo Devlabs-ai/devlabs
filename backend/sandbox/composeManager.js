@@ -97,6 +97,94 @@ function placeholderFields(composeYaml) {
   return Array.from(fields);
 }
 
+// Strip Docker pull/build progress noise from compose stdout/stderr. Lines
+// like "083e1d04595f Downloading [==>] 1MB/87MB", "kafka Pulling", and
+// "131f1a26eef0 Extracting 3 s" carry no signal once a pull is over but
+// can balloon retry context to >100KB and trigger TPM rate limits.
+const _NOISE_PATTERNS = [
+  /\bPulling fs layer\s*$/,
+  /\bPulling\s*$/,
+  /\bPulled\s*$/,
+  /\bPull complete\s*$/,
+  /\bDownloading\s*\[/,
+  /\bDownload complete\s*$/,
+  /\bDownloaded newer image\b/,
+  /\bExtracting\s+\d+\s*s\s*$/,
+  /\bVerifying Checksum\s*$/,
+  /\bWaiting\s*$/,
+  /\bAlready exists\s*$/,
+  /\bInterrupted\s*$/,
+];
+
+function stripDockerNoise(s) {
+  if (!s || typeof s !== 'string') return s;
+  return s
+    .split('\n')
+    .filter((line) => {
+      const t = line.trimEnd();
+      if (/^time="[^"]+" level=warning msg=/.test(t.trim())) return false;
+      for (const re of _NOISE_PATTERNS) {
+        if (re.test(t)) return false;
+      }
+      return true;
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
+// Extract every `build.context` path declared in a docker-compose YAML.
+// Supports both short form (`build: ./path`) and block form
+// (`build:\n      context: ./path`). Returns [{ service, contextPath }, ...].
+// Best-effort, tolerant parser for the constrained 2-space-indent layout we
+// expect; not a full YAML implementation.
+function extractBuildContexts(composeYaml) {
+  if (!composeYaml || typeof composeYaml !== 'string') return [];
+  const out = [];
+  const lines = composeYaml.split('\n').map((l) => l.replace(/\r$/, ''));
+  let inServices = false;
+  let currentService = null;
+  let inBuildBlock = false;
+  for (const line of lines) {
+    if (!line.trim() || /^\s*#/.test(line)) continue;
+    if (/^[A-Za-z_][\w-]*\s*:/.test(line)) {
+      inServices = /^services\s*:/.test(line);
+      currentService = null;
+      inBuildBlock = false;
+      continue;
+    }
+    if (!inServices) continue;
+    const svcM = line.match(/^  ([A-Za-z][\w-]*)\s*:\s*(?:#.*)?$/);
+    if (svcM) {
+      currentService = svcM[1];
+      inBuildBlock = false;
+      continue;
+    }
+    if (!currentService) continue;
+    const shortM = line.match(/^    build\s*:\s*['"]?([^'"#\s]+)['"]?\s*(?:#.*)?$/);
+    if (shortM) {
+      out.push({ service: currentService, contextPath: shortM[1] });
+      inBuildBlock = false;
+      continue;
+    }
+    if (/^    build\s*:\s*(?:#.*)?$/.test(line)) {
+      inBuildBlock = true;
+      continue;
+    }
+    if (inBuildBlock) {
+      // Any line with <=4 leading spaces means we exited the build block.
+      const indMatch = line.match(/^( +)/);
+      const ind = indMatch ? indMatch[1].length : 0;
+      if (ind <= 4) {
+        inBuildBlock = false;
+      } else {
+        const ctxM = line.match(/^\s+context\s*:\s*['"]?([^'"#\s]+)['"]?\s*(?:#.*)?$/);
+        if (ctxM) out.push({ service: currentService, contextPath: ctxM[1] });
+      }
+    }
+  }
+  return out;
+}
+
 // Extract top-level service names from a docker-compose YAML string.
 // Handles standard 2-space indentation; ignores comments, anchors, etc.
 function extractServiceNames(composeYaml) {
@@ -124,49 +212,83 @@ async function resolvePortMap(buildDir, composeYaml, ownerId, { pool = 'session'
   return portMap;
 }
 
+// Wait until every compose service is `running` AND stays that way long
+// enough that we're not racing against a crash-on-boot. Three guarantees:
+//
+//   1. `--all` — exited / dead containers stay visible in the ps output so we
+//      can fail fast instead of timing out with "no services found".
+//   2. Fail-fast on `exited` / `dead` state. No reason to keep polling once
+//      we have ground truth that a container died.
+//   3. Stability check — require N consecutive observations of "all running"
+//      before declaring success. Without this, the very first poll catches
+//      containers mid-boot and reports them as running for a few hundred ms
+//      before they crash (e.g. Confluent Kafka exiting because
+//      KAFKA_PROCESS_ROLES is unset).
 async function waitForServices(buildDir, portMap, maxWaitMs = 60000) {
+  const POLL_INTERVAL_MS = 3000;
+  const STABLE_POLLS_REQUIRED = 3; // ~9s of consecutive "all running"
   const start = Date.now();
+  let stableCount = 0;
   let lastStatus = '';
 
   while (Date.now() - start < maxWaitMs) {
+    let services = [];
     try {
-      const { stdout } = await runCompose(['ps', '--format', 'json'], {
+      const { stdout } = await runCompose(['ps', '--all', '--format', 'json'], {
         cwd: buildDir,
         env: envWithPorts(portMap),
       });
       const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
-      const services = [];
       for (const line of lines) {
         try {
-          const obj = JSON.parse(line);
-          services.push(obj);
+          services.push(JSON.parse(line));
         } catch (_e) {
+          // older Compose versions emit a single JSON array on one line
           try {
             const arr = JSON.parse(stdout);
-            if (Array.isArray(arr)) {
-              for (const s of arr) services.push(s);
-              break;
-            }
+            if (Array.isArray(arr)) { services = arr; break; }
           } catch (_ee) { /* ignore */ }
-        }
-      }
-
-      if (services.length === 0) {
-        lastStatus = 'no services found';
-      } else {
-        const states = services.map((s) => s.State || s.state || 'unknown');
-        lastStatus = states.join(', ');
-        const allRunning = states.every((s) => s === 'running');
-        if (allRunning) {
-          console.log(`[compose] waitForServices OK: ${lastStatus}`);
-          return true;
         }
       }
     } catch (e) {
       lastStatus = `ps error: ${e.message}`;
+      stableCount = 0;
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      continue;
     }
 
-    await new Promise((r) => setTimeout(r, 3000));
+    if (services.length === 0) {
+      lastStatus = 'no services found';
+      stableCount = 0;
+    } else {
+      lastStatus = services
+        .map((s) => `${s.Service || s.Name}=${s.State}${s.Status ? ` (${s.Status})` : ''}`)
+        .join('; ');
+
+      // Hard fail: any exited / dead container means the boot is broken.
+      // Throwing here lets the build agent capture compose logs immediately
+      // instead of waiting out the 90s timeout.
+      const dead = services.find((s) => /^(exited|dead)$/i.test(s.State || ''));
+      if (dead) {
+        throw new Error(
+          `service "${dead.Service || dead.Name}" ${dead.State}: ${dead.Status || 'unknown reason'}`,
+        );
+      }
+
+      const allRunning = services.every((s) => (s.State || '').toLowerCase() === 'running');
+      if (allRunning) {
+        stableCount += 1;
+        console.log(`[compose] waitForServices stable ${stableCount}/${STABLE_POLLS_REQUIRED}: ${lastStatus}`);
+        if (stableCount >= STABLE_POLLS_REQUIRED) {
+          console.log(`[compose] waitForServices OK after ${stableCount} stable polls`);
+          return true;
+        }
+      } else {
+        stableCount = 0;
+      }
+    }
+
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
 
   throw new Error(`waitForServices timed out (${maxWaitMs}ms). Last status: ${lastStatus}`);
@@ -195,4 +317,6 @@ module.exports = {
   readComposeFile,
   placeholderFields,
   extractServiceNames,
+  extractBuildContexts,
+  stripDockerNoise,
 };
