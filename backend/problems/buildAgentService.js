@@ -30,7 +30,7 @@ const BUILDS_ROOT = path.join(ROOT, 'sandbox', 'builds');
 
 const MAX_ITERATIONS = 10;
 
-const GENERATE_SYSTEM_PROMPT = `You are the Build Agent for "System Escape Room".
+const GENERATE_SYSTEM_PROMPT = `You are the Build Agent for "Devlabs".
 Given a sandboxSpec describing a broken-infrastructure interview challenge,
 emit the COMPLETE set of files needed to build that sandbox with docker
 compose.

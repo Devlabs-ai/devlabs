@@ -200,7 +200,7 @@ export default function App() {
       <div className="topbar">
         <div className="brand">
           <span className="logo-dot" />
-          System Escape Room
+          Devlabs
           <span className="sub">v0.1</span>
         </div>
 

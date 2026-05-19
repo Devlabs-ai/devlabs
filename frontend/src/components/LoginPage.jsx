@@ -26,7 +26,7 @@ export default function LoginPage({ onLoggedIn }) {
       <form onSubmit={handleSubmit}>
         <h1>
           <span className="logo-dot" />
-          System Escape Room
+          Devlabs
         </h1>
         <div className="hint" style={{ textAlign: 'left', marginBottom: 8 }}>
           Sign in as an interviewer to author challenges and run sessions.

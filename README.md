@@ -1,4 +1,4 @@
-# System Escape Room
+# Devlabs
 
 A technical interview platform where interviewers author broken-infrastructure challenges and candidates debug them live inside real Docker sandboxes.
 

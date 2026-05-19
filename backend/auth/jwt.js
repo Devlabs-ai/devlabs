@@ -5,7 +5,7 @@ const jwt = require('jsonwebtoken');
 const EXPIRES_IN = '8h';
 
 function getSecret() {
-  return process.env.JWT_SECRET || 'escape-room-dev-secret';
+  return process.env.JWT_SECRET || 'devlabs-dev-secret';
 }
 
 function signInterviewerToken(sub = 'admin') {

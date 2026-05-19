@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# System Escape Room — dev convenience targets
+# Devlabs — dev convenience targets
 #
 # Common flow:
 #   make install      # install backend + frontend npm deps
@@ -21,7 +21,7 @@ SHELL := /bin/bash
         build clean reset seed-memory seed-memory-force seed-memory-dry
 
 help:
-	@printf "\nSystem Escape Room — make targets\n\n"
+	@printf "\nDevlabs — make targets\n\n"
 	@printf "  %-14s %s\n" "install"     "install backend + frontend npm deps"
 	@printf "  %-14s %s\n" "infra-up"    "start Postgres + Redis (detached)"
 	@printf "  %-14s %s\n" "infra-down"  "stop Postgres + Redis (keep volumes)"
