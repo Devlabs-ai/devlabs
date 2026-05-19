@@ -108,29 +108,29 @@ similar lessons retrieved from prior builds (across all drafts). Shape:
   {
     "relatedLessons": [
       {
-        "text":       "<one paragraph describing what happened and the lesson>",
+        "text":       "<lesson paragraph — failures seen + working fix>",
         "category":   "<category slug or null>",
         "hitCount":   <how many builds have recorded this same lesson>,
-        "similarity": <cosine similarity 0..1; higher = more relevant>
+        "similarity": <cosine similarity 0..1; higher = more relevant>,
+        "details":    { "successMantra": "...", "workingCompose": "...", "failureHistory": [...] }
       },
       ...
     ]
   }
 
-Lessons describe past failures (with their cause + cure) AND past
-successes (e.g. "Docker image X was used successfully in a working build
-for category Y"). They are retrieved by semantic similarity to the
-current task and the previousAttempt failure, so the list is ALREADY
-filtered for relevance — read every entry carefully.
+Lessons are recorded only after a phase SUCCEEDS (START or VALIDATE). Each
+success lesson lists prior failures for that phase in \`text\` and stores
+the working compose + guidance in \`details.successMantra\` and
+\`details.workingCompose\`. Read \`details\` carefully — it is the
+authoritative fix, not just the summary in \`text\`.
 
 How to use it:
-  - If a lesson says an image tag failed to resolve, DO NOT use that tag.
-  - If a lesson describes a fix for a previous failure that matches your
-    current previousAttempt, try applying the fix in the same line.
-  - If a success lesson mentions image tags or services that fit the
-    current category, prefer those as starting points.
-  - Higher \`similarity\` and \`hitCount\` mean stronger signal — weight
-    those lessons more heavily.
+  - Prefer image tags, env vars, and service blocks from
+    \`details.workingCompose\` when present.
+  - Follow \`details.successMantra\` for how prior errors were resolved.
+  - \`details.failureHistory\` lists what failed before the fix — avoid
+    repeating those mistakes.
+  - Higher \`similarity\` and \`hitCount\` mean stronger signal.
   - Docker image tags, env blocks, and service recipes come ONLY from
     \`relatedLessons\` (seed catalog + lessons from past builds).
 
@@ -380,10 +380,10 @@ function sanitizePreviousAttempt(prev) {
 // previous-attempt failure summary), embed it, ask Postgres for the K
 // closest lessons. The LLM reads them as advisory paragraphs.
 //
-// Recording is dual: every failure becomes one prose lesson; every
-// success-after-failure becomes one prose lesson with before/after
-// snippets in details; every successful build also records each compose
-// image as its own "image works" lesson so future drafts retrieve it.
+// Recording happens only on phase SUCCESS (START or VALIDATE). Each
+// success lesson bundles prior failures for that phase in lesson_text and
+// stores workingCompose + successMantra in details. VALIDATE pass also
+// records one "image works" row per compose image.
 
 const MEMORY_K = 8;
 const MEMORY_MAX_DISTANCE = 0.45;
@@ -424,16 +424,46 @@ function buildRetrievalQuery({ draft, previousAttempt }) {
   return parts.join('\n');
 }
 
+const PROMPT_DETAILS_COMPOSE_MAX = 2500;
+const PROMPT_DETAILS_MANTRA_MAX = 600;
+const PROMPT_FAILURE_HISTORY_MAX = 5;
+
 // What the LLM sees inside `memory.relatedLessons[]`.
 function shapeLessonForPrompt(lesson) {
-  return {
-    text: cap(lesson.text, 1200),
+  const out = {
+    text: cap(lesson.text, 2000),
     category: lesson.category || null,
     hitCount: lesson.hitCount,
     similarity: lesson.distance != null
       ? Math.max(0, Math.min(1, 1 - lesson.distance))
       : null,
   };
+  const details = shapeDetailsForPrompt(lesson.details);
+  if (details) out.details = details;
+  return out;
+}
+
+function shapeDetailsForPrompt(details) {
+  if (!details || typeof details !== 'object') return null;
+  const out = {};
+  if (details.successMantra) {
+    out.successMantra = cap(String(details.successMantra), PROMPT_DETAILS_MANTRA_MAX);
+  }
+  if (details.workingCompose) {
+    out.workingCompose = cap(String(details.workingCompose), PROMPT_DETAILS_COMPOSE_MAX);
+  }
+  if (Array.isArray(details.failureHistory) && details.failureHistory.length) {
+    out.failureHistory = details.failureHistory
+      .slice(0, PROMPT_FAILURE_HISTORY_MAX)
+      .map((f) => ({
+        attempt: f.attempt,
+        phase: f.phase,
+        message: cap(f.message || '', 400),
+      }));
+  }
+  if (details.image) out.image = details.image;
+  if (details.recordType) out.recordType = details.recordType;
+  return Object.keys(out).length ? out : null;
 }
 
 async function buildMemoryBlock({ draft, previousAttempt }) {
@@ -459,7 +489,9 @@ async function buildMemoryBlock({ draft, previousAttempt }) {
     const baselineCats = [];
     if (category) baselineCats.push(category);
     if (!baselineCats.includes('docker-images')) baselineCats.push('docker-images');
-
+    
+    // This is only for first iteration, to get some category wise lookup as well as there are 
+    // no previous attempts.
     for (const cat of baselineCats) {
       const extra = await memoryStore.topByCategory(cat, 3);
       for (const row of extra) {
@@ -481,6 +513,21 @@ async function buildMemoryBlock({ draft, previousAttempt }) {
 
   return {
     relatedLessons: merged.map(shapeLessonForPrompt),
+  };
+}
+
+// Snapshot a failed attempt for in-build history (recorded later inside a
+// success lesson, not as a standalone failure row).
+function captureFailureSnapshot({ attempt, phase, lastAttempt }) {
+  if (!lastAttempt) return null;
+  return {
+    attempt,
+    phase,
+    message: cap(lastAttempt.message || '', 600),
+    composeSnippet: cap(lastAttempt.artifacts?.dockerCompose || '', 1200),
+    composeStderr: cap(lastAttempt.details?.composeStderr, 600),
+    logs: cap(lastAttempt.details?.logs, 600),
+    feedback: cap(lastAttempt.details?.feedback, 400),
   };
 }
 
@@ -523,57 +570,93 @@ function failureLessonText({ phase, message, details = {}, category }) {
   return lines.join(' ');
 }
 
-async function recordFailureLessons({ phase, lastAttempt, category }) {
-  if (!lastAttempt) return;
-  const text = failureLessonText({
-    phase,
-    message: lastAttempt.message,
-    details: lastAttempt.details || {},
-    category,
-  });
+function buildPhaseSuccessLessonText({ phase, category, failures, compose }) {
+  const lines = [];
+  lines.push(
+    `${phase} phase succeeded${category ? ` for category ${category}` : ''}.`,
+  );
+  if (failures.length > 0) {
+    lines.push(`Failures observed before this success (${failures.length}):`);
+    for (const f of failures) {
+      lines.push(`- Attempt ${f.attempt} (${f.phase}): ${f.message}`);
+    }
+  } else {
+    lines.push('No prior failures for this phase in the same build.');
+  }
+  lines.push('Working compose configuration that resolved the issue:');
+  lines.push(cap(compose, 2200));
+  return lines.join('\n');
+}
+
+function buildSuccessMantra({ phase, failures, compose }) {
+  const parts = [];
+  if (failures.length > 0) {
+    parts.push(
+      `After ${failures.length} failed ${phase} attempt(s), all services reached a good state. `
+      + 'Reuse the exact image tags, environment variables, and service definitions in workingCompose. '
+      + 'Do not repeat the mistakes listed in failureHistory.',
+    );
+    for (const f of failures.slice(0, 4)) {
+      const hint = failureLessonText({
+        phase: f.phase,
+        message: f.message,
+        details: {
+          composeStderr: f.composeStderr,
+          logs: f.logs,
+          feedback: f.feedback,
+        },
+        category: null,
+      });
+      parts.push(`Prior failure (attempt ${f.attempt}): ${cap(f.message, 200)} → ${cap(hint, 300)}`);
+    }
+  } else {
+    parts.push(
+      `${phase} succeeded on the first try for this build. `
+      + 'Reuse workingCompose as the baseline for similar challenges.',
+    );
+  }
+  parts.push(`Compose keys: ${cap(compose, 800)}`);
+  return parts.join(' ');
+}
+
+// Record a success lesson when START or VALIDATE passes. Bundles all prior
+// failures for that phase in lesson_text and stores the working compose +
+// successMantra in details for cross-build retrieval.
+async function recordPhaseSuccessLessons({
+  phase,
+  assets,
+  category,
+  failures = [],
+  attempt,
+}) {
+  const compose = assets?.dockerCompose || '';
+  if (!compose.trim()) return;
+
+  const text = buildPhaseSuccessLessonText({ phase, category, failures, compose });
+  const successMantra = buildSuccessMantra({ phase, failures, compose });
+
   await memoryStore.record({
     text,
     details: {
+      recordType: phase === 'START' ? 'start-success' : 'validate-success',
       phase,
-      message: cap(lastAttempt.message || '', 800),
-      composeStderr: cap(lastAttempt.details?.composeStderr, 1200),
-      logs: cap(lastAttempt.details?.logs, 1200),
-      feedback: cap(lastAttempt.details?.feedback, 600),
+      attempt,
+      successMantra,
+      workingCompose: cap(compose, 3500),
+      failureHistory: failures,
     },
     category,
   });
 }
 
-// On a successful iteration that followed at least one failure, store a
-// fix lesson with before/after compose excerpts. Also store one "image
-// works" lesson per compose image so future drafts retrieve a known-good
-// image suggestion without needing the same kind of failure first.
-async function recordSuccessLessons({ priorFailure, assets, category, draft }) {
-  const compose = assets.dockerCompose || '';
-
-  if (priorFailure) {
-    const before = priorFailure.artifacts?.dockerCompose || '';
-    const after = compose;
-    const text = `Fix for a build that previously failed at ${priorFailure.phase}${category ? ` (category: ${category})` : ''}. Prior error: ${cap(priorFailure.message || '', 400)}. The next iteration succeeded; the compose file was adjusted to resolve it.`;
-    await memoryStore.record({
-      text,
-      details: {
-        phase: priorFailure.phase,
-        priorError: cap(priorFailure.message || '', 800),
-        beforeCompose: cap(before, 1500),
-        afterCompose: cap(after, 1500),
-      },
-      category,
-    });
-  }
-
-  // One "image works" lesson per image in the successful compose. Each
-  // gets its own SHA so similar drafts can semantically retrieve them.
+// One "image works" lesson per image in a fully validated compose.
+async function recordImageWorksLessons({ assets, category }) {
+  const compose = assets?.dockerCompose || '';
   for (const image of extractImagesFromCompose(compose)) {
-    const text = `Docker image \`${image}\` was used successfully in a working build${category ? ` for the ${category} category` : ''}. It is a known-good tag — safe to reuse for similar challenges.`;
+    const text = `Docker image \`${image}\` was used successfully in a validated build${category ? ` for the ${category} category` : ''}. It is a known-good tag — safe to reuse for similar challenges.`;
     await memoryStore.record({
       text,
-      details: { image, fromCategory: category || null },
+      details: { recordType: 'image-works', image, fromCategory: category || null },
       category,
     });
   }
@@ -618,6 +701,10 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
   // `previousAttempt` in the user payload, so it knows exactly what it
   // emitted last time and why it failed.
   let lastAttempt = null;
+  // Failures accumulated until START / VALIDATE succeed — written once as
+  // part of a success lesson (not as standalone failure rows).
+  const startFailureHistory = [];
+  const validateFailureHistory = [];
 
   for (let attempt = 1; attempt <= MAX_ITERATIONS; attempt++) {
     onEvent({ type: 'phase', phase: 'GENERATE', attempt, total: MAX_ITERATIONS });
@@ -717,6 +804,7 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
     }
 
     onEvent({ type: 'phase', phase: 'START', attempt, total: MAX_ITERATIONS });
+    const buildCategory = draft?.category || draft?.sandboxSpec?.category || null;
     let portMap;
     try {
       const { content: composeYaml } = composeManager.readComposeFile(buildDir);
@@ -727,6 +815,21 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
       await composeManager.up(buildDir, portMap);
       await composeManager.waitForServices(buildDir, portMap, 90_000);
       onEvent({ type: 'log', message: '[start] all services reported running' });
+
+      await recordPhaseSuccessLessons({
+        phase: 'START',
+        assets,
+        category: buildCategory,
+        failures: startFailureHistory,
+        attempt,
+      });
+      if (startFailureHistory.length > 0) {
+        onEvent({
+          type: 'log',
+          message: `[memory] recorded START success lesson (${startFailureHistory.length} prior failure(s) bundled)`,
+        });
+      }
+      startFailureHistory.length = 0;
     } catch (e) {
       // Strip docker pull-progress noise BEFORE we log, show, or stash for
       // retry. Without this, a single failed Kafka pull can dump 250KB of
@@ -760,23 +863,13 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
           logs,
         },
       };
-      // record image_bad / other signature-based lessons so the next
-      // iteration's memory block picks them up
-      await recordFailureLessons({
-        phase: 'START',
-        lastAttempt,
-        category: draft?.category || draft?.sandboxSpec?.category || null,
-      });
+      const snap = captureFailureSnapshot({ attempt, phase: 'START', lastAttempt });
+      if (snap) startFailureHistory.push(snap);
       // eslint-disable-next-line no-continue
       continue;
     }
 
     onEvent({ type: 'phase', phase: 'VALIDATE', attempt, total: MAX_ITERATIONS });
-    const buildCategory = draft?.category || draft?.sandboxSpec?.category || null;
-    // Snapshot the failure that drove THIS iteration (if any) so we can
-    // learn from the diff if this iteration succeeds. Once we overwrite
-    // `lastAttempt` below the original context is lost.
-    const priorFailure = lastAttempt;
     let validation;
     try {
       validation = await validationAgent.validate({
@@ -798,7 +891,8 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
         rawText: null,
         details: null,
       };
-      await recordFailureLessons({ phase: 'VALIDATE', lastAttempt, category: buildCategory });
+      const snap = captureFailureSnapshot({ attempt, phase: 'VALIDATE', lastAttempt });
+      if (snap) validateFailureHistory.push(snap);
       // eslint-disable-next-line no-continue
       continue;
     }
@@ -820,11 +914,19 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
         ? `${terminalWsBase}/ws/metrics?sessionId=__build:${buildSessionId}`
         : null;
 
-      // Memory lessons learned from this successful iteration. If we got
-      // here after at least one failure, store a fix lesson with
-      // before/after compose. Always store one "image works" lesson per
-      // image in the working compose.
-      await recordSuccessLessons({ priorFailure, assets, category: buildCategory, draft });
+      await recordPhaseSuccessLessons({
+        phase: 'VALIDATE',
+        assets,
+        category: buildCategory,
+        failures: validateFailureHistory,
+        attempt,
+      });
+      validateFailureHistory.length = 0;
+      await recordImageWorksLessons({ assets, category: buildCategory });
+      onEvent({
+        type: 'log',
+        message: '[memory] recorded VALIDATE success + image-works lessons',
+      });
 
       onEvent({
         type: 'done',
@@ -860,7 +962,8 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
         evidence: validation.evidence || [],
       },
     };
-    await recordFailureLessons({ phase: 'VALIDATE', lastAttempt, category: buildCategory });
+    const snap = captureFailureSnapshot({ attempt, phase: 'VALIDATE', lastAttempt });
+    if (snap) validateFailureHistory.push(snap);
   }
 
   // exhausted retries
