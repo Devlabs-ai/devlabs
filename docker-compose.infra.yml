@@ -1,33 +1,31 @@
 services:
   postgres:
     # pgvector/pgvector:pg15 is postgres:15 + pgvector extension preinstalled.
-    # Data layout is identical to the stock postgres:15 image, so the existing
-    # `escape_room_pg_data` volume migrates without reinitdb.
     image: pgvector/pgvector:pg15
-    container_name: escape-room-postgres
+    container_name: devlabs-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: escaperoom
+      POSTGRES_DB: devlabs
     ports:
       - "5432:5432"
     volumes:
-      - escape_room_pg_data:/var/lib/postgresql/data
+      - devlabs_pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d escaperoom"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d devlabs"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    container_name: escape-room-redis
+    container_name: devlabs-redis
     restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
-      - escape_room_redis_data:/data
+      - devlabs_redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -35,5 +33,5 @@ services:
       retries: 10
 
 volumes:
-  escape_room_pg_data:
-  escape_room_redis_data:
+  devlabs_pg_data:
+  devlabs_redis_data:

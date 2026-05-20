@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const TOKEN_KEY = 'escaperoom_jwt';
+const TOKEN_KEY = 'devlabs_jwt';
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY);

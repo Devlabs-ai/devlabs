@@ -12,7 +12,7 @@
 
 const llm = require('../llm/client');
 
-const SYSTEM_PROMPT = `You are the Problem Design Agent for "System Escape Room",
+const SYSTEM_PROMPT = `You are the Problem Design Agent for "Devlabs",
 a platform where interviewers/probelem-setting agents author System challenges that
 candidates debug live inside Docker sandboxes.
 

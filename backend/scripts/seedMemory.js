@@ -7,7 +7,7 @@
 require('dotenv').config();
 
 const pool = require('../db/pool');
-const memoryStore = require('../problems/memoryStore');
+const specialistStore = require('../problems/specialistStore');
 const llm = require('../llm/client');
 const { seedCatalog, CATALOG } = require('../problems/seeds/runCatalogSeed');
 
@@ -38,12 +38,6 @@ async function main() {
   const opts = parseArgs(process.argv);
   if (opts.help) { printHelp(); return; }
 
-  if (!llm.isEmbeddingConfigured() && !opts.dryRun) {
-    console.error('[seed] OPENAI_API_KEY is not set.');
-    process.exitCode = 1;
-    return;
-  }
-
   if (opts.category) {
     const match = CATALOG.filter((e) => e.category === opts.category);
     if (match.length === 0) {
@@ -69,7 +63,7 @@ async function main() {
     console.log('');
     console.log(`[seed] done in ${elapsed}s — inserted ${inserted}, skipped ${skipped}, failed ${failed}`);
     if (!opts.dryRun) {
-      console.log(`[seed] build_memory now holds ${await memoryStore.count()} row(s)`);
+      console.log(`[seed] specialists now holds ${await specialistStore.count()} row(s)`);
     }
     if (failed > 0) process.exitCode = 1;
   } catch (e) {

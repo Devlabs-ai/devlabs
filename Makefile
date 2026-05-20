@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# System Escape Room — dev convenience targets
+# Devlabs — dev convenience targets
 #
 # Common flow:
 #   make install      # install backend + frontend npm deps
@@ -21,7 +21,7 @@ SHELL := /bin/bash
         build clean reset seed-memory seed-memory-force seed-memory-dry
 
 help:
-	@printf "\nSystem Escape Room — make targets\n\n"
+	@printf "\nDevlabs — make targets\n\n"
 	@printf "  %-14s %s\n" "install"     "install backend + frontend npm deps"
 	@printf "  %-14s %s\n" "infra-up"    "start Postgres + Redis (detached)"
 	@printf "  %-14s %s\n" "infra-down"  "stop Postgres + Redis (keep volumes)"
@@ -31,7 +31,7 @@ help:
 	@printf "  %-14s %s\n" "dev"         "infra + backend + frontend together; Ctrl-C stops all"
 	@printf "  %-14s %s\n" "stop"        "kill any stray dev servers and stop infra"
 	@printf "  %-14s %s\n" "build"       "production frontend build into frontend/dist/"
-	@printf "  %-14s %s\n" "seed-memory" "pre-seed build_memory with the curated image catalog"
+	@printf "  %-14s %s\n" "seed-memory" "pre-seed specialists table from the curated image catalog"
 	@printf "  %-14s %s\n" "clean"       "remove node_modules, dist, ephemeral sandbox dirs"
 	@printf "  %-14s %s\n" "reset"       "clean + infra-reset (full wipe)"
 	@printf "\n"
@@ -112,9 +112,9 @@ build:
 # build_memory seeding
 # ---------------------------------------------------------------------------
 #
-# Pre-populates the build_memory pgvector table with ~32 curated image
-# recipes (Postgres, Kafka, Nginx, Spark, ...). Idempotent: re-runs skip
-# unchanged entries without hitting the embedding API. Pass extra flags via
+# Pre-populates the specialists table with ~32 curated image handbook rows
+# (Postgres, Kafka, Nginx, Spark, ...). Idempotent: re-runs skip unchanged
+# entries. Pass extra flags via
 # ARGS=... (e.g. `make seed-memory ARGS="--category=postgres"`).
 
 seed-memory:

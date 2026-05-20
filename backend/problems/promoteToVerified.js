@@ -8,7 +8,6 @@ const fs = require('fs');
 const path = require('path');
 
 const loader = require('../challenges/loader');
-const memoryStore = require('./memoryStore');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const VERIFIED_ROOT = path.join(ROOT, 'sandbox', 'verified');
@@ -75,78 +74,7 @@ async function promote({ buildDir, builtChallenge, fallbackTitle }) {
   await loader.seedChallengesFromDisk(VERIFIED_ROOT);
   await loader.loadChallengesFromDB();
 
-  // Record a prose exemplar lesson so future drafts in a semantically
-  // similar space retrieve this challenge as a working blueprint. Best
-  // effort; never fail the promotion on memory errors.
-  try {
-    let composeYaml = '';
-    try { composeYaml = fs.readFileSync(path.join(dest, 'docker-compose.yml'), 'utf8'); }
-    catch (_e) { /* compose file may be at a non-standard name; skip */ }
-    const imagesUsed = extractImagesFromCompose(composeYaml);
-    const services = composeYaml ? extractServiceNames(composeYaml) : [];
-    const categorySlugVal = categorySlug(merged.category);
-
-    const titleStr = merged.title || slug;
-    const servicesStr = services.length ? services.join(', ') : 'n/a';
-    const imagesStr = imagesUsed.length ? imagesUsed.join(', ') : 'n/a';
-    const text = `Verified working blueprint: ${titleStr}. Category: ${merged.category || 'general'}. Services: ${servicesStr}. Docker images used: ${imagesStr}. This compose was promoted to the verified library after passing the build pipeline — its image choices, env vars, and service layout are known-good and safe to reuse for similar challenges.`;
-
-    await memoryStore.record({
-      text,
-      details: {
-        slug,
-        title: titleStr,
-        services,
-        imagesUsed,
-        composeExcerpt: composeYaml.length > 0 ? composeYaml.slice(0, 2500) : null,
-      },
-      category: categorySlugVal,
-    });
-  } catch (e) {
-    console.warn(`[promote] memory recording failed (non-fatal): ${e.message}`);
-  }
-
   return { slug, verifiedDir: dest, challenge: merged };
-}
-
-// Local helpers — kept here so promoteToVerified doesn't have to import
-// the deleted lessonSignatures.js or the heavier composeManager.
-function categorySlug(category) {
-  if (!category || typeof category !== 'string') return null;
-  return category
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    || null;
-}
-
-function extractImagesFromCompose(yaml) {
-  if (!yaml || typeof yaml !== 'string') return [];
-  const out = new Set();
-  for (const rawLine of yaml.split('\n')) {
-    const line = rawLine.replace(/\r$/, '');
-    if (/^\s*#/.test(line)) continue;
-    const m = line.match(/^\s+image\s*:\s*['"]?([^\s'"#]+)['"]?\s*(?:#.*)?$/);
-    if (m) out.add(m[1]);
-  }
-  return Array.from(out);
-}
-
-function extractServiceNames(composeYaml) {
-  const out = [];
-  let inServices = false;
-  for (const rawLine of (composeYaml || '').split('\n')) {
-    const line = rawLine.replace(/\r$/, '');
-    if (!line.trim() || /^\s*#/.test(line)) continue;
-    if (/^[A-Za-z_][\w-]*\s*:/.test(line)) {
-      inServices = /^services\s*:/.test(line);
-      continue;
-    }
-    if (!inServices) continue;
-    const m = line.match(/^  ([A-Za-z][\w-]*)\s*:\s*(?:#.*)?$/);
-    if (m) out.push(m[1]);
-  }
-  return out;
 }
 
 module.exports = { promote, VERIFIED_ROOT };

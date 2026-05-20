@@ -69,25 +69,44 @@ const STATEMENTS = [
   // replaced by build_memory below. Safe to drop because dev DBs only ever
   // held smoke rows.
   `DROP TABLE IF EXISTS build_lessons`,
-  `CREATE TABLE IF NOT EXISTS build_memory (
-     id           SERIAL PRIMARY KEY,
-     signature    TEXT NOT NULL UNIQUE,
-     lesson_text  TEXT NOT NULL,
-     details      JSONB,
-     category     TEXT,
-     hit_count    INTEGER NOT NULL DEFAULT 1,
-     embedding    vector(1536),
-     created_at   BIGINT NOT NULL,
-     updated_at   BIGINT NOT NULL
+  `DROP TABLE IF EXISTS build_memory`,
+  `CREATE TABLE IF NOT EXISTS specialists (
+     id            SERIAL PRIMARY KEY,
+     signature     TEXT NOT NULL UNIQUE,
+     category      TEXT NOT NULL,
+     stack         TEXT,
+     service_role  TEXT,
+     title         TEXT NOT NULL,
+     dos           JSONB NOT NULL DEFAULT '[]',
+     donts         JSONB NOT NULL DEFAULT '[]',
+     conf          JSONB NOT NULL DEFAULT '{}',
+     priority      INT NOT NULL DEFAULT 0,
+     active        BOOLEAN NOT NULL DEFAULT true,
+     created_at    BIGINT NOT NULL,
+     updated_at    BIGINT NOT NULL
    )`,
-  `CREATE INDEX IF NOT EXISTS idx_build_memory_category
-     ON build_memory (category)`,
-  `CREATE INDEX IF NOT EXISTS idx_build_memory_updated
-     ON build_memory (updated_at DESC)`,
-  // HNSW for fast cosine ANN over the embedding column. Only matters once
-  // we have ~hundreds of rows; harmless when empty.
-  `CREATE INDEX IF NOT EXISTS idx_build_memory_embedding
-     ON build_memory USING hnsw (embedding vector_cosine_ops)`,
+  `CREATE INDEX IF NOT EXISTS idx_specialists_category_active
+     ON specialists (category, priority DESC)
+     WHERE active = true`,
+  `CREATE TABLE IF NOT EXISTS lessons (
+     id               SERIAL PRIMARY KEY,
+     phase            TEXT NOT NULL CHECK (phase IN ('start', 'validate')),
+     draft_session_id TEXT,
+     build_session_id TEXT NOT NULL,
+     category         TEXT,
+     title            TEXT,
+     problem_context  TEXT NOT NULL,
+     failure_summary  TEXT NOT NULL,
+     fix_summary      TEXT NOT NULL,
+     lesson_text      TEXT NOT NULL,
+     details          JSONB,
+     embedding        vector(1536),
+     created_at       BIGINT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_lessons_phase_category
+     ON lessons (phase, category)`,
+  `CREATE INDEX IF NOT EXISTS idx_lessons_embedding
+     ON lessons USING hnsw (embedding vector_cosine_ops)`,
 ];
 
 async function runMigrations() {

@@ -1400,3 +1400,65 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
   border-radius: var(--radius); padding: 10px;
   font-size: 11px; max-height: 320px; overflow: auto; color: var(--text-muted);
 }
+
+/* --- Memories browser (interviewer) ------------------------------------ */
+.memories-page-wrap { padding: 18px 24px; max-width: 960px; }
+.memories-page { display: flex; flex-direction: column; gap: 16px; }
+.memories-toolbar {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px;
+}
+.memories-filter {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;
+}
+.memories-filter input,
+.memories-filter select {
+  min-width: 160px; background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 8px 10px; font-size: 13px; text-transform: none; letter-spacing: 0;
+}
+.memories-list { display: flex; flex-direction: column; gap: 10px; }
+.memories-card {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.memories-card-head {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px 14px; background: transparent; border: none;
+  color: var(--text); text-align: left; cursor: pointer;
+}
+.memories-card-head:hover { background: rgba(255,255,255,0.03); }
+.memories-card-title {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1; min-width: 0;
+}
+.memories-card-title strong { font-size: 14px; font-weight: 600; }
+.memories-card-body {
+  padding: 0 14px 14px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.memories-card-body section h4 {
+  margin: 10px 0 6px; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.6px; color: var(--text-dim);
+}
+.memories-card-body ul {
+  margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.55; color: var(--text-muted);
+}
+.memories-card-body ul.donts { color: var(--danger); }
+.memories-prose {
+  margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-muted);
+  white-space: pre-wrap; word-break: break-word;
+}
+.memories-json, .memories-code {
+  margin: 0; font-family: var(--mono); font-size: 11px;
+  background: rgba(0,0,0,0.35); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px;
+  max-height: 280px; overflow: auto; color: var(--text-muted);
+}
+.memories-pagination {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 10px; padding-top: 8px;
+}
+.memories-pagination-btns { display: flex; gap: 8px; }
+.pill.warn { background: rgba(255, 180, 60, 0.15); color: #e6b84d; }
+.pill.pass { background: rgba(80, 200, 120, 0.12); color: var(--brand-bright); }
+.pill.dim { opacity: 0.75; }

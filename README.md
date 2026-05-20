@@ -1,4 +1,4 @@
-# System Escape Room
+# Devlabs
 
 A technical interview platform where interviewers author broken-infrastructure challenges and candidates debug them live inside real Docker sandboxes.
 
@@ -27,7 +27,7 @@ npm run dev
 
 On startup the backend runs idempotent Postgres migrations, restores any in-flight sessions from the database, and seeds the `challenges` table from every `sandbox/verified/<slug>/challenge.json` it finds.
 
-If you have `OPENAI_API_KEY` set, the backend auto-seeds `build_memory` on first boot when the table is empty (~34 curated Docker image recipes: Postgres, Kafka, Nginx, Spark, etc.). The AI build pipeline retrieves them by semantic similarity plus category baselines on iteration 1. You can still run `make seed-memory` manually; re-runs are idempotent. Use `make seed-memory-force` to refresh entries after editing `backend/problems/seeds/imageCatalog.js`.
+On first boot when the `specialists` table is empty, the backend auto-seeds handbook rows from `backend/problems/seeds/imageCatalog.js` (~34 curated Docker recipes: Postgres, Kafka, Nginx, etc.). The build pipeline injects matching specialists (dos, donts, conf) on every GENERATE pass. Learned fixes are stored in `lessons` (requires `OPENAI_API_KEY` for embeddings) after a START or VALIDATE phase succeeds following prior failures in that build. Run `make seed-memory` manually; re-runs are idempotent. Use `make seed-memory-force` to refresh after editing the catalog.
 
 ### 3. Frontend (port 5173)
 

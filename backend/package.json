@@ -1,7 +1,7 @@
 {
-  "name": "escape-room-backend",
+  "name": "devlabs-backend",
   "version": "0.1.0",
-  "description": "System Escape Room backend (Express + WebSocket + Postgres + Redis)",
+  "description": "Devlabs backend (Express + WebSocket + Postgres + Redis)",
   "private": true,
   "type": "commonjs",
   "main": "server.js",

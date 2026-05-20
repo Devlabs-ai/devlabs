@@ -7,6 +7,7 @@ import TerminalWorkspace from './components/TerminalWorkspace.jsx';
 import MetricsDashboard, { useMetricsState } from './components/MetricsDashboard.jsx';
 import AlertsPanel from './components/AlertsPanel.jsx';
 import AuthoringWorkspace from './pages/AuthoringWorkspace.jsx';
+import MemoriesPage from './pages/MemoriesPage.jsx';
 import { getToken, logout, resolveInvite } from './services/authApi.js';
 import { fetchChallenges, fetchChallenge } from './services/challengeApi.js';
 import { startSession, endSession } from './services/sessionApi.js';
@@ -60,7 +61,7 @@ export default function App() {
   const [ending, setEnding] = useState(false);
   const [startError, setStartError] = useState(null);
   const [activeTab, setActiveTab] = useState('problem'); // 'problem' | 'metrics'
-  const [page, setPage] = useState('play'); // 'play' | 'authoring' (interviewer-only)
+  const [page, setPage] = useState('play'); // 'play' | 'authoring' | 'memories'
 
   const metricsWsUrl = playState === 'active' ? activeSession?.metricsWsUrl : null;
   const { series, latest, recovered } = useMetricsStream(metricsWsUrl);
@@ -82,6 +83,13 @@ export default function App() {
     }
     if (getToken()) {
       setAuthMode('interviewer');
+      try {
+        const post = sessionStorage.getItem('devlabs_post_login_page');
+        if (post === 'memories') {
+          setPage('memories');
+          sessionStorage.removeItem('devlabs_post_login_page');
+        }
+      } catch (_e) { /* noop */ }
     } else {
       setAuthMode('unauthenticated');
     }
@@ -190,7 +198,18 @@ export default function App() {
             <div className="alert">Candidate invite error: {candidateError}</div>
           </div>
         )}
-        <LoginPage onLoggedIn={() => setAuthMode('interviewer')} />
+        <LoginPage
+          onLoggedIn={() => {
+            setAuthMode('interviewer');
+            try {
+              const post = sessionStorage.getItem('devlabs_post_login_page');
+              if (post === 'memories') {
+                setPage('memories');
+                sessionStorage.removeItem('devlabs_post_login_page');
+              }
+            } catch (_e) { /* noop */ }
+          }}
+        />
       </>
     );
   }
@@ -200,7 +219,7 @@ export default function App() {
       <div className="topbar">
         <div className="brand">
           <span className="logo-dot" />
-          System Escape Room
+          Devlabs
           <span className="sub">v0.1</span>
         </div>
 
@@ -214,6 +233,10 @@ export default function App() {
               className={`topnav-pill ${page === 'authoring' ? 'active' : ''}`}
               onClick={() => setPage('authoring')}
             >Authoring</button>
+            <button
+              className={`topnav-pill ${page === 'memories' ? 'active' : ''}`}
+              onClick={() => setPage('memories')}
+            >Memories</button>
           </div>
         )}
 
@@ -252,6 +275,12 @@ export default function App() {
               } catch (_e) { /* noop */ }
             }}
           />
+        </div>
+      )}
+
+      {page === 'memories' && authMode === 'interviewer' && (
+        <div className="main memories-page-wrap">
+          <MemoriesPage />
         </div>
       )}
 
