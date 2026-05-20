@@ -1,7 +1,11 @@
 # Production stack for a single EC2 host.
+# Backend image is built in GitHub Actions and published to Docker Hub:
+#   rithvikreddyalkanti/devlabs-backend:latest
+#
 # Usage (on server, from repo root):
 #   cp deploy/env.production.example .env   # edit secrets + PUBLIC_HOST
-#   docker compose -f docker-compose.prod.yml build
+#   cd frontend && npm ci && npm run build && cd ..
+#   docker compose -f docker-compose.prod.yml pull
 #   docker compose -f docker-compose.prod.yml up -d
 
 services:
@@ -38,9 +42,7 @@ services:
       - devlabs_internal
 
   backend:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile.backend
+    image: rithvikreddyalkanti/devlabs-backend:${DEVLABS_BACKEND_TAG:-latest}
     container_name: devlabs-backend
     restart: unless-stopped
     env_file:

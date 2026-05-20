@@ -93,7 +93,30 @@ Do **not** expose Postgres (5432) or Redis (6379) to the internet; they stay on 
 
 Restrict 6000–7999 to your IP if you can; opening them worldwide is convenient for demos but widens the attack surface.
 
-## 3. Deploy on the server
+## 3. Backend image (GitHub Actions → Docker Hub)
+
+The **backend** is built in CI and published to a **public** Docker Hub repo:
+
+**[rithvikreddyalkanti/devlabs-backend](https://hub.docker.com/r/rithvikreddyalkanti/devlabs-backend)**
+
+Workflow: [.github/workflows/docker-backend.yml](../.github/workflows/docker-backend.yml) — runs on push to `main` / `ft/deploy` when backend or `deploy/Dockerfile.backend` changes.
+
+Verified challenges ship in git under `sandbox/verified/` and are mounted into the backend container at runtime.
+
+### One-time GitHub setup
+
+In **GitHub → Settings → Secrets and variables → Actions**, add:
+
+| Secret | Value |
+| ------ | ----- |
+| `DOCKERHUB_USERNAME` | `rithvikreddyalkanti` |
+| `DOCKERHUB_TOKEN` | Docker Hub **Access Token** (Account → Security → New Access Token) |
+
+Push to `ft/deploy` (or run the workflow manually) and confirm the image appears on Docker Hub before deploying EC2.
+
+EC2 pulls this image over the public internet — **no `docker login` required** for a public repo.
+
+## 4. Deploy on the server
 
 ```bash
 git clone https://github.com/Rithvik89/Devlabs.git
@@ -104,15 +127,23 @@ git checkout ft/deploy   # or main once deploy is merged
 cp deploy/env.production.example .env
 nano .env   # set PGPASSWORD, JWT_SECRET, PUBLIC_HOST=<elastic-ip>, LLM keys
 
-# Frontend static build
+# Frontend static build (still built on the VM — not in Docker Hub)
 cd frontend && npm ci && npm run build && cd ..
 
-# Start stack
-docker compose -f docker-compose.prod.yml build
+# Pull platform images (backend from Docker Hub; postgres/redis/nginx from Hub)
+docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 
 # Optional: seed specialists handbook (idempotent)
 docker compose -f docker-compose.prod.yml exec backend node scripts/seedMemory.js
+```
+
+Pin a specific backend build (optional):
+
+```bash
+export DEVLABS_BACKEND_TAG=<git-sha-from-github-actions>
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 Open **http://YOUR_ELASTIC_IP/** (no TLS until you add a domain).
@@ -126,7 +157,7 @@ docker compose -f docker-compose.prod.yml ps
 curl -s http://localhost/health
 ```
 
-## 4. Operations
+## 5. Operations
 
 ```bash
 cd ~/Devlabs   # or wherever you cloned
@@ -134,10 +165,10 @@ cd ~/Devlabs   # or wherever you cloned
 # Logs
 docker compose -f docker-compose.prod.yml logs -f backend nginx
 
-# Restart after pull
+# Restart after a new backend image was pushed to Docker Hub
 git pull
 cd frontend && npm run build && cd ..
-docker compose -f docker-compose.prod.yml build backend
+docker compose -f docker-compose.prod.yml pull backend
 docker compose -f docker-compose.prod.yml up -d
 
 # Backup Postgres
@@ -152,7 +183,7 @@ Ephemeral session dirs accumulate under the `devlabs_sandbox_sessions` volume. P
 docker system prune -f
 ```
 
-## 5. Full platform env
+## 6. Full platform env
 
 Set in `.env` on the server:
 
@@ -165,7 +196,7 @@ Set in `.env` on the server:
 
 Without keys, Play still works; Authoring chat/build and semantic memory retrieval are degraded (see root `README.md`).
 
-## 6. When you add a domain later
+## 7. When you add a domain later
 
 1. Point DNS A record → Elastic IP.
 2. Terminate TLS at nginx (Certbot on the instance, or ACM + ALB in front).
