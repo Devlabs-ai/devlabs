@@ -7,6 +7,7 @@ A technical interview platform where interviewers author broken-infrastructure c
 - Docker + Docker Compose (v2)
 - Node.js 18+ (the backend uses the global `fetch` API)
 - npm 9+
+- Linux hosts running Elasticsearch/OpenSearch challenges: `vm.max_map_count` ≥ 262144 — see [docs/host-requirements.md](docs/host-requirements.md)
 
 ## Quick Start
 

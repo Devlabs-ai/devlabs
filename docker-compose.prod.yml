@@ -1,0 +1,90 @@
+# Production stack for a single EC2 host.
+# Usage (on server, from repo root):
+#   cp deploy/env.production.example .env   # edit secrets + PUBLIC_HOST
+#   docker compose -f docker-compose.prod.yml build
+#   docker compose -f docker-compose.prod.yml up -d
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: devlabs-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PGUSER:-postgres}
+      POSTGRES_PASSWORD: ${PGPASSWORD:?set PGPASSWORD in .env}
+      POSTGRES_DB: ${PGDATABASE:-devlabs}
+    volumes:
+      - devlabs_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER:-postgres} -d ${PGDATABASE:-devlabs}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - devlabs_internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: devlabs-redis
+    restart: unless-stopped
+    volumes:
+      - devlabs_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - devlabs_internal
+
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
+    container_name: devlabs-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PGHOST: postgres
+      REDIS_HOST: redis
+    volumes:
+      # Challenge sandboxes and build artifacts live on the host Docker daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - devlabs_sandbox_sessions:/app/sandbox/sessions
+      - devlabs_sandbox_builds:/app/sandbox/builds
+      - ./sandbox/verified:/app/sandbox/verified:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - devlabs_internal
+    # Published challenge ports (6000–7999) bind on the EC2 host, not this mapping.
+    ports:
+      - "127.0.0.1:4000:4000"
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: devlabs-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - ./deploy/nginx/devlabs.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+    networks:
+      - devlabs_internal
+
+volumes:
+  devlabs_pg_data:
+  devlabs_redis_data:
+  devlabs_sandbox_sessions:
+  devlabs_sandbox_builds:
+
+networks:
+  devlabs_internal:
+    driver: bridge

@@ -59,7 +59,8 @@ function ServiceEndpoints({ portMap }) {
       <ul>
         {entries.map(([field, port]) => {
           const svc = fieldToService(field);
-          const url = `http://localhost:${port}`;
+          const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+          const url = `http://${host}:${port}`;
           return (
             <li key={field}>
               <span className="svc">{svc}</span>
