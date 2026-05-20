@@ -18,6 +18,7 @@ const challengeRoutes = require('./routes/challenges');
 const sessionRoutes = require('./routes/session');
 const problemRoutes = require('./routes/problems');
 const reviewRoutes = require('./routes/reviews');
+const memoryRoutes = require('./routes/memories');
 
 const terminalService = require('./observability/terminalService');
 const metricsService = require('./observability/metricsService');
@@ -40,6 +41,7 @@ app.use('/api/challenges', challengeRoutes);
 app.use('/api/session', sessionRoutes);
 app.use('/api/problems', problemRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/memories', memoryRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error('[http] unhandled error', err);
@@ -81,7 +83,7 @@ async function start() {
   await runMigrations();
 
   const seeded = await seedCatalogIfEmpty({ onLog: (msg) => console.log(`[boot] ${msg}`) });
-  if (seeded > 0) console.log(`[boot] build_memory seeded ${seeded} catalog entries`);
+  if (seeded > 0) console.log(`[boot] specialists seeded ${seeded} catalog entries`);
 
   console.log('[boot] restoring active sessions from db...');
   await sessionStore.restoreFromDB();

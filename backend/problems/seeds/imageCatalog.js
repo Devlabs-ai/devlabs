@@ -1,7 +1,7 @@
 'use strict';
 
 // Curated catalog of known-good Docker image recipes that pre-seed the
-// build_memory table. Each entry is a self-contained paragraph:
+// specialists table. Each entry is a self-contained paragraph:
 //   - which image tag to use and when
 //   - the minimum env / command block to run it
 //   - common pitfalls and "do not use" warnings

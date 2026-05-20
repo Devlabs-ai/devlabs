@@ -23,7 +23,8 @@ const llm = require('../llm/client');
 const composeManager = require('../sandbox/composeManager');
 const portAllocator = require('../sandbox/portAllocator');
 const validationAgent = require('./validationAgentService');
-const memoryStore = require('./memoryStore');
+const specialistStore = require('./specialistStore');
+const lessonStore = require('./lessonStore');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const BUILDS_ROOT = path.join(ROOT, 'sandbox', 'builds');
@@ -93,72 +94,63 @@ HARD RULES:
    exactly \`./services/<service-name>\` (matching the on-disk layout the
    writer uses). NEVER \`./<service-name>\` or any other path — the runner
    will reject the build before docker even pulls images.
-9. For Docker image tags and service recipes, use memory.relatedLessons as the
-   authoritative source. Never invent image tags or version numbers. If
-   relatedLessons is empty, use only tags you are highly confident exist on
-   Docker Hub.
+9. For Docker image tags, env blocks, and service recipes, use specialistBrief
+   entries (dos, donts, conf) as the authoritative source. Apply every conf
+   block to compose environment or service files so containers pick them up
+   at startup. Never invent image tags or version numbers.
 
 The JSON inside <challenge_assets> must be strictly valid: no trailing commas,
 no comments, all newlines inside string values escaped as \\n.
 
-============================= MEMORY =============================
-The user payload includes a \`memory\` object with the K most semantically
-similar lessons retrieved from prior builds (across all drafts). Shape:
+============================= SPECIALIST BRIEF =============================
+The user payload includes \`specialistBrief\` — static handbook rows for this
+draft's category/stacks. Shape:
 
   {
-    "relatedLessons": [
+    "category": "...",
+    "matchedCategories": ["global", "postgres", ...],
+    "entries": [
       {
-        "text":       "<lesson paragraph — failures seen + working fix>",
-        "category":   "<category slug or null>",
-        "hitCount":   <how many builds have recorded this same lesson>,
-        "similarity": <cosine similarity 0..1; higher = more relevant>,
-        "details":    { "successMantra": "...", "workingCompose": "...", "failureHistory": [...] }
-      },
-      ...
+        "category": "postgres",
+        "stack": "postgres",
+        "title": "postgres:16-alpine",
+        "dos": ["..."],
+        "donts": ["NEVER use bitnami/..."],
+        "conf": {
+          "image": "postgres:16-alpine",
+          "composeFragment": { "environment": { "POSTGRES_USER": "postgres", ... } },
+          "inNetwork": { "host": "postgres", "port": 5432 }
+        }
+      }
     ]
   }
 
-Lessons are recorded only after a phase SUCCEEDS (START or VALIDATE). Each
-success lesson lists prior failures for that phase in \`text\` and stores
-the working compose + guidance in \`details.successMantra\` and
-\`details.workingCompose\`. Read \`details\` carefully — it is the
-authoritative fix, not just the summary in \`text\`.
+Follow ALL dos/donts. Materialize EVERY conf block in docker-compose.yml or
+service files so containers load them at startup. specialistBrief is the
+authoritative source for images and env — never invent tags.
 
-How to use it:
-  - Prefer image tags, env vars, and service blocks from
-    \`details.workingCompose\` when present.
-  - Follow \`details.successMantra\` for how prior errors were resolved.
-  - \`details.failureHistory\` lists what failed before the fix — avoid
-    repeating those mistakes.
-  - Higher \`similarity\` and \`hitCount\` mean stronger signal.
-  - Docker image tags, env blocks, and service recipes come ONLY from
-    \`relatedLessons\` (seed catalog + lessons from past builds).
+============================= LEARNED LESSONS =============================
+On retry (when startFailureMsg or validateFailureMsg is set), the payload may
+include \`lessonsBlock.relatedLessons\` — past builds where the same phase failed
+then succeeded. Prefer \`details.workingCompose\` when present. Avoid repeating
+mistakes listed in failureSummary.
 
-If \`relatedLessons\` is empty, use only image tags you are highly confident
-exist on Docker Hub. HARD RULES 1–8 still apply for compose structure,
-Python services, ports, and metrics. Memory NEVER overrides HARD RULES 1–8.
+============================ RETRY / DEBUG MODE ============================
+When \`challengeAssets\`, \`startFailureMsg\`, and/or \`validateFailureMsg\` are
+present, you are fixing a prior attempt — not authoring from scratch.
 
-============================ DEBUG MODE ============================
-If the user message includes a non-null \`previousAttempt\`, you are NOT
-authoring from scratch — you are DEBUGGING the previous attempt. The
-previousAttempt object contains:
+  - \`challengeAssets\`: the FULL <challenge_assets> JSON from the last attempt.
+  - \`startFailureMsg\`: evidence from the latest START failure (compose stderr, logs).
+  - \`validateFailureMsg\`: judge feedback + suggestions when VALIDATE failed.
 
-  {
-    "artifacts": { ... }      // the FULL <challenge_assets> JSON you emitted
-                              // last time. null if GENERATE itself failed.
-    "rawText":   "..."        // raw LLM response, only present when artifacts
-                              // could not be parsed.
-    "phase":     "GENERATE | WRITE | START | VALIDATE",  // where it failed
-    "message":   "...",       // short error string
-    "details":   { ... }      // phase-specific evidence (see playbook below)
-  }
+If \`previousAttempt\` is set (GENERATE or WRITE failure only), same rules as
+below for parse/path errors.
 
 Your job:
-  1. Read previousAttempt.phase and previousAttempt.details carefully.
+  1. Read failure messages and lessonsBlock carefully.
   2. Diagnose the SPECIFIC root cause.
   3. Emit the FULL revised <challenge_assets> JSON. Preserve everything
-     that worked; change ONLY what is needed to fix the failure. Do not
-     rewrite the whole challenge from a clean slate.
+     that worked; change ONLY what is needed to fix the failure.
 
 Failure-phase playbook:
 
@@ -374,19 +366,10 @@ function sanitizePreviousAttempt(prev) {
   return out;
 }
 
-// --- semantic memory ----------------------------------------------------
-//
-// Single retrieval path: build one query text (current draft brief +
-// previous-attempt failure summary), embed it, ask Postgres for the K
-// closest lessons. The LLM reads them as advisory paragraphs.
-//
-// Recording happens only on phase SUCCESS (START or VALIDATE). Each
-// success lesson bundles prior failures for that phase in lesson_text and
-// stores workingCompose + successMantra in details. VALIDATE pass also
-// records one "image works" row per compose image.
-
-const MEMORY_K = 8;
-const MEMORY_MAX_DISTANCE = 0.45;
+function sanitizeAssets(assets) {
+  if (!assets) return null;
+  return sanitizePreviousAttempt({ phase: 'RETRY', message: '', artifacts: assets, details: null }).artifacts;
+}
 
 function pickCategory(draft) {
   return (
@@ -395,125 +378,6 @@ function pickCategory(draft) {
     || draft?.sandboxSpec?.brief?.category
     || null
   );
-}
-
-// Build the text we feed to the embedding model for retrieval. Mixes
-// what the LLM is currently trying to do (draft brief) with the most
-// recent failure context, so similar combined situations surface.
-function buildRetrievalQuery({ draft, previousAttempt }) {
-  const parts = [];
-  const title = draft?.title || draft?.sandboxSpec?.title || draft?.sandboxSpec?.brief?.title;
-  if (title) parts.push(`Title: ${title}`);
-  const category = pickCategory(draft);
-  if (category) parts.push(`Category: ${category}`);
-  const services = draft?.sandboxSpec?.services || draft?.sandboxSpec?.brief?.services;
-  if (Array.isArray(services) && services.length) {
-    parts.push(`Services: ${services.slice(0, 12).join(', ')}`);
-  }
-  const description = draft?.sandboxSpec?.description || draft?.sandboxSpec?.brief?.description;
-  if (description) parts.push(`Description: ${cap(description, 600)}`);
-
-  if (previousAttempt) {
-    parts.push(`Previous attempt failed at ${previousAttempt.phase}.`);
-    if (previousAttempt.message) parts.push(`Error: ${cap(previousAttempt.message, 600)}`);
-    const d = previousAttempt.details || {};
-    if (d.composeStderr) parts.push(`Compose stderr:\n${cap(d.composeStderr, 800)}`);
-    if (d.logs) parts.push(`Container logs:\n${cap(d.logs, 800)}`);
-    if (d.feedback) parts.push(`Validation feedback: ${cap(d.feedback, 400)}`);
-  }
-  return parts.join('\n');
-}
-
-const PROMPT_DETAILS_COMPOSE_MAX = 2500;
-const PROMPT_DETAILS_MANTRA_MAX = 600;
-const PROMPT_FAILURE_HISTORY_MAX = 5;
-
-// What the LLM sees inside `memory.relatedLessons[]`.
-function shapeLessonForPrompt(lesson) {
-  const out = {
-    text: cap(lesson.text, 2000),
-    category: lesson.category || null,
-    hitCount: lesson.hitCount,
-    similarity: lesson.distance != null
-      ? Math.max(0, Math.min(1, 1 - lesson.distance))
-      : null,
-  };
-  const details = shapeDetailsForPrompt(lesson.details);
-  if (details) out.details = details;
-  return out;
-}
-
-function shapeDetailsForPrompt(details) {
-  if (!details || typeof details !== 'object') return null;
-  const out = {};
-  if (details.successMantra) {
-    out.successMantra = cap(String(details.successMantra), PROMPT_DETAILS_MANTRA_MAX);
-  }
-  if (details.workingCompose) {
-    out.workingCompose = cap(String(details.workingCompose), PROMPT_DETAILS_COMPOSE_MAX);
-  }
-  if (Array.isArray(details.failureHistory) && details.failureHistory.length) {
-    out.failureHistory = details.failureHistory
-      .slice(0, PROMPT_FAILURE_HISTORY_MAX)
-      .map((f) => ({
-        attempt: f.attempt,
-        phase: f.phase,
-        message: cap(f.message || '', 400),
-      }));
-  }
-  if (details.image) out.image = details.image;
-  if (details.recordType) out.recordType = details.recordType;
-  return Object.keys(out).length ? out : null;
-}
-
-async function buildMemoryBlock({ draft, previousAttempt }) {
-  const queryText = buildRetrievalQuery({ draft, previousAttempt });
-  const category = pickCategory(draft);
-  const isFirstIteration = !previousAttempt;
-
-  const semanticHits = queryText
-    ? await memoryStore.findSimilar({
-        text: queryText,
-        k: MEMORY_K,
-        maxDistance: MEMORY_MAX_DISTANCE,
-        category,
-      })
-    : [];
-
-  const bySig = new Map();
-  for (const hit of semanticHits) {
-    bySig.set(hit.signature, hit);
-  }
-
-  if (isFirstIteration) {
-    const baselineCats = [];
-    if (category) baselineCats.push(category);
-    if (!baselineCats.includes('docker-images')) baselineCats.push('docker-images');
-    
-    // This is only for first iteration, to get some category wise lookup as well as there are 
-    // no previous attempts.
-    for (const cat of baselineCats) {
-      const extra = await memoryStore.topByCategory(cat, 3);
-      for (const row of extra) {
-        if (!bySig.has(row.signature)) {
-          bySig.set(row.signature, { ...row, distance: row.distance ?? 0.5 });
-        }
-      }
-    }
-  }
-
-  let merged = [...bySig.values()];
-  merged.sort((a, b) => {
-    const da = a.distance ?? 999;
-    const db = b.distance ?? 999;
-    if (da !== db) return da - db;
-    return (b.hitCount || 0) - (a.hitCount || 0);
-  });
-  merged = merged.slice(0, MEMORY_K);
-
-  return {
-    relatedLessons: merged.map(shapeLessonForPrompt),
-  };
 }
 
 // Snapshot a failed attempt for in-build history (recorded later inside a
@@ -529,151 +393,6 @@ function captureFailureSnapshot({ attempt, phase, lastAttempt }) {
     logs: cap(lastAttempt.details?.logs, 600),
     feedback: cap(lastAttempt.details?.feedback, 400),
   };
-}
-
-// Construct a prose lesson paragraph for a build failure. Stable wording
-// for stable causes (image refs, env vars, modules) so the SHA dedup
-// works without us needing a kind column.
-function failureLessonText({ phase, message, details = {}, category }) {
-  const cleanedMsg = cap(message || '', 800);
-  const lines = [];
-
-  const imageMatch = /failed to resolve reference "([^"]+)"/.exec(`${cleanedMsg}\n${details.composeStderr || ''}`);
-  if (imageMatch) {
-    const ref = imageMatch[1].replace(/^docker\.io\//, '');
-    lines.push(`Docker image \`${ref}\` failed to resolve on Docker Hub during the ${phase} phase of a build. The tag either does not exist or has been removed. Avoid this image; pick a tag that has been confirmed to pull.`);
-  }
-
-  const envMatch = /environment variable "([^"]+)" is not set/.exec(`${cleanedMsg}\n${details.logs || ''}`);
-  if (envMatch) {
-    lines.push(`A container exited at ${phase} because the required environment variable \`${envMatch[1]}\` was not set. The service entrypoint refuses to start without it; set it in the compose service's \`environment\` block.`);
-  }
-
-  const moduleMatch = /ModuleNotFoundError: No module named '([^']+)'/.exec(details.logs || '');
-  if (moduleMatch) {
-    lines.push(`A Python service crashed at ${phase} with \`ModuleNotFoundError: No module named '${moduleMatch[1]}'\`. The module must be added to that service's \`requirements.txt\` and the Dockerfile must \`pip install -r requirements.txt\` before launching the app.`);
-  }
-
-  if (/kafka\.errors\.NoBrokersAvailable/.test(details.logs || '')) {
-    lines.push(`A Kafka client raised \`NoBrokersAvailable\` at ${phase}. Either the Kafka broker is not yet listening, or the bootstrap server hostname/port is wrong. Wrap producer/consumer init in a retry-with-backoff loop and verify \`bootstrap_servers\` points to the in-network broker (e.g. \`kafka:9092\`).`);
-  }
-
-  if (/psycopg2\.OperationalError/.test(details.logs || '')) {
-    lines.push(`A Postgres client raised \`psycopg2.OperationalError\` at ${phase}. The DB may not be ready yet, the hostname/port may be wrong, or credentials don't match. Gate dependents on a postgres healthcheck and confirm the connection string matches the compose service name.`);
-  }
-
-  if (lines.length === 0) {
-    // Generic fallback so we still record SOMETHING semantically searchable.
-    lines.push(`A build at ${phase} failed${category ? ` (category: ${category})` : ''}. Error: ${cleanedMsg || '(no message)'}.`);
-  }
-
-  return lines.join(' ');
-}
-
-function buildPhaseSuccessLessonText({ phase, category, failures, compose }) {
-  const lines = [];
-  lines.push(
-    `${phase} phase succeeded${category ? ` for category ${category}` : ''}.`,
-  );
-  if (failures.length > 0) {
-    lines.push(`Failures observed before this success (${failures.length}):`);
-    for (const f of failures) {
-      lines.push(`- Attempt ${f.attempt} (${f.phase}): ${f.message}`);
-    }
-  } else {
-    lines.push('No prior failures for this phase in the same build.');
-  }
-  lines.push('Working compose configuration that resolved the issue:');
-  lines.push(cap(compose, 2200));
-  return lines.join('\n');
-}
-
-function buildSuccessMantra({ phase, failures, compose }) {
-  const parts = [];
-  if (failures.length > 0) {
-    parts.push(
-      `After ${failures.length} failed ${phase} attempt(s), all services reached a good state. `
-      + 'Reuse the exact image tags, environment variables, and service definitions in workingCompose. '
-      + 'Do not repeat the mistakes listed in failureHistory.',
-    );
-    for (const f of failures.slice(0, 4)) {
-      const hint = failureLessonText({
-        phase: f.phase,
-        message: f.message,
-        details: {
-          composeStderr: f.composeStderr,
-          logs: f.logs,
-          feedback: f.feedback,
-        },
-        category: null,
-      });
-      parts.push(`Prior failure (attempt ${f.attempt}): ${cap(f.message, 200)} → ${cap(hint, 300)}`);
-    }
-  } else {
-    parts.push(
-      `${phase} succeeded on the first try for this build. `
-      + 'Reuse workingCompose as the baseline for similar challenges.',
-    );
-  }
-  parts.push(`Compose keys: ${cap(compose, 800)}`);
-  return parts.join(' ');
-}
-
-// Record a success lesson when START or VALIDATE passes. Bundles all prior
-// failures for that phase in lesson_text and stores the working compose +
-// successMantra in details for cross-build retrieval.
-async function recordPhaseSuccessLessons({
-  phase,
-  assets,
-  category,
-  failures = [],
-  attempt,
-}) {
-  const compose = assets?.dockerCompose || '';
-  if (!compose.trim()) return;
-
-  const text = buildPhaseSuccessLessonText({ phase, category, failures, compose });
-  const successMantra = buildSuccessMantra({ phase, failures, compose });
-
-  await memoryStore.record({
-    text,
-    details: {
-      recordType: phase === 'START' ? 'start-success' : 'validate-success',
-      phase,
-      attempt,
-      successMantra,
-      workingCompose: cap(compose, 3500),
-      failureHistory: failures,
-    },
-    category,
-  });
-}
-
-// One "image works" lesson per image in a fully validated compose.
-async function recordImageWorksLessons({ assets, category }) {
-  const compose = assets?.dockerCompose || '';
-  for (const image of extractImagesFromCompose(compose)) {
-    const text = `Docker image \`${image}\` was used successfully in a validated build${category ? ` for the ${category} category` : ''}. It is a known-good tag — safe to reuse for similar challenges.`;
-    await memoryStore.record({
-      text,
-      details: { recordType: 'image-works', image, fromCategory: category || null },
-      category,
-    });
-  }
-}
-
-// Minimal local image extractor (kept in-file since lessonSignatures is
-// gone). One row per `image:` value.
-function extractImagesFromCompose(yaml) {
-  if (!yaml || typeof yaml !== 'string') return [];
-  const out = new Set();
-  for (const rawLine of yaml.split('\n')) {
-    const line = rawLine.replace(/\r$/, '');
-    if (/^\s*#/.test(line)) continue;
-    const m = line.match(/^\s+image\s*:\s*['"]?([^\s'"#]+)['"]?\s*(?:#.*)?$/);
-    if (m) out.add(m[1]);
-  }
-  return Array.from(out);
 }
 
 async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = null }) {
@@ -697,40 +416,65 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
   const buildSessionId = uuidv4();
   const buildDir = path.join(BUILDS_ROOT, buildSessionId);
 
-  // Structured carry-over between iterations. The LLM sees this as
-  // `previousAttempt` in the user payload, so it knows exactly what it
-  // emitted last time and why it failed.
   let lastAttempt = null;
-  // Failures accumulated until START / VALIDATE succeed — written once as
-  // part of a success lesson (not as standalone failure rows).
+  let lastAssets = null;
+  let startFailureMsg = null;
+  let validateFailureMsg = null;
   const startFailureHistory = [];
   const validateFailureHistory = [];
 
   for (let attempt = 1; attempt <= MAX_ITERATIONS; attempt++) {
     onEvent({ type: 'phase', phase: 'GENERATE', attempt, total: MAX_ITERATIONS });
+    const retryHint = startFailureMsg
+      ? 'START'
+      : (validateFailureMsg ? 'VALIDATE' : (lastAttempt ? lastAttempt.phase : null));
     onEvent({
       type: 'log',
-      message: lastAttempt
-        ? `[build] iteration ${attempt}/${MAX_ITERATIONS} — debug-mode (fixing previous ${lastAttempt.phase} failure)`
+      message: retryHint
+        ? `[build] iteration ${attempt}/${MAX_ITERATIONS} — fixing previous ${retryHint} failure`
         : `[build] iteration ${attempt}/${MAX_ITERATIONS}`,
     });
 
     let assets;
     let rawText = null;
-    let memoryBlock = null;
     try {
-      memoryBlock = await buildMemoryBlock({ draft, previousAttempt: lastAttempt });
-      if (memoryBlock.relatedLessons.length) {
-        const best = memoryBlock.relatedLessons[0];
+      const specialistBrief = await specialistStore.buildBrief({ draft });
+      if (specialistBrief.entries.length) {
         onEvent({
           type: 'log',
-          message: `[memory] injecting ${memoryBlock.relatedLessons.length} related lessons (top similarity ${best.similarity != null ? best.similarity.toFixed(2) : 'n/a'})`,
+          message: `[specialists] injecting ${specialistBrief.entries.length} handbook entries (${specialistBrief.matchedCategories.join(', ')})`,
         });
       }
+
+      let lessonsBlock = { relatedLessons: [] };
+      if (startFailureMsg || validateFailureMsg) {
+        lessonsBlock = await lessonStore.findForRetry({
+          draft,
+          startFailureMsg,
+          validateFailureMsg,
+        });
+        if (lessonsBlock.relatedLessons.length) {
+          const best = lessonsBlock.relatedLessons[0];
+          onEvent({
+            type: 'log',
+            message: `[lessons] injecting ${lessonsBlock.relatedLessons.length} learned lesson(s) (top similarity ${best.similarity != null ? best.similarity.toFixed(2) : 'n/a'})`,
+          });
+        }
+      }
+
+      const prevForGenerate = lastAttempt
+        && (lastAttempt.phase === 'GENERATE' || lastAttempt.phase === 'WRITE')
+        ? lastAttempt
+        : null;
+
       const userPayload = JSON.stringify({
         draft,
-        memory: memoryBlock,
-        previousAttempt: sanitizePreviousAttempt(lastAttempt),
+        specialistBrief,
+        lessonsBlock,
+        challengeAssets: sanitizeAssets(lastAssets),
+        startFailureMsg,
+        validateFailureMsg,
+        previousAttempt: sanitizePreviousAttempt(prevForGenerate),
       }, null, 2);
       rawText = await llm.completeMessage({
         system: GENERATE_SYSTEM_PROMPT,
@@ -739,6 +483,7 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
       });
       assets = extractAssets(rawText);
       if (!assets) throw new Error('LLM response did not contain <challenge_assets> JSON');
+      lastAssets = assets;
       onEvent({ type: 'log', message: `[generate] received ${JSON.stringify(summariseAssets(assets))}` });
     } catch (e) {
       onEvent({ type: 'log', message: `[generate] failed: ${e.message}` });
@@ -816,20 +561,26 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
       await composeManager.waitForServices(buildDir, portMap, 90_000);
       onEvent({ type: 'log', message: '[start] all services reported running' });
 
-      await recordPhaseSuccessLessons({
-        phase: 'START',
-        assets,
-        category: buildCategory,
-        failures: startFailureHistory,
-        attempt,
-      });
+      startFailureMsg = null;
       if (startFailureHistory.length > 0) {
-        onEvent({
-          type: 'log',
-          message: `[memory] recorded START success lesson (${startFailureHistory.length} prior failure(s) bundled)`,
+        const lessonId = await lessonStore.record({
+          phase: 'start',
+          draftSessionId,
+          buildSessionId,
+          category: buildCategory,
+          title: draft?.title || assets?.title,
+          draft,
+          failures: [...startFailureHistory],
+          assets,
         });
+        if (lessonId) {
+          onEvent({
+            type: 'log',
+            message: `[lessons] recorded START lesson id=${lessonId} (${startFailureHistory.length} prior failure(s))`,
+          });
+        }
+        startFailureHistory.length = 0;
       }
-      startFailureHistory.length = 0;
     } catch (e) {
       // Strip docker pull-progress noise BEFORE we log, show, or stash for
       // retry. Without this, a single failed Kafka pull can dump 250KB of
@@ -852,15 +603,21 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
       }
       await composeManager.down(buildDir).catch(() => {});
       await portAllocator.releaseIn('build', buildSessionId).catch(() => {});
+      startFailureMsg = {
+        message: cleanMsg || e.message,
+        composeStdout: cleanStdout || null,
+        composeStderr: cleanStderr || null,
+        logs,
+      };
       lastAttempt = {
         phase: 'START',
-        message: cleanMsg || e.message,
+        message: startFailureMsg.message,
         artifacts: assets,
         rawText: null,
         details: {
-          composeStdout: cleanStdout || null,
-          composeStderr: cleanStderr || null,
-          logs,
+          composeStdout: startFailureMsg.composeStdout,
+          composeStderr: startFailureMsg.composeStderr,
+          logs: startFailureMsg.logs,
         },
       };
       const snap = captureFailureSnapshot({ attempt, phase: 'START', lastAttempt });
@@ -914,19 +671,27 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
         ? `${terminalWsBase}/ws/metrics?sessionId=__build:${buildSessionId}`
         : null;
 
-      await recordPhaseSuccessLessons({
-        phase: 'VALIDATE',
-        assets,
-        category: buildCategory,
-        failures: validateFailureHistory,
-        attempt,
-      });
-      validateFailureHistory.length = 0;
-      await recordImageWorksLessons({ assets, category: buildCategory });
-      onEvent({
-        type: 'log',
-        message: '[memory] recorded VALIDATE success + image-works lessons',
-      });
+      validateFailureMsg = null;
+      if (validateFailureHistory.length > 0) {
+        const lessonId = await lessonStore.record({
+          phase: 'validate',
+          draftSessionId,
+          buildSessionId,
+          category: buildCategory,
+          title: draft?.title || assets?.title,
+          draft,
+          failures: [...validateFailureHistory],
+          assets,
+          validationFeedback: validation.feedback,
+        });
+        if (lessonId) {
+          onEvent({
+            type: 'log',
+            message: `[lessons] recorded VALIDATE lesson id=${lessonId} (${validateFailureHistory.length} prior failure(s))`,
+          });
+        }
+        validateFailureHistory.length = 0;
+      }
 
       onEvent({
         type: 'done',
@@ -947,13 +712,23 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
       };
     }
 
-    // failed validation — tear down and feed structured feedback into next iter
     onEvent({ type: 'log', message: `[validate] judged FAIL: ${validation.feedback}` });
     await composeManager.down(buildDir).catch(() => {});
     await portAllocator.releaseIn('build', buildSessionId).catch(() => {});
+    validateFailureMsg = {
+      message: validation.feedback || 'validation rejected the build',
+      suggestions: validation.suggestions || [],
+      evidence: (validation.evidence || []).map((ev) => ({
+        step: ev.step,
+        ok: ev.ok,
+        stdout: cap(ev.stdout, 1500),
+        stderr: cap(ev.stderr, 800),
+        error: ev.error,
+      })),
+    };
     lastAttempt = {
       phase: 'VALIDATE',
-      message: validation.feedback || 'validation rejected the build',
+      message: validateFailureMsg.message,
       artifacts: assets,
       rawText: null,
       details: {

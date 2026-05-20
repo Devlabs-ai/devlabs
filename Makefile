@@ -31,7 +31,7 @@ help:
 	@printf "  %-14s %s\n" "dev"         "infra + backend + frontend together; Ctrl-C stops all"
 	@printf "  %-14s %s\n" "stop"        "kill any stray dev servers and stop infra"
 	@printf "  %-14s %s\n" "build"       "production frontend build into frontend/dist/"
-	@printf "  %-14s %s\n" "seed-memory" "pre-seed build_memory with the curated image catalog"
+	@printf "  %-14s %s\n" "seed-memory" "pre-seed specialists table from the curated image catalog"
 	@printf "  %-14s %s\n" "clean"       "remove node_modules, dist, ephemeral sandbox dirs"
 	@printf "  %-14s %s\n" "reset"       "clean + infra-reset (full wipe)"
 	@printf "\n"
@@ -112,9 +112,9 @@ build:
 # build_memory seeding
 # ---------------------------------------------------------------------------
 #
-# Pre-populates the build_memory pgvector table with ~32 curated image
-# recipes (Postgres, Kafka, Nginx, Spark, ...). Idempotent: re-runs skip
-# unchanged entries without hitting the embedding API. Pass extra flags via
+# Pre-populates the specialists table with ~32 curated image handbook rows
+# (Postgres, Kafka, Nginx, Spark, ...). Idempotent: re-runs skip unchanged
+# entries. Pass extra flags via
 # ARGS=... (e.g. `make seed-memory ARGS="--category=postgres"`).
 
 seed-memory:
