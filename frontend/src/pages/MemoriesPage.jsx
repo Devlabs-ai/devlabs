@@ -156,7 +156,7 @@ export default function MemoriesPage() {
     : '';
 
   return (
-    <div className="app-page">
+    <div className="app-page memories-page">
       <AppPageHeader
         eyebrow="Memories"
         title="Specialist Handbook"
