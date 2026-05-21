@@ -1,0 +1,28 @@
+# Stage 1: install deps (node-pty needs full image / prebuilds; slim lacks gyp toolchain)
+FROM node:20-bookworm AS build
+WORKDIR /app
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci --omit=dev && npm run postinstall
+
+# Stage 2: lean runtime + Docker CLI for sandbox compose on the host socket
+FROM node:20-bookworm-slim
+
+# docker-compose-plugin is not in Debian bookworm apt; install the CLI plugin manually.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl docker.io \
+  && rm -rf /var/lib/apt/lists/* \
+  && mkdir -p /usr/local/lib/docker/cli-plugins \
+  && curl -fsSL "https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-linux-$(uname -m)" \
+    -o /usr/local/lib/docker/cli-plugins/docker-compose \
+  && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+WORKDIR /app
+
+COPY --from=build /app/node_modules ./node_modules
+COPY backend/ ./
+COPY sandbox/verified/ /app/sandbox/verified/
+
+ENV NODE_ENV=production
+EXPOSE 4000
+
+CMD ["node", "server.js"]

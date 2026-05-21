@@ -18,7 +18,8 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 .PHONY: help install infra-up infra-down infra-reset backend frontend dev stop \
-        build clean reset seed-memory seed-memory-force seed-memory-dry
+        build clean reset seed-memory seed-memory-force seed-memory-dry \
+        prod-build prod-pull prod-up prod-restart prod-down prod-logs
 
 help:
 	@printf "\nDevlabs — make targets\n\n"
@@ -31,6 +32,12 @@ help:
 	@printf "  %-14s %s\n" "dev"         "infra + backend + frontend together; Ctrl-C stops all"
 	@printf "  %-14s %s\n" "stop"        "kill any stray dev servers and stop infra"
 	@printf "  %-14s %s\n" "build"       "production frontend build into frontend/dist/"
+	@printf "  %-14s %s\n" "prod-build"    "frontend build for EC2 (same as build)"
+	@printf "  %-14s %s\n" "prod-pull"     "pull images from docker-compose.prod.yml"
+	@printf "  %-14s %s\n" "prod-up"       "prod-pull + start production stack"
+	@printf "  %-14s %s\n" "prod-restart"  "pull latest images + recreate containers (EC2 deploy)"
+	@printf "  %-14s %s\n" "prod-down"     "stop production compose stack"
+	@printf "  %-14s %s\n" "prod-logs"     "tail production compose logs"
 	@printf "  %-14s %s\n" "seed-memory" "pre-seed specialists table from the curated image catalog"
 	@printf "  %-14s %s\n" "clean"       "remove node_modules, dist, ephemeral sandbox dirs"
 	@printf "  %-14s %s\n" "reset"       "clean + infra-reset (full wipe)"
@@ -107,6 +114,25 @@ stop:
 
 build:
 	cd frontend && npm run build
+
+prod-build: build
+
+prod-pull:
+	docker compose -f docker-compose.prod.yml pull
+
+prod-up: prod-pull
+	docker compose -f docker-compose.prod.yml up -d
+
+prod-restart: prod-pull
+	docker compose -f docker-compose.prod.yml up -d
+	@echo "==> health:" && curl -sf http://localhost/health && echo || true
+	@docker compose -f docker-compose.prod.yml ps
+
+prod-down:
+	docker compose -f docker-compose.prod.yml down
+
+prod-logs:
+	docker compose -f docker-compose.prod.yml logs -f
 
 # ---------------------------------------------------------------------------
 # build_memory seeding
