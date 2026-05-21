@@ -4,15 +4,21 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * Repo root in git checkout: <repo>/
+ * Repo root in git checkout: <repo>/  (sandbox/verified, sandbox/sessions)
  * App root in Docker image: /app/  (backend/ copied flat; sandbox/ mounted alongside)
+ *
+ * backend/sandbox/ holds runtime JS (composeManager, etc.) — not the data root.
  */
 function appRoot() {
   const backendDir = path.resolve(__dirname, '..');
-  if (fs.existsSync(path.join(backendDir, 'sandbox'))) {
+  const repoRoot = path.resolve(backendDir, '..');
+  if (fs.existsSync(path.join(repoRoot, 'sandbox', 'verified'))) {
+    return repoRoot;
+  }
+  if (fs.existsSync(path.join(backendDir, 'sandbox', 'verified'))) {
     return backendDir;
   }
-  return path.resolve(backendDir, '..');
+  return repoRoot;
 }
 
 const SANDBOX_ROOT = path.join(appRoot(), 'sandbox');

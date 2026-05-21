@@ -18,5 +18,5 @@ services:
     image: python:3.11-alpine
     command: python load_generator.py
     volumes:
-      - ./scripts:/scripts
+      - ./init:/scripts
     working_dir: /scripts
