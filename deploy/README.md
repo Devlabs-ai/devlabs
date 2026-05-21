@@ -161,15 +161,48 @@ curl -s http://localhost/health
 
 ```bash
 cd ~/Devlabs   # or wherever you cloned
+```
 
-# Logs
-docker compose -f docker-compose.prod.yml logs -f backend nginx
+### Install `make` on Amazon Linux (optional)
 
-# Restart after a new backend image was pushed to Docker Hub
+```bash
+sudo dnf install -y make
+```
+
+### Restart after a new backend image (pull + up)
+
+**With make:**
+
+```bash
+make prod-restart
+```
+
+**Without make** (same thing):
+
+```bash
+chmod +x scripts/prod-restart.sh
+./scripts/prod-restart.sh
+```
+
+Or manually:
+
+```bash
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+After frontend changes, rebuild first:
+
+```bash
 git pull
 cd frontend && npm run build && cd ..
-docker compose -f docker-compose.prod.yml pull backend
-docker compose -f docker-compose.prod.yml up -d
+make prod-restart    # or ./scripts/prod-restart.sh
+```
+
+### Logs
+
+```bash
+docker compose -f docker-compose.prod.yml logs -f backend nginx
 
 # Backup Postgres
 docker exec devlabs-postgres pg_dump -U postgres devlabs > devlabs-$(date +%F).sql
