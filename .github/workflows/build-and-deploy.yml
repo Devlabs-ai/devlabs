@@ -14,13 +14,8 @@ name: Build and deploy
 
 on:
   push:
-    branches: [main, ft/deploy]
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      deploy_branch:
-        description: Branch to deploy on EC2
-        required: false
-        default: main
 
 env:
   IMAGE: rithvikreddyalkanti/devlabs-backend
@@ -57,27 +52,10 @@ jobs:
   deploy-ec2:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: >
-      needs.build-and-push.result == 'success' &&
-      (
-        github.ref == 'refs/heads/main' ||
-        github.ref == 'refs/heads/ft/deploy' ||
-        github.event_name == 'workflow_dispatch'
-      )
     env:
       APP_DIR: ${{ secrets.EC2_APP_DIR != '' && secrets.EC2_APP_DIR || '/home/ec2-user/Devlabs' }}
+      DEPLOY_BRANCH: main
     steps:
-      - name: Resolve deploy branch
-        id: meta
-        run: |
-          if [[ "${{ github.ref }}" == "refs/heads/ft/deploy" ]]; then
-            echo "branch=ft/deploy" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.deploy_branch }}" ]]; then
-            echo "branch=${{ github.event.inputs.deploy_branch }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "branch=main" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -88,6 +66,6 @@ jobs:
           script: |
             set -euo pipefail
             cd "${{ env.APP_DIR }}"
-            export DEPLOY_BRANCH="${{ steps.meta.outputs.branch }}"
+            export DEPLOY_BRANCH="${{ env.DEPLOY_BRANCH }}"
             chmod +x scripts/prod-deploy.sh scripts/prod-restart.sh
             ./scripts/prod-deploy.sh

@@ -104,7 +104,7 @@ Workflow: [.github/workflows/build-and-deploy.yml](../.github/workflows/build-an
 1. **CI** — build `deploy/Dockerfile.backend` and push to Docker Hub  
 2. **CD** — SSH to EC2, `git pull`, rebuild frontend, `docker compose pull` + `up -d`
 
-Runs on every push to **`main`** or **`ft/deploy`**, and via **workflow_dispatch**.
+Runs on every push to **`main`**, and via **workflow_dispatch**.
 
 Verified challenges ship in git under `sandbox/verified/` and are mounted into the backend container at runtime.
 
@@ -120,7 +120,7 @@ In **GitHub → Settings → Secrets and variables → Actions**, add:
 | `EC2_USER` | yes (for CD) | `ec2-user` |
 | `EC2_SSH_KEY` | yes (for CD) | Full PEM private key used to SSH into the instance |
 | `EC2_APP_DIR` | no | Default `/home/ec2-user/Devlabs` |
-| `EC2_DEPLOY_BRANCH` | no | Default `main` (workflow uses `ft/deploy` when that branch is pushed) |
+| `EC2_DEPLOY_BRANCH` | no | Unused by CI; deploy always checks out **`main`** on EC2 |
 
 **EC2 prerequisites for CD:** Node.js 20+ (`npm ci` / `npm run build` for frontend), git clone of this repo, `.env` configured, security group allows **SSH (22)** from GitHub Actions IPs (or use a self-hosted runner on the VPC).
 
@@ -131,7 +131,7 @@ EC2 pulls the backend image over the public internet — **no `docker login` req
 ```bash
 git clone https://github.com/Rithvik89/Devlabs.git
 cd Devlabs
-git checkout ft/deploy   # or main once deploy is merged
+git checkout main
 
 # Secrets
 cp deploy/env.production.example .env
@@ -185,7 +185,7 @@ sudo dnf install -y make
 
 ```bash
 make prod-deploy
-# or: DEPLOY_BRANCH=ft/deploy ./scripts/prod-deploy.sh
+# or: DEPLOY_BRANCH=main ./scripts/prod-deploy.sh
 ```
 
 **Restart only** (new Docker image, no git/frontend changes):
