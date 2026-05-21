@@ -1,0 +1,93 @@
+# CI: build backend image → Docker Hub
+# CD: SSH to EC2 → git pull, frontend build, docker compose pull + up
+#
+# GitHub Actions secrets (Settings → Secrets → Actions):
+#   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN
+#   EC2_HOST          — Elastic IP or public hostname
+#   EC2_USER          — ec2-user (Amazon Linux)
+#   EC2_SSH_KEY       — private key PEM for SSH (full file contents)
+# Optional:
+#   EC2_APP_DIR       — default /home/ec2-user/Devlabs
+#   EC2_DEPLOY_BRANCH — default main
+
+name: Build and deploy
+
+on:
+  push:
+    branches: [main, ft/deploy]
+  workflow_dispatch:
+    inputs:
+      deploy_branch:
+        description: Branch to deploy on EC2
+        required: false
+        default: main
+
+env:
+  IMAGE: rithvikreddyalkanti/devlabs-backend
+
+concurrency:
+  group: build-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.backend
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-ec2:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: >
+      needs.build-and-push.result == 'success' &&
+      (
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/ft/deploy' ||
+        github.event_name == 'workflow_dispatch'
+      )
+    env:
+      APP_DIR: ${{ secrets.EC2_APP_DIR != '' && secrets.EC2_APP_DIR || '/home/ec2-user/Devlabs' }}
+    steps:
+      - name: Resolve deploy branch
+        id: meta
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/ft/deploy" ]]; then
+            echo "branch=ft/deploy" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.deploy_branch }}" ]]; then
+            echo "branch=${{ github.event.inputs.deploy_branch }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "branch=main" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd "${{ env.APP_DIR }}"
+            export DEPLOY_BRANCH="${{ steps.meta.outputs.branch }}"
+            chmod +x scripts/prod-deploy.sh scripts/prod-restart.sh
+            ./scripts/prod-deploy.sh
