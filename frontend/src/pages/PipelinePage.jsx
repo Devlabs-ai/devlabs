@@ -106,7 +106,15 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
 
   if (!draft) {
-    return <div className="setter-empty"><div className="hero"><h2>Pipeline</h2><p>Select a draft to view its build pipeline.</p></div></div>;
+    return (
+      <div className="authoring-empty">
+        <div className="authoring-empty-icon" aria-hidden>⚙</div>
+        <div className="authoring-empty-copy">
+          <h2>Build pipeline</h2>
+          <p>Select a draft from the library to run or inspect the AI build pipeline.</p>
+        </div>
+      </div>
+    );
   }
 
   const hasSandboxSpec = !!draft.draft?.sandboxSpec;

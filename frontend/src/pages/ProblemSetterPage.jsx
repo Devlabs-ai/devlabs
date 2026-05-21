@@ -5,10 +5,11 @@ function Empty({ onImport }) {
   const [text, setText] = useState('');
   const [showImport, setShowImport] = useState(false);
   return (
-    <div className="setter-empty">
-      <div className="hero">
-        <h2>Problem Setter</h2>
-        <p>Pick a draft from the sidebar, start a new one, or paste a draft JSON below.</p>
+    <div className="authoring-empty setter-empty">
+      <div className="authoring-empty-icon" aria-hidden>✎</div>
+      <div className="authoring-empty-copy">
+        <h2>Shape your challenge</h2>
+        <p>Select a draft from the library, create a new one, or import JSON to get started.</p>
       </div>
       {showImport ? (
         <div className="import-box">

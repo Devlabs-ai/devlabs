@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import AppPageHeader from '../components/AppPageHeader.jsx';
 import {
   fetchLessons,
   fetchMemoryStats,
@@ -150,35 +151,31 @@ export default function MemoriesPage() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setPage(1); }, [tab, categoryFilter, phaseFilter]);
 
-  return (
-    <div className="memories-page">
-      <header className="page-header">
-        <div>
-          <h2>Memories</h2>
-          <span className="sub">
-            Specialist handbook (static) and lessons learned from builds
-            {stats && (
-              <>
-                {' '}
-                — {stats.specialists} specialists, {stats.lessons} lessons
-              </>
-            )}
-          </span>
-        </div>
-      </header>
+  const statsMeta = stats
+    ? `${stats.specialists} specialists · ${stats.lessons} lessons`
+    : '';
 
-      <div className="memories-toolbar">
-        <div className="authoring-tabs" style={{ marginBottom: 0 }}>
+  return (
+    <div className="app-page">
+      <AppPageHeader
+        eyebrow="Memories"
+        title="Specialist Handbook"
+        meta={statsMeta}
+        lead="Curated stack recipes and lessons captured from successful builds—used by the agent on every pipeline run."
+      />
+
+      <div className="memories-toolbar app-surface-card">
+        <div className="app-segmented-tabs">
           <button
             type="button"
-            className={`authoring-tab ${tab === 'specialists' ? 'active' : ''}`}
+            className={`app-segmented-tab ${tab === 'specialists' ? 'active' : ''}`}
             onClick={() => setTab('specialists')}
           >
             Specialists
           </button>
           <button
             type="button"
-            className={`authoring-tab ${tab === 'lessons' ? 'active' : ''}`}
+            className={`app-segmented-tab ${tab === 'lessons' ? 'active' : ''}`}
             onClick={() => setTab('lessons')}
           >
             Lessons

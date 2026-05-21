@@ -99,7 +99,12 @@ The **backend** is built in CI and published to a **public** Docker Hub repo:
 
 **[rithvikreddyalkanti/devlabs-backend](https://hub.docker.com/r/rithvikreddyalkanti/devlabs-backend)**
 
-Workflow: [.github/workflows/docker-backend.yml](../.github/workflows/docker-backend.yml) — runs on push to `main` / `ft/deploy` when backend or `deploy/Dockerfile.backend` changes.
+Workflow: [.github/workflows/build-and-deploy.yml](../.github/workflows/build-and-deploy.yml)
+
+1. **CI** — build `deploy/Dockerfile.backend` and push to Docker Hub  
+2. **CD** — SSH to EC2, `git pull`, rebuild frontend, `docker compose pull` + `up -d`
+
+Runs on every push to **`main`**, and via **workflow_dispatch**.
 
 Verified challenges ship in git under `sandbox/verified/` and are mounted into the backend container at runtime.
 
@@ -107,21 +112,26 @@ Verified challenges ship in git under `sandbox/verified/` and are mounted into t
 
 In **GitHub → Settings → Secrets and variables → Actions**, add:
 
-| Secret | Value |
-| ------ | ----- |
-| `DOCKERHUB_USERNAME` | `rithvikreddyalkanti` |
-| `DOCKERHUB_TOKEN` | Docker Hub **Access Token** (Account → Security → New Access Token) |
+| Secret | Required | Value |
+| ------ | -------- | ----- |
+| `DOCKERHUB_USERNAME` | yes | `rithvikreddyalkanti` |
+| `DOCKERHUB_TOKEN` | yes | Docker Hub access token (read/write) |
+| `EC2_HOST` | yes (for CD) | Elastic IP, e.g. `54.x.x.x` |
+| `EC2_USER` | yes (for CD) | `ec2-user` |
+| `EC2_SSH_KEY` | yes (for CD) | Full PEM private key used to SSH into the instance |
+| `EC2_APP_DIR` | no | Default `/home/ec2-user/Devlabs` |
+| `EC2_DEPLOY_BRANCH` | no | Unused by CI; deploy always checks out **`main`** on EC2 |
 
-Push to `ft/deploy` (or run the workflow manually) and confirm the image appears on Docker Hub before deploying EC2.
+**EC2 prerequisites for CD:** Node.js 20+ (`npm ci` / `npm run build` for frontend), git clone of this repo, `.env` configured, security group allows **SSH (22)** from GitHub Actions IPs (or use a self-hosted runner on the VPC).
 
-EC2 pulls this image over the public internet — **no `docker login` required** for a public repo.
+EC2 pulls the backend image over the public internet — **no `docker login` required** for a public Hub repo.
 
 ## 4. Deploy on the server
 
 ```bash
 git clone https://github.com/Rithvik89/Devlabs.git
 cd Devlabs
-git checkout ft/deploy   # or main once deploy is merged
+git checkout main
 
 # Secrets
 cp deploy/env.production.example .env
@@ -169,34 +179,20 @@ cd ~/Devlabs   # or wherever you cloned
 sudo dnf install -y make
 ```
 
-### Restart after a new backend image (pull + up)
+### Deploy / restart on EC2
 
-**With make:**
+**Full deploy** (git pull + frontend build + image pull + up) — same as GitHub CD:
+
+```bash
+make prod-deploy
+# or: DEPLOY_BRANCH=main ./scripts/prod-deploy.sh
+```
+
+**Restart only** (new Docker image, no git/frontend changes):
 
 ```bash
 make prod-restart
-```
-
-**Without make** (same thing):
-
-```bash
-chmod +x scripts/prod-restart.sh
-./scripts/prod-restart.sh
-```
-
-Or manually:
-
-```bash
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
-```
-
-After frontend changes, rebuild first:
-
-```bash
-git pull
-cd frontend && npm run build && cd ..
-make prod-restart    # or ./scripts/prod-restart.sh
+# or: ./scripts/prod-restart.sh
 ```
 
 ### Logs

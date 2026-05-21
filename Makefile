@@ -19,7 +19,7 @@ SHELL := /bin/bash
 
 .PHONY: help install infra-up infra-down infra-reset backend frontend dev stop \
         build clean reset seed-memory seed-memory-force seed-memory-dry \
-        prod-build prod-pull prod-up prod-restart prod-down prod-logs
+        prod-build prod-pull prod-up prod-deploy prod-restart prod-down prod-logs
 
 help:
 	@printf "\nDevlabs — make targets\n\n"
@@ -35,7 +35,8 @@ help:
 	@printf "  %-14s %s\n" "prod-build"    "frontend build for EC2 (same as build)"
 	@printf "  %-14s %s\n" "prod-pull"     "pull images from docker-compose.prod.yml"
 	@printf "  %-14s %s\n" "prod-up"       "prod-pull + start production stack"
-	@printf "  %-14s %s\n" "prod-restart"  "pull latest images + recreate containers (EC2 deploy)"
+	@printf "  %-14s %s\n" "prod-deploy"   "git pull + frontend build + prod-restart (on EC2)"
+	@printf "  %-14s %s\n" "prod-restart"  "pull latest images + recreate containers"
 	@printf "  %-14s %s\n" "prod-down"     "stop production compose stack"
 	@printf "  %-14s %s\n" "prod-logs"     "tail production compose logs"
 	@printf "  %-14s %s\n" "seed-memory" "pre-seed specialists table from the curated image catalog"
@@ -122,6 +123,10 @@ prod-pull:
 
 prod-up: prod-pull
 	docker compose -f docker-compose.prod.yml up -d
+
+prod-deploy:
+	chmod +x scripts/prod-deploy.sh
+	./scripts/prod-deploy.sh
 
 prod-restart: prod-pull
 	docker compose -f docker-compose.prod.yml up -d
