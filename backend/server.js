@@ -12,6 +12,7 @@ const { seedCatalogIfEmpty } = require('./problems/seeds/runCatalogSeed');
 const sessionStore = require('./db/sessionStore');
 const draftStore = require('./problems/problemDraftStore');
 const { loadChallengesFromDB, seedChallengesFromDisk } = require('./challenges/loader');
+const { VERIFIED_ROOT } = require('./sandbox/paths');
 
 const authRoutes = require('./routes/auth');
 const challengeRoutes = require('./routes/challenges');
@@ -91,9 +92,8 @@ async function start() {
   console.log('[boot] restoring draft sessions from db...');
   await draftStore.restoreFromDB().catch((e) => console.warn('[boot] draftStore restore failed:', e.message));
 
-  const verifiedDir = path.resolve(__dirname, '..', 'sandbox', 'verified');
-  console.log(`[boot] seeding challenges from ${verifiedDir}`);
-  await seedChallengesFromDisk(verifiedDir);
+  console.log(`[boot] seeding challenges from ${VERIFIED_ROOT}`);
+  await seedChallengesFromDisk(VERIFIED_ROOT);
 
   console.log('[boot] loading challenges from db...');
   await loadChallengesFromDB();

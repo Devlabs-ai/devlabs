@@ -25,9 +25,7 @@ const portAllocator = require('../sandbox/portAllocator');
 const validationAgent = require('./validationAgentService');
 const specialistStore = require('./specialistStore');
 const lessonStore = require('./lessonStore');
-
-const ROOT = path.resolve(__dirname, '..', '..');
-const BUILDS_ROOT = path.join(ROOT, 'sandbox', 'builds');
+const { BUILDS_ROOT } = require('../sandbox/paths');
 
 const MAX_ITERATIONS = 10;
 

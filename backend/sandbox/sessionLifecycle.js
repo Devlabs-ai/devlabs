@@ -9,9 +9,7 @@ const portAllocator = require('./portAllocator');
 const sessionStore = require('../db/sessionStore');
 const loader = require('../challenges/loader');
 const invites = require('../auth/invites');
-
-const ROOT = path.resolve(__dirname, '..', '..');
-const SESSIONS_ROOT = path.join(ROOT, 'sandbox', 'sessions');
+const { SESSIONS_ROOT } = require('./paths');
 
 function copyDirSync(src, dest) {
   fs.mkdirSync(dest, { recursive: true });

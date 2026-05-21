@@ -8,9 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const loader = require('../challenges/loader');
-
-const ROOT = path.resolve(__dirname, '..', '..');
-const VERIFIED_ROOT = path.join(ROOT, 'sandbox', 'verified');
+const { VERIFIED_ROOT } = require('../sandbox/paths');
 
 function slugify(s) {
   return String(s || 'challenge')
