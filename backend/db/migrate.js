@@ -25,6 +25,10 @@ const STATEMENTS = [
      created_at         BIGINT NOT NULL,
      updated_at         BIGINT NOT NULL
    )`,
+  // Role bucket (software-engineer / data-engineer / platform-engineer /
+  // devops). Picked at "Push to verified" time so the candidate library can
+  // group labs by hiring track. Nullable for legacy rows that predate bucketing.
+  `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS bucket TEXT`,
   `CREATE TABLE IF NOT EXISTS game_sessions (
      id              TEXT PRIMARY KEY,
      challenge_id    TEXT,
@@ -70,24 +74,7 @@ const STATEMENTS = [
   // held smoke rows.
   `DROP TABLE IF EXISTS build_lessons`,
   `DROP TABLE IF EXISTS build_memory`,
-  `CREATE TABLE IF NOT EXISTS specialists (
-     id            SERIAL PRIMARY KEY,
-     signature     TEXT NOT NULL UNIQUE,
-     category      TEXT NOT NULL,
-     stack         TEXT,
-     service_role  TEXT,
-     title         TEXT NOT NULL,
-     dos           JSONB NOT NULL DEFAULT '[]',
-     donts         JSONB NOT NULL DEFAULT '[]',
-     conf          JSONB NOT NULL DEFAULT '{}',
-     priority      INT NOT NULL DEFAULT 0,
-     active        BOOLEAN NOT NULL DEFAULT true,
-     created_at    BIGINT NOT NULL,
-     updated_at    BIGINT NOT NULL
-   )`,
-  `CREATE INDEX IF NOT EXISTS idx_specialists_category_active
-     ON specialists (category, priority DESC)
-     WHERE active = true`,
+  `DROP TABLE IF EXISTS specialists`,
   `CREATE TABLE IF NOT EXISTS lessons (
      id               SERIAL PRIMARY KEY,
      phase            TEXT NOT NULL CHECK (phase IN ('start', 'validate')),
@@ -107,6 +94,22 @@ const STATEMENTS = [
      ON lessons (phase, category)`,
   `CREATE INDEX IF NOT EXISTS idx_lessons_embedding
      ON lessons USING hnsw (embedding vector_cosine_ops)`,
+  `CREATE TABLE IF NOT EXISTS catalogue (
+     id              SERIAL PRIMARY KEY,
+     category        TEXT NOT NULL UNIQUE,
+     image           TEXT,
+     image_hints     JSONB NOT NULL DEFAULT '[]'::jsonb,
+     port            INT,
+     dos             JSONB NOT NULL DEFAULT '[]'::jsonb,
+     donts           JSONB NOT NULL DEFAULT '[]'::jsonb,
+     conf            JSONB NOT NULL DEFAULT '{}'::jsonb,
+     default_limits  JSONB,
+     handbook_text   TEXT,
+     metric_format   TEXT,
+     observables     JSONB NOT NULL DEFAULT '[]'::jsonb,
+     created_at      BIGINT NOT NULL,
+     updated_at      BIGINT NOT NULL
+   )`,
 ];
 
 async function runMigrations() {

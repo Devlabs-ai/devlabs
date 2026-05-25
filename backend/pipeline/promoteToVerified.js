@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const loader = require('../challenges/loader');
+const { normalizeBucket } = require('../challenges/buckets');
 const { VERIFIED_ROOT } = require('../sandbox/paths');
 
 function slugify(s) {
@@ -31,9 +32,16 @@ function copyDirSync(src, dest) {
 // Copy a built challenge into the verified dir, finalise its challenge.json,
 // and refresh the in-process challenges cache. Returns { slug, verifiedDir,
 // challenge }.
-async function promote({ buildDir, builtChallenge, fallbackTitle }) {
+async function promote({ buildDir, builtChallenge, fallbackTitle, bucket }) {
   if (!buildDir || !fs.existsSync(buildDir)) {
     const e = new Error('build directory missing on disk; rebuild before promoting');
+    e.status = 400;
+    throw e;
+  }
+
+  const normalizedBucket = normalizeBucket(bucket);
+  if (bucket && !normalizedBucket) {
+    const e = new Error(`unknown bucket: ${bucket}`);
     e.status = 400;
     throw e;
   }
@@ -57,16 +65,25 @@ async function promote({ buildDir, builtChallenge, fallbackTitle }) {
   const merged = {
     ...cur,
     id: slug,
-    title: built.title || cur.title,
+    title: built.title || built.meta?.name || cur.title,
     description: built.description || cur.description,
-    difficulty: built.difficulty || cur.difficulty || 'Medium',
-    category: built.category || cur.category || 'General',
-    tags: built.tags || cur.tags || [],
+    difficulty: built.difficulty || built.meta?.difficulty || cur.difficulty || 'Medium',
+    category: built.category || built.meta?.category || cur.category || 'General',
+    bucket: normalizedBucket || normalizeBucket(cur.bucket) || null,
+    tags: built.tags || built.meta?.tags || cur.tags || [],
     finalized: true,
     sandboxType: 'compose',
+    arch: built.arch || cur.arch || null,
+    metrics: built.metrics || cur.metrics || null,
     problemStatement: built.problemStatement || cur.problemStatement || null,
     validationSpec: built.validationSpec || cur.validationSpec || null,
   };
+  if (merged.metrics?.recovery && merged.validationSpec) {
+    merged.validationSpec.metricLogFormat = merged.metrics.format
+      || merged.validationSpec.metricLogFormat;
+    merged.validationSpec.metricsService = merged.metrics.service
+      || merged.validationSpec.metricsService;
+  }
   fs.writeFileSync(challengeFile, `${JSON.stringify(merged, null, 2)}\n`);
 
   await loader.seedChallengesFromDisk(VERIFIED_ROOT);

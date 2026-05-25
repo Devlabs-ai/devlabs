@@ -217,7 +217,7 @@ export default function AuthoringWorkspace({ onPromoted }) {
           {importOpen && (
             <div className="authoring-import">
               <textarea
-                placeholder='{ "title": "...", "sandboxSpec": { ... } }'
+                placeholder='{ "schemaVersion": 1, "meta": { ... }, "description": "...", ... }'
                 value={importText}
                 onChange={(e) => setImportText(e.target.value)}
                 rows={4}
@@ -279,6 +279,11 @@ export default function AuthoringWorkspace({ onPromoted }) {
                 onImportDraft={handleImportDraft}
                 onDeleteDraft={handleDeleteDraft}
                 onGoPipeline={() => setTab('pipeline')}
+                onRefreshSession={async () => {
+                  if (!activeDraftId) return;
+                  const fresh = await getProblemSession(activeDraftId);
+                  setActiveDraft(fresh);
+                }}
               />
             )}
             {tab === 'pipeline' && (

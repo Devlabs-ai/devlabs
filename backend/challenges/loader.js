@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const pool = require('../db/pool');
+const { normalizeBucket } = require('./buckets');
 
 const cache = new Map();
 
@@ -14,6 +15,7 @@ function publicFields(row) {
     difficulty: row.difficulty,
     tags: row.tags || [],
     category: row.category,
+    bucket: row.bucket || null,
     finalized: !!row.finalized,
     sandboxType: row.sandbox_type || null,
   };
@@ -55,16 +57,17 @@ async function seedChallengesFromDisk(verifiedRoot) {
 
     await pool.query(
       `INSERT INTO challenges
-        (id, title, description, difficulty, tags, category, finalized,
+        (id, title, description, difficulty, tags, category, bucket, finalized,
          sandbox_type, verified_dir, problem_statement, validation_spec,
          created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)
        ON CONFLICT (id) DO UPDATE SET
          title = EXCLUDED.title,
          description = EXCLUDED.description,
          difficulty = EXCLUDED.difficulty,
          tags = EXCLUDED.tags,
          category = EXCLUDED.category,
+         bucket = EXCLUDED.bucket,
          finalized = EXCLUDED.finalized,
          sandbox_type = EXCLUDED.sandbox_type,
          verified_dir = EXCLUDED.verified_dir,
@@ -78,6 +81,7 @@ async function seedChallengesFromDisk(verifiedRoot) {
         parsed.difficulty || 'Medium',
         JSON.stringify(parsed.tags || []),
         parsed.category || 'General',
+        normalizeBucket(parsed.bucket),
         parsed.finalized != null ? !!parsed.finalized : true,
         parsed.sandboxType || null,
         verifiedDir,
@@ -117,6 +121,7 @@ function listPublicChallenges() {
     difficulty: c.difficulty,
     tags: c.tags,
     category: c.category,
+    bucket: c.bucket || null,
     finalized: c.finalized,
     sandboxType: c.sandboxType,
   }));
@@ -132,6 +137,7 @@ function getPublicChallenge(id) {
     difficulty: c.difficulty,
     tags: c.tags,
     category: c.category,
+    bucket: c.bucket || null,
     finalized: c.finalized,
     sandboxType: c.sandboxType,
     problemStatement: c.problemStatement,

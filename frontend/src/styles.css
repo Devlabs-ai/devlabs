@@ -591,14 +591,15 @@ a:hover { text-decoration: underline; }
 
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 360px));
+  gap: 18px;
+  align-items: stretch;
 }
 .card {
   background: linear-gradient(180deg, var(--surface-2), var(--surface));
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 24px 24px 22px;
+  padding: 22px 22px 20px;
   cursor: pointer;
   position: relative;
   overflow: hidden;
@@ -621,49 +622,247 @@ a:hover { text-decoration: underline; }
 }
 .card:hover::after { opacity: 1; }
 .card h3 {
-  margin: 0 0 6px;
-  font-size: 19px;
+  margin: 0 0 8px;
+  font-size: 18px;
   font-weight: 600;
   letter-spacing: -0.02em;
+  line-height: 1.3;
 }
-.card .difficulty {
+.card .pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  background: var(--surface-3);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.card .pill.easy { color: #6ee7b7; border-color: rgba(110, 231, 183, 0.3); background: rgba(16, 185, 129, 0.08); }
+.card .pill.medium { color: #fcd34d; border-color: rgba(252, 211, 77, 0.3); background: rgba(251, 191, 36, 0.08); }
+.card .pill.hard { color: #fda4af; border-color: rgba(253, 164, 175, 0.3); background: rgba(244, 63, 94, 0.08); }
+
+.challenge-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.challenge-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--bucket-accent, var(--brand));
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  pointer-events: none;
+}
+.challenge-card:hover::before { opacity: 1; }
+.challenge-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.challenge-card-category {
+  font-size: 11px;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.6px;
   color: var(--text-dim);
-  margin-bottom: 10px;
 }
-.card .difficulty .pill {
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--surface-3);
+.challenge-card-description {
+  margin: 0 0 16px;
   color: var(--text-muted);
-  border: 1px solid var(--border);
+  font-size: 14px;
+  line-height: 1.55;
+  min-height: 44px;
+  flex: 1;
 }
-.card .difficulty .pill.easy { color: #6ee7b7; border-color: rgba(110, 231, 183, 0.3); background: rgba(16, 185, 129, 0.08); }
-.card .difficulty .pill.medium { color: #fcd34d; border-color: rgba(252, 211, 77, 0.3); background: rgba(251, 191, 36, 0.08); }
-.card .difficulty .pill.hard { color: #fda4af; border-color: rgba(253, 164, 175, 0.3); background: rgba(244, 63, 94, 0.08); }
-.card .description {
-  color: var(--text-muted);
-  font-size: 15px;
-  line-height: 1.6;
-  min-height: 48px;
+.challenge-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
-.card .meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.challenge-card-footer .meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
 .card .tag {
   background: var(--surface-3);
   color: var(--text-muted);
-  padding: 4px 10px;
+  padding: 3px 9px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11.5px;
   border: 1px solid var(--border);
 }
+.challenge-card-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--bucket-accent, var(--brand-bright));
+  opacity: 0.55;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.challenge-card-cta .arrow {
+  font-size: 14px;
+  transition: transform 0.18s ease;
+}
+.challenge-card:hover .challenge-card-cta { opacity: 1; }
+.challenge-card:hover .challenge-card-cta .arrow { transform: translateX(3px); }
+
 .card.coming-soon { opacity: 0.55; cursor: not-allowed; }
 .card.coming-soon:hover { transform: none; border-color: var(--border); box-shadow: none; }
+.card.coming-soon:hover::before { opacity: 0; }
+
+/* ---------- Bucket filter / sections (Play library) ---------- */
+
+.bucket-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 28px;
+}
+.bucket-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease, transform 0.06s ease;
+}
+.bucket-chip:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+  filter: none;
+  transform: none;
+}
+.bucket-chip.active {
+  color: #00170d;
+  background: linear-gradient(180deg, var(--brand-bright), var(--brand));
+  border-color: transparent;
+}
+.bucket-chip .count {
+  background: rgba(0, 0, 0, 0.18);
+  color: inherit;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.bucket-chip:not(.active) .count {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Per-bucket accent colors. Defined on the section so descendant cards inherit
+   the CSS variable for their hover stripe and CTA color. */
+.bucket-section {
+  --bucket-accent: var(--brand);
+  --bucket-accent-soft: rgba(16, 185, 129, 0.14);
+  margin-bottom: 36px;
+}
+.bucket-section[data-bucket="software-engineer"] {
+  --bucket-accent: #60a5fa;
+  --bucket-accent-soft: rgba(96, 165, 250, 0.16);
+}
+.bucket-section[data-bucket="data-engineer"] {
+  --bucket-accent: #c084fc;
+  --bucket-accent-soft: rgba(192, 132, 252, 0.16);
+}
+.bucket-section[data-bucket="platform-engineer"] {
+  --bucket-accent: #fb923c;
+  --bucket-accent-soft: rgba(251, 146, 60, 0.16);
+}
+.bucket-section[data-bucket="devops"] {
+  --bucket-accent: #34d399;
+  --bucket-accent-soft: rgba(52, 211, 153, 0.16);
+}
+.bucket-section[data-bucket="__unbucketed__"] {
+  --bucket-accent: #94a3b8;
+  --bucket-accent-soft: rgba(148, 163, 184, 0.14);
+}
+.bucket-section:last-child {
+  margin-bottom: 0;
+}
+.bucket-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.bucket-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.bucket-section-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--bucket-accent);
+  box-shadow: 0 0 0 5px var(--bucket-accent-soft);
+}
+.bucket-section-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.bucket-section-count {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+/* ---------- Review bucket picker ---------- */
+
+.review-bucket-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.review-bucket-picker label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+}
+.review-bucket-picker select {
+  min-width: 180px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+}
 
 /* ---------- Login ---------- */
 
@@ -2546,6 +2745,162 @@ a:hover { text-decoration: underline; }
 .draft-preview-empty {
   color: var(--text-dim); font-size: 13px; padding: 24px; text-align: center; line-height: 1.6;
 }
+
+/* Phase 1 design contract preview */
+.description-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 18px 20px;
+}
+.description-panel .contract-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+.description-panel .contract-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.description-panel .contract-pills-label {
+  flex: 0 0 100%;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+.description-panel .contract-pill {
+  display: inline-block;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: var(--mono, ui-monospace, monospace);
+  color: var(--accent, #7ee787);
+  background: rgba(126, 231, 135, 0.08);
+  border: 1px solid rgba(126, 231, 135, 0.25);
+  border-radius: 999px;
+}
+.description-panel .contract-meta-grid {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+}
+.description-panel .contract-meta-row {
+  display: grid;
+  grid-template-columns: 9.5rem 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.description-panel .contract-meta-row:last-child {
+  border-bottom: none;
+}
+.description-panel .contract-meta-row dt {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+.description-panel .contract-meta-row dd {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  word-break: break-word;
+}
+.description-panel .contract-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.description-panel .contract-section-title {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+.description-panel .description-body {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+}
+.description-panel .contract-prose {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.description-panel .contract-list {
+  margin: 0;
+  padding: 12px 14px 12px 28px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.description-panel .contract-list li + li {
+  margin-top: 6px;
+}
+.description-panel .contract-details {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: 4px 12px 10px;
+  background: rgba(0, 0, 0, 0.12);
+}
+.description-panel .contract-details.setter-only summary {
+  color: var(--text-dim);
+}
+.description-panel .contract-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 0;
+  color: var(--text-muted);
+}
+.description-panel .contract-footnote {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.description-panel .contract-footnote.warn {
+  border-color: rgba(255, 180, 80, 0.35);
+  background: rgba(255, 180, 80, 0.06);
+  color: var(--text-muted);
+}
+
 .json-toggle { margin-top: 10px; }
 .json-toggle summary {
   cursor: pointer; color: var(--text-muted); font-size: 12px; padding: 6px 0;
@@ -2621,8 +2976,99 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
   overflow-y: auto;
   flex: 1;
 }
-.log-line { white-space: pre-wrap; word-break: break-word; padding: 1px 0; }
+.log-line { white-space: pre-wrap; word-break: break-word; padding: 2px 0; line-height: 1.45; }
+.log-line.log-ok { color: var(--brand-bright); }
+.log-line.log-error { color: var(--danger); }
+.log-line.log-warn { color: #fbbf24; }
+.log-line.log-phase { color: var(--accent); font-weight: 500; }
 .log-empty { color: var(--text-dim); text-align: center; padding: 24px; }
+
+.iteration-checklist {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.iteration-checklist.passed { border-color: var(--border-accent); }
+.iteration-checklist.failed { border-color: rgba(244,63,94,0.35); }
+.iteration-checklist-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+}
+.iteration-checklist .badge {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+}
+.checklist-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.checklist li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.check-icon {
+  font-family: var(--mono);
+  width: 1.2em;
+  flex-shrink: 0;
+}
+.check-pass .check-icon { color: var(--brand-bright); }
+.check-fail .check-icon { color: var(--danger); }
+.check-skip .check-icon { color: var(--text-dim); }
+.check-pending .check-icon { color: var(--text-muted); }
+.check-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  margin-right: 6px;
+}
+.check-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+  flex: 1 1 100%;
+  padding-left: 1.8em;
+}
+.checklist-history summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.checklist-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.design-checklist {
+  margin-top: 8px;
+  border-style: dashed;
+}
 
 .validation-card {
   border: 1px solid var(--border-strong);

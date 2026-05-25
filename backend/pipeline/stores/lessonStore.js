@@ -4,8 +4,8 @@
 // after one or more failures in that phase. Retrieved by semantic similarity
 // on retry. Best-effort — never blocks a build.
 
-const pool = require('../db/pool');
-const llm = require('../llm/client');
+const pool = require('../../db/pool');
+const llm = require('../../llm/client');
 
 const LESSONS_K = 8;
 const LESSONS_MAX_DISTANCE = 0.45;

@@ -4,6 +4,7 @@
   "description": "A critical service relies on Kafka for event streaming, but it's experiencing issues in message consumption.",
   "difficulty": "Easy",
   "category": "Messaging",
+  "bucket": "data-engineer",
   "tags": [
     "kafka",
     "messaging",

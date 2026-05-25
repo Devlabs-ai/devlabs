@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import AppPageHeader from '../components/AppPageHeader.jsx';
 import {
+  fetchCatalogue,
   fetchLessons,
   fetchMemoryStats,
-  fetchSpecialists,
 } from '../services/memoriesApi.js';
 
 const PAGE_SIZE = 20;
@@ -39,19 +39,25 @@ function JsonBlock({ value }) {
   return <pre className="memories-json">{JSON.stringify(value, null, 2)}</pre>;
 }
 
-function SpecialistCard({ item, expanded, onToggle }) {
+function CatalogueCard({ item, expanded, onToggle }) {
   return (
     <article className={`memories-card ${expanded ? 'expanded' : ''}`}>
       <button type="button" className="memories-card-head" onClick={onToggle}>
         <div className="memories-card-title">
           <span className="pill">{item.category}</span>
-          {item.stack && <span className="pill dim">{item.stack}</span>}
-          <strong>{item.title}</strong>
+          {item.image && <span className="pill dim">{item.image}</span>}
+          <strong>{item.image || item.category}</strong>
         </div>
         <span className="dim">{expanded ? '▾' : '▸'}</span>
       </button>
       {expanded && (
         <div className="memories-card-body">
+          {item.handbookText && (
+            <section>
+              <h4>Handbook</h4>
+              <p className="memories-prose">{item.handbookText}</p>
+            </section>
+          )}
           {item.dos?.length > 0 && (
             <section>
               <h4>Do</h4>
@@ -68,6 +74,12 @@ function SpecialistCard({ item, expanded, onToggle }) {
             <h4>Conf (container startup)</h4>
             <JsonBlock value={item.conf} />
           </section>
+          {item.observables?.length > 0 && (
+            <section>
+              <h4>Observables</h4>
+              <JsonBlock value={item.observables} />
+            </section>
+          )}
         </div>
       )}
     </article>
@@ -112,7 +124,7 @@ function LessonCard({ item, expanded, onToggle }) {
 }
 
 export default function MemoriesPage() {
-  const [tab, setTab] = useState('specialists');
+  const [tab, setTab] = useState('catalogue');
   const [stats, setStats] = useState(null);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [phaseFilter, setPhaseFilter] = useState('');
@@ -135,8 +147,8 @@ export default function MemoriesPage() {
     setExpandedId(null);
     try {
       const opts = { page, limit: PAGE_SIZE, category: categoryFilter };
-      const result = tab === 'specialists'
-        ? await fetchSpecialists(opts)
+      const result = tab === 'catalogue'
+        ? await fetchCatalogue(opts)
         : await fetchLessons({ ...opts, phase: phaseFilter });
       setData(result);
     } catch (e) {
@@ -152,26 +164,26 @@ export default function MemoriesPage() {
   useEffect(() => { setPage(1); }, [tab, categoryFilter, phaseFilter]);
 
   const statsMeta = stats
-    ? `${stats.specialists} specialists · ${stats.lessons} lessons`
+    ? `${stats.catalogue} catalogue · ${stats.lessons} lessons`
     : '';
 
   return (
     <div className="app-page memories-page">
       <AppPageHeader
         eyebrow="Memories"
-        title="Specialist Handbook"
+        title="Catalogue & Lessons"
         meta={statsMeta}
-        lead="Curated stack recipes and lessons captured from successful builds—used by the agent on every pipeline run."
+        lead="Verified stack recipes and lessons captured from successful builds—used by the agent on every pipeline run."
       />
 
       <div className="memories-toolbar app-surface-card">
         <div className="app-segmented-tabs">
           <button
             type="button"
-            className={`app-segmented-tab ${tab === 'specialists' ? 'active' : ''}`}
-            onClick={() => setTab('specialists')}
+            className={`app-segmented-tab ${tab === 'catalogue' ? 'active' : ''}`}
+            onClick={() => setTab('catalogue')}
           >
-            Specialists
+            Catalogue
           </button>
           <button
             type="button"
@@ -185,7 +197,7 @@ export default function MemoriesPage() {
           Category
           <input
             type="text"
-            placeholder="e.g. postgres, Database"
+            placeholder="e.g. postgres, redis"
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value.trim())}
           />
@@ -211,16 +223,16 @@ export default function MemoriesPage() {
         </div>
       ) : data.items.length === 0 ? (
         <div className="review-empty">
-          {tab === 'specialists'
-            ? 'No specialist rows yet. Run make seed-memory or restart the backend to seed the handbook.'
+          {tab === 'catalogue'
+            ? 'No catalogue rows yet. Restart the backend to seed from pipeline/catalogue/seeds when the table is empty.'
             : 'No lessons yet. Lessons are recorded when a build succeeds after failures in START or VALIDATE.'}
         </div>
       ) : (
         <>
           <div className="memories-list">
-            {tab === 'specialists'
+            {tab === 'catalogue'
               ? data.items.map((item) => (
-                <SpecialistCard
+                <CatalogueCard
                   key={item.id}
                   item={item}
                   expanded={expandedId === item.id}

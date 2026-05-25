@@ -6,10 +6,10 @@ export async function fetchMemoryStats() {
   return data;
 }
 
-export async function fetchSpecialists({ page = 1, limit = 20, category = '' } = {}) {
+export async function fetchCatalogue({ page = 1, limit = 20, category = '' } = {}) {
   const params = { page, limit };
   if (category) params.category = category;
-  const { data } = await axios.get('/api/memories/specialists', {
+  const { data } = await axios.get('/api/memories/catalogue', {
     headers: getAuthHeader(),
     params,
   });

@@ -18,7 +18,7 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 .PHONY: help install infra-up infra-down infra-reset backend frontend dev stop \
-        build clean reset seed-memory seed-memory-force seed-memory-dry \
+        build clean reset seed-catalogue seed-catalogue-if-empty seed-catalogue-dry \
         prod-build prod-pull prod-up prod-deploy prod-restart prod-down prod-logs
 
 help:
@@ -39,7 +39,7 @@ help:
 	@printf "  %-14s %s\n" "prod-restart"  "pull latest images + recreate containers"
 	@printf "  %-14s %s\n" "prod-down"     "stop production compose stack"
 	@printf "  %-14s %s\n" "prod-logs"     "tail production compose logs"
-	@printf "  %-14s %s\n" "seed-memory" "pre-seed specialists table from the curated image catalog"
+	@printf "  %-14s %s\n" "seed-catalogue" "seed catalogue table from seeds/catalogue.js (insert-only)"
 	@printf "  %-14s %s\n" "clean"       "remove node_modules, dist, ephemeral sandbox dirs"
 	@printf "  %-14s %s\n" "reset"       "clean + infra-reset (full wipe)"
 	@printf "\n"
@@ -140,22 +140,21 @@ prod-logs:
 	docker compose -f docker-compose.prod.yml logs -f
 
 # ---------------------------------------------------------------------------
-# build_memory seeding
+# catalogue seeding
 # ---------------------------------------------------------------------------
 #
-# Pre-populates the specialists table with ~32 curated image handbook rows
-# (Postgres, Kafka, Nginx, Spark, ...). Idempotent: re-runs skip unchanged
-# entries. Pass extra flags via
-# ARGS=... (e.g. `make seed-memory ARGS="--category=postgres"`).
+# Seeds the catalogue table from backend/pipeline/catalogue/seeds/catalogue.js.
+# Insert-only unless the table is empty (use --if-empty on boot).
+# ARGS=... (e.g. `make seed-catalogue ARGS="--category=postgres"`).
 
-seed-memory:
-	cd backend && node scripts/seedMemory.js $(ARGS)
+seed-catalogue:
+	cd backend && node scripts/seedCatalogue.js $(ARGS)
 
-seed-memory-force:
-	cd backend && node scripts/seedMemory.js --force $(ARGS)
+seed-catalogue-if-empty:
+	cd backend && node scripts/seedCatalogue.js --if-empty $(ARGS)
 
-seed-memory-dry:
-	cd backend && node scripts/seedMemory.js --dry-run $(ARGS)
+seed-catalogue-dry:
+	cd backend && node scripts/seedCatalogue.js --dry-run $(ARGS)
 
 clean:
 	@echo "==> removing node_modules + build output"

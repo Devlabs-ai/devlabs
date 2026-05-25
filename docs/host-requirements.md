@@ -36,7 +36,7 @@ Challenges that include **Elasticsearch** or **OpenSearch** services will fail o
 max virtual memory areas vm.max_map_count [65530] is too low, increase to at least [262144]
 ```
 
-The build pipeline’s specialist handbook documents the same requirement for OpenSearch images (`backend/problems/seeds/imageCatalog.js`).
+The build pipeline’s catalogue handbook documents the same requirement for OpenSearch images (`backend/pipeline/catalogue/seeds/catalogue.js`).
 
 Challenges that use only Postgres, Redis, Kafka, nginx, etc. **do not** need this setting. We still document and apply it on deploy hosts so **any** catalog challenge can run without silent failures when someone picks a search-engine scenario.
 

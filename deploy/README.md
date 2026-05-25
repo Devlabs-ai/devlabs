@@ -144,8 +144,8 @@ cd frontend && npm ci && npm run build && cd ..
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 
-# Optional: seed specialists handbook (idempotent)
-docker compose -f docker-compose.prod.yml exec backend node scripts/seedMemory.js
+# Optional: seed catalogue handbook (insert-only when empty)
+docker compose -f docker-compose.prod.yml exec backend node scripts/seedCatalogue.js --if-empty
 ```
 
 Pin a specific backend build (optional):

@@ -19,13 +19,16 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
-const llm = require('../llm/client');
-const composeManager = require('../sandbox/composeManager');
-const portAllocator = require('../sandbox/portAllocator');
-const validationAgent = require('./validationAgentService');
-const specialistStore = require('./specialistStore');
-const lessonStore = require('./lessonStore');
-const { BUILDS_ROOT } = require('../sandbox/paths');
+const llm = require('../../llm/client');
+const composeManager = require('../../sandbox/composeManager');
+const portAllocator = require('../../sandbox/portAllocator');
+const validationAgent = require('./validationAgent');
+const lessonStore = require('../stores/lessonStore');
+const { normalizeDraft, isDraftReady } = require('../draft/draftSchema');
+// metricsObserver (OBSERVE phase) deferred to a future release — not run during build.
+const { emitLog } = require('../build/buildLogger');
+const { buildIterationChecklist } = require('../validation/validationChecklist');
+const { BUILDS_ROOT } = require('../../sandbox/paths');
 
 const MAX_ITERATIONS = 10;
 
@@ -92,40 +95,20 @@ HARD RULES:
    exactly \`./services/<service-name>\` (matching the on-disk layout the
    writer uses). NEVER \`./<service-name>\` or any other path — the runner
    will reject the build before docker even pulls images.
-9. For Docker image tags, env blocks, and service recipes, use specialistBrief
-   entries (dos, donts, conf) as the authoritative source. Apply every conf
-   block to compose environment or service files so containers pick them up
-   at startup. Never invent image tags or version numbers.
+9. Docker images, resource limits, and service names come from \`draft.infra.services\`
+   (materialized during Shape schema generation). Use those \`image_hint\` values
+   exactly in compose — do not substitute or re-query catalogue during build.
 
 The JSON inside <challenge_assets> must be strictly valid: no trailing commas,
 no comments, all newlines inside string values escaped as \\n.
 
-============================= SPECIALIST BRIEF =============================
-The user payload includes \`specialistBrief\` — static handbook rows for this
-draft's category/stacks. Shape:
+============================= DRAFT INFRA (LOCKED) =============================
+The user payload includes \`draft\` with \`infra.services[]\` already finalized:
 
-  {
-    "category": "...",
-    "matchedCategories": ["global", "postgres", ...],
-    "entries": [
-      {
-        "category": "postgres",
-        "stack": "postgres",
-        "title": "postgres:16-alpine",
-        "dos": ["..."],
-        "donts": ["NEVER use bitnami/..."],
-        "conf": {
-          "image": "postgres:16-alpine",
-          "composeFragment": { "environment": { "POSTGRES_USER": "postgres", ... } },
-          "inNetwork": { "host": "postgres", "port": 5432 }
-        }
-      }
-    ]
-  }
+  { "name": "orders-service", "image_hint": "python:3.11-alpine", "limits": {...}, "notes": "..." }
 
-Follow ALL dos/donts. Materialize EVERY conf block in docker-compose.yml or
-service files so containers load them at startup. specialistBrief is the
-authoritative source for images and env — never invent tags.
+Use every service name and \`image_hint\` from the draft. Align validationSpec.steps
+with \`draft.brokenState.validationSymptoms\` — steps must prove the broken symptoms.
 
 ============================= LEARNED LESSONS =============================
 On retry (when startFailureMsg or validateFailureMsg is set), the payload may
@@ -370,12 +353,8 @@ function sanitizeAssets(assets) {
 }
 
 function pickCategory(draft) {
-  return (
-    draft?.category
-    || draft?.sandboxSpec?.category
-    || draft?.sandboxSpec?.brief?.category
-    || null
-  );
+  const n = normalizeDraft(draft);
+  return n.meta?.category || n.category || n.sandboxSpec?.category || null;
 }
 
 // Snapshot a failed attempt for in-build history (recorded later inside a
@@ -393,6 +372,41 @@ function captureFailureSnapshot({ attempt, phase, lastAttempt }) {
   };
 }
 
+function emitIterationSummary(onEvent, {
+  attempt,
+  total,
+  failedPhase,
+  validation,
+  draft,
+  validationSpec,
+}) {
+  const checklist = buildIterationChecklist({
+    attempt,
+    total,
+    failedPhase,
+    validation,
+    draft,
+    validationSpec,
+  });
+  const phaseLines = checklist.phases.map((p) => {
+    const icon = p.status === 'pass' ? '✓' : p.status === 'fail' ? '✗' : '○';
+    return `${icon} ${p.label}`;
+  });
+  const checkLines = checklist.items.map((i) => {
+    const icon = i.status === 'pass' ? '✓' : i.status === 'fail' ? '✗' : i.status === 'skip' ? '–' : '○';
+    return `${icon} ${i.label}`;
+  });
+  emitLog(onEvent, {
+    level: checklist.passed ? 'ok' : (failedPhase ? 'warn' : 'info'),
+    tag: 'build',
+    message: checklist.passed
+      ? `Iteration ${attempt}/${total} — validation passed`
+      : `Iteration ${attempt}/${total} — ${failedPhase || 'pipeline'} did not complete`,
+    detail: [...phaseLines, ...(checkLines.length ? ['', 'Validation checklist:', ...checkLines] : [])].join('\n'),
+  });
+  onEvent({ type: 'checklist', checklist });
+}
+
 async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = null }) {
   if (!llm.isConfigured()) {
     const provider = llm.getProvider();
@@ -403,11 +417,26 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
     throw e;
   }
 
-  if (!draft || !draft.sandboxSpec) {
-    const e = new Error('draft is missing sandboxSpec; finish the chat phase first');
+  const normalized = normalizeDraft(draft);
+  if (!isDraftReady(normalized)) {
+    const e = new Error('draft is incomplete; need description, brokenState.rootCause, and infra.services');
     onEvent({ type: 'error', message: e.message });
     throw e;
   }
+
+  const serviceSummary = (normalized.infra?.services || [])
+    .map((s) => `${s.name} (${s.image_hint || 'no image'})`)
+    .join(', ');
+  emitLog(onEvent, {
+    level: 'phase',
+    tag: 'build',
+    message: `Starting build pipeline (max ${MAX_ITERATIONS} iterations)`,
+    detail: {
+      title: normalized.meta?.name || normalized.title,
+      services: serviceSummary,
+      rootCause: cap(normalized.brokenState?.rootCause, 200),
+    },
+  });
 
   fs.mkdirSync(BUILDS_ROOT, { recursive: true });
 
@@ -426,36 +455,31 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
     const retryHint = startFailureMsg
       ? 'START'
       : (validateFailureMsg ? 'VALIDATE' : (lastAttempt ? lastAttempt.phase : null));
-    onEvent({
-      type: 'log',
+    emitLog(onEvent, {
+      level: 'phase',
+      tag: 'build',
       message: retryHint
-        ? `[build] iteration ${attempt}/${MAX_ITERATIONS} — fixing previous ${retryHint} failure`
-        : `[build] iteration ${attempt}/${MAX_ITERATIONS}`,
+        ? `Iteration ${attempt}/${MAX_ITERATIONS} — retry after ${retryHint} failure`
+        : `Iteration ${attempt}/${MAX_ITERATIONS}`,
     });
 
     let assets;
     let rawText = null;
     try {
-      const specialistBrief = await specialistStore.buildBrief({ draft });
-      if (specialistBrief.entries.length) {
-        onEvent({
-          type: 'log',
-          message: `[specialists] injecting ${specialistBrief.entries.length} handbook entries (${specialistBrief.matchedCategories.join(', ')})`,
-        });
-      }
-
       let lessonsBlock = { relatedLessons: [] };
       if (startFailureMsg || validateFailureMsg) {
         lessonsBlock = await lessonStore.findForRetry({
-          draft,
+          draft: normalized,
           startFailureMsg,
           validateFailureMsg,
         });
         if (lessonsBlock.relatedLessons.length) {
           const best = lessonsBlock.relatedLessons[0];
-          onEvent({
-            type: 'log',
-            message: `[lessons] injecting ${lessonsBlock.relatedLessons.length} learned lesson(s) (top similarity ${best.similarity != null ? best.similarity.toFixed(2) : 'n/a'})`,
+          emitLog(onEvent, {
+            level: 'info',
+            tag: 'lessons',
+            message: `Injecting ${lessonsBlock.relatedLessons.length} learned lesson(s)`,
+            detail: `Top match similarity ${best.similarity != null ? best.similarity.toFixed(2) : 'n/a'}`,
           });
         }
       }
@@ -465,9 +489,15 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
         ? lastAttempt
         : null;
 
+      emitLog(onEvent, {
+        level: 'info',
+        tag: 'generate',
+        message: 'Calling build agent (draft infra is authoritative — no catalogue re-fetch)',
+        detail: summariseAssets(lastAssets) || { services: serviceSummary },
+      });
+
       const userPayload = JSON.stringify({
-        draft,
-        specialistBrief,
+        draft: normalized,
         lessonsBlock,
         challengeAssets: sanitizeAssets(lastAssets),
         startFailureMsg,
@@ -482,9 +512,14 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
       assets = extractAssets(rawText);
       if (!assets) throw new Error('LLM response did not contain <challenge_assets> JSON');
       lastAssets = assets;
-      onEvent({ type: 'log', message: `[generate] received ${JSON.stringify(summariseAssets(assets))}` });
+      emitLog(onEvent, {
+        level: 'ok',
+        tag: 'generate',
+        message: 'Received challenge assets',
+        detail: summariseAssets(assets),
+      });
     } catch (e) {
-      onEvent({ type: 'log', message: `[generate] failed: ${e.message}` });
+      emitLog(onEvent, { level: 'error', tag: 'generate', message: e.message });
       lastAttempt = {
         phase: 'GENERATE',
         message: e.message,
@@ -492,6 +527,14 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
         rawText,
         details: null,
       };
+      emitIterationSummary(onEvent, {
+        attempt,
+        total: MAX_ITERATIONS,
+        failedPhase: 'GENERATE',
+        validation: null,
+        draft: normalized,
+        validationSpec: lastAssets?.validationSpec,
+      });
       // eslint-disable-next-line no-continue
       continue;
     }
@@ -532,9 +575,14 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
         );
       }
       onEvent({ type: 'buildDir', buildDir });
-      onEvent({ type: 'log', message: `[write] laid down ${buildDir}` });
+      emitLog(onEvent, {
+        level: 'ok',
+        tag: 'write',
+        message: 'Wrote build artifacts',
+        detail: buildDir,
+      });
     } catch (e) {
-      onEvent({ type: 'log', message: `[write] failed: ${e.message}` });
+      emitLog(onEvent, { level: 'error', tag: 'write', message: e.message });
       lastAttempt = {
         phase: 'WRITE',
         message: e.message,
@@ -542,22 +590,36 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
         rawText: null,
         details: null,
       };
+      emitIterationSummary(onEvent, {
+        attempt,
+        total: MAX_ITERATIONS,
+        failedPhase: 'WRITE',
+        validation: null,
+        draft: normalized,
+        validationSpec: assets?.validationSpec,
+      });
       // eslint-disable-next-line no-continue
       continue;
     }
 
     onEvent({ type: 'phase', phase: 'START', attempt, total: MAX_ITERATIONS });
-    const buildCategory = draft?.category || draft?.sandboxSpec?.category || null;
+    const buildCategory = normalized.meta?.category || normalized.category || null;
     let portMap;
     try {
       const { content: composeYaml } = composeManager.readComposeFile(buildDir);
       portMap = await composeManager.resolvePortMap(
         buildDir, composeYaml, buildSessionId, { pool: 'build' },
       );
-      onEvent({ type: 'log', message: `[start] allocated ports ${JSON.stringify(portMap)}` });
+      emitLog(onEvent, {
+        level: 'info',
+        tag: 'start',
+        message: 'Allocated host ports',
+        detail: portMap,
+      });
+      emitLog(onEvent, { level: 'info', tag: 'start', message: 'Running docker compose up…' });
       await composeManager.up(buildDir, portMap);
       await composeManager.waitForServices(buildDir, portMap, 90_000);
-      onEvent({ type: 'log', message: '[start] all services reported running' });
+      emitLog(onEvent, { level: 'ok', tag: 'start', message: 'All services reported running' });
 
       startFailureMsg = null;
       if (startFailureHistory.length > 0) {
@@ -566,15 +628,17 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
           draftSessionId,
           buildSessionId,
           category: buildCategory,
-          title: draft?.title || assets?.title,
-          draft,
+          title: normalized.meta?.name || normalized.title || assets?.title,
+          draft: normalized,
           failures: [...startFailureHistory],
           assets,
         });
         if (lessonId) {
-          onEvent({
-            type: 'log',
-            message: `[lessons] recorded START lesson id=${lessonId} (${startFailureHistory.length} prior failure(s))`,
+          emitLog(onEvent, {
+            level: 'info',
+            tag: 'lessons',
+            message: `Recorded START lesson #${lessonId}`,
+            detail: `${startFailureHistory.length} prior failure(s) before this success`,
           });
         }
         startFailureHistory.length = 0;
@@ -587,17 +651,30 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
       const cleanMsg = composeManager.stripDockerNoise(e.message || '');
       const cleanStderr = composeManager.stripDockerNoise(e.stderr || '');
       const cleanStdout = composeManager.stripDockerNoise(e.stdout || '');
-      onEvent({ type: 'log', message: `[start] failed: ${cap(cleanMsg, 1500)}` });
-      if (cleanStderr) onEvent({ type: 'log', message: `[start] stderr:\n${cap(cleanStderr, 1500)}` });
-      // Pull recent container logs BEFORE teardown so the LLM has real
-      // evidence (compose errors usually say "container exited" — the
-      // actual stack trace lives in the service's stdout).
+      emitLog(onEvent, {
+        level: 'error',
+        tag: 'start',
+        message: 'Compose start failed',
+        detail: cap(cleanMsg, 1500),
+      });
+      if (cleanStderr) {
+        emitLog(onEvent, {
+          level: 'detail',
+          tag: 'start',
+          message: 'Compose stderr',
+          detail: cap(cleanStderr, 1500),
+        });
+      }
       const rawLogs = await captureComposeLogs(buildDir, portMap).catch(() => null);
       const logs = rawLogs ? composeManager.stripDockerNoise(rawLogs) : null;
       if (logs) {
         const head = logs.split('\n').slice(0, 40).join('\n');
-        onEvent({ type: 'log', message: `[start] container logs (head):\n${head}` });
-        onEvent({ type: 'log', message: `[start] captured ${logs.length} bytes for retry context` });
+        emitLog(onEvent, {
+          level: 'detail',
+          tag: 'start',
+          message: `Container logs (${logs.length} bytes captured)`,
+          detail: head,
+        });
       }
       await composeManager.down(buildDir).catch(() => {});
       await portAllocator.releaseIn('build', buildSessionId).catch(() => {});
@@ -620,6 +697,14 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
       };
       const snap = captureFailureSnapshot({ attempt, phase: 'START', lastAttempt });
       if (snap) startFailureHistory.push(snap);
+      emitIterationSummary(onEvent, {
+        attempt,
+        total: MAX_ITERATIONS,
+        failedPhase: 'START',
+        validation: null,
+        draft: normalized,
+        validationSpec: assets?.validationSpec,
+      });
       // eslint-disable-next-line no-continue
       continue;
     }
@@ -630,13 +715,22 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
       validation = await validationAgent.validate({
         buildDir,
         portMap,
-        sandboxSpec: draft.sandboxSpec,
+        sandboxSpec: normalized.sandboxSpec,
+        draft: normalized,
         validationSpec: assets.validationSpec,
-        onLog: (m) => onEvent({ type: 'log', message: m }),
+        onLog: (payload) => {
+          if (typeof payload === 'string') {
+            emitLog(onEvent, { level: 'info', tag: 'validate', message: payload });
+          } else if (payload?.type) {
+            onEvent(payload);
+          } else {
+            emitLog(onEvent, { tag: 'validate', ...payload });
+          }
+        },
       });
       onEvent({ type: 'validation', result: validation });
     } catch (e) {
-      onEvent({ type: 'log', message: `[validate] failed: ${e.message}` });
+      emitLog(onEvent, { level: 'error', tag: 'validate', message: e.message });
       await composeManager.down(buildDir).catch(() => {});
       await portAllocator.releaseIn('build', buildSessionId).catch(() => {});
       lastAttempt = {
@@ -648,9 +742,26 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
       };
       const snap = captureFailureSnapshot({ attempt, phase: 'VALIDATE', lastAttempt });
       if (snap) validateFailureHistory.push(snap);
+      emitIterationSummary(onEvent, {
+        attempt,
+        total: MAX_ITERATIONS,
+        failedPhase: 'VALIDATE',
+        validation: { passed: false, feedback: e.message, evidence: [], checklist: [] },
+        draft: normalized,
+        validationSpec: assets?.validationSpec,
+      });
       // eslint-disable-next-line no-continue
       continue;
     }
+
+    emitIterationSummary(onEvent, {
+      attempt,
+      total: MAX_ITERATIONS,
+      failedPhase: validation.passed ? null : 'VALIDATE',
+      validation,
+      draft: normalized,
+      validationSpec: assets?.validationSpec,
+    });
 
     if (validation.passed) {
       const built = {
@@ -676,20 +787,27 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
           draftSessionId,
           buildSessionId,
           category: buildCategory,
-          title: draft?.title || assets?.title,
-          draft,
+          title: normalized.meta?.name || normalized.title || assets?.title,
+          draft: normalized,
           failures: [...validateFailureHistory],
           assets,
           validationFeedback: validation.feedback,
         });
         if (lessonId) {
-          onEvent({
-            type: 'log',
-            message: `[lessons] recorded VALIDATE lesson id=${lessonId} (${validateFailureHistory.length} prior failure(s))`,
+          emitLog(onEvent, {
+            level: 'info',
+            tag: 'lessons',
+            message: `Recorded VALIDATE lesson #${lessonId}`,
+            detail: `${validateFailureHistory.length} prior failure(s) before this success`,
           });
         }
         validateFailureHistory.length = 0;
       }
+
+      built.metrics = normalized.metrics;
+      built.description = normalized.description;
+      built.arch = normalized.arch;
+      built.meta = normalized.meta;
 
       onEvent({
         type: 'done',
@@ -704,13 +822,13 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
         buildDir,
         builtChallenge: built,
         buildValidation: validation,
+        draft: normalized,
         portMap,
         terminalService,
         attempts: attempt,
       };
     }
 
-    onEvent({ type: 'log', message: `[validate] judged FAIL: ${validation.feedback}` });
     await composeManager.down(buildDir).catch(() => {});
     await portAllocator.releaseIn('build', buildSessionId).catch(() => {});
     validateFailureMsg = {
