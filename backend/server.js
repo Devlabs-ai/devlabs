@@ -8,9 +8,9 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 
 const { runMigrations } = require('./db/migrate');
-const { seedCatalogIfEmpty } = require('./problems/seeds/runCatalogSeed');
+const { seedCatalogueIfEmpty } = require('./pipeline/catalogue/seeds/runCatalogueSeed');
 const sessionStore = require('./db/sessionStore');
-const draftStore = require('./problems/problemDraftStore');
+const draftStore = require('./pipeline/stores/problemDraftStore');
 const { loadChallengesFromDB, seedChallengesFromDisk } = require('./challenges/loader');
 const { VERIFIED_ROOT } = require('./sandbox/paths');
 
@@ -83,8 +83,8 @@ async function start() {
   console.log('[boot] running migrations...');
   await runMigrations();
 
-  const seeded = await seedCatalogIfEmpty({ onLog: (msg) => console.log(`[boot] ${msg}`) });
-  if (seeded > 0) console.log(`[boot] specialists seeded ${seeded} catalog entries`);
+  const catalogueSeeded = await seedCatalogueIfEmpty({ onLog: (msg) => console.log(`[boot] ${msg}`) });
+  if (catalogueSeeded > 0) console.log(`[boot] catalogue seeded ${catalogueSeeded} entries`);
 
   console.log('[boot] restoring active sessions from db...');
   await sessionStore.restoreFromDB();

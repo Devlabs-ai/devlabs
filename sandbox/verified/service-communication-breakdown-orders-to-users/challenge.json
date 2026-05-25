@@ -4,6 +4,7 @@
   "description": "The orders service is having trouble reaching the user service. Can you identify and fix the misconfiguration?",
   "difficulty": "Easy",
   "category": "Networking",
+  "bucket": "software-engineer",
   "tags": [
     "microservices",
     "networking",

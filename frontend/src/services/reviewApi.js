@@ -11,10 +11,10 @@ export async function getReview(sessionId) {
   return data.review;
 }
 
-export async function pushReview(sessionId) {
+export async function pushReview(sessionId, { bucket } = {}) {
   const { data } = await axios.post(
     `/api/reviews/${sessionId}/push`,
-    {},
+    { bucket },
     { headers: getAuthHeader() },
   );
   return data;

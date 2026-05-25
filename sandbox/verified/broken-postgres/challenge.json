@@ -5,6 +5,7 @@
   "difficulty": "Easy",
   "tags": ["postgres", "indexing", "performance"],
   "category": "Database",
+  "bucket": "data-engineer",
   "finalized": true,
   "sandboxType": "postgres",
   "problemStatement": {

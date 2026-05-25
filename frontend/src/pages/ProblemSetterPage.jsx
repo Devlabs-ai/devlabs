@@ -1,5 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { streamChat } from '../services/problemApi.js';
+import { DesignValidationChecklist } from '../components/ValidationChecklist.jsx';
+import {
+  streamChat,
+  approveDescription,
+  reviseDescription,
+  generateSchema,
+} from '../services/problemApi.js';
 
 function Empty({ onImport }) {
   const [text, setText] = useState('');
@@ -14,17 +20,17 @@ function Empty({ onImport }) {
       {showImport ? (
         <div className="import-box">
           <textarea
-            placeholder='{ "title": "...", "sandboxSpec": { ... } }'
+            placeholder='{ "schemaVersion": 1, "meta": { ... }, "description": "...", ... }'
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
           <div className="actions">
-            <button className="ghost" onClick={() => setShowImport(false)}>Cancel</button>
-            <button onClick={() => onImport(text)} disabled={!text.trim()}>Import draft</button>
+            <button type="button" className="ghost" onClick={() => setShowImport(false)}>Cancel</button>
+            <button type="button" onClick={() => onImport(text)} disabled={!text.trim()}>Import draft</button>
           </div>
         </div>
       ) : (
-        <button className="ghost" onClick={() => setShowImport(true)}>Import draft JSON…</button>
+        <button type="button" className="ghost" onClick={() => setShowImport(true)}>Import draft JSON…</button>
       )}
     </div>
   );
@@ -39,48 +45,203 @@ function ChatBubble({ role, content }) {
   );
 }
 
-function DraftPreview({ draft }) {
-  if (!draft) {
+function isDraftBuildReadyLocal(d) {
+  if (!d?.description?.trim()) return false;
+  if (!d?.brokenState?.rootCause?.trim()) return false;
+  const services = d?.infra?.services || [];
+  if (!services.length) return false;
+  return services.every((s) => {
+    const svc = typeof s === 'string' ? { name: s } : s;
+    return !!svc?.image_hint?.trim();
+  });
+}
+
+function isShapeContractCompleteLocal(d) {
+  if (!d) return false;
+  if (!d.description?.trim()) return false;
+  const cats = (d.meta?.catalogueCategories || []).filter((c) => c !== 'global');
+  if (!cats.length) return false;
+  if (!d.meta?.name?.trim()) return false;
+  if (!d.meta?.category?.trim()) return false;
+  if (!d.meta?.difficulty?.trim()) return false;
+  if (!d.arch?.trim()) return false;
+  if (!d.brokenState?.rootCause?.trim()) return false;
+  if (!(d.brokenState?.validationSymptoms?.length)) return false;
+  if (!(d.infra?.services?.length)) return false;
+  return true;
+}
+
+function shapeContractMissingLocal(d) {
+  const missing = [];
+  if (!d?.description?.trim()) missing.push('description');
+  const cats = (d?.meta?.catalogueCategories || []).filter((c) => c !== 'global');
+  if (!cats.length) missing.push('meta.catalogueCategories');
+  if (!d?.meta?.name?.trim()) missing.push('meta.name');
+  if (!d?.meta?.category?.trim()) missing.push('meta.category');
+  if (!d?.meta?.difficulty?.trim()) missing.push('meta.difficulty');
+  if (!d?.arch?.trim()) missing.push('arch');
+  if (!d?.brokenState?.rootCause?.trim()) missing.push('brokenState.rootCause');
+  if (!(d?.brokenState?.validationSymptoms?.length)) missing.push('brokenState.validationSymptoms');
+  if (!(d?.infra?.services?.length)) missing.push('infra.services');
+  return missing;
+}
+
+function PhaseBadge({ shapePhase, descriptionApproved, draftReady, schemaMaterialized }) {
+  const labels = {
+    description: 'Phase 1 — Design contract',
+    schema: schemaMaterialized && draftReady
+      ? 'Ready to build'
+      : schemaMaterialized
+        ? 'Phase 2 — Schema generated'
+        : 'Phase 2 — Generate schema',
+    ready: 'Ready to build',
+  };
+  return (
+    <span className={`pill shape-phase ${shapePhase}`}>
+      {labels[shapePhase] || shapePhase}
+    </span>
+  );
+}
+
+function DescriptionPanel({ draft, shapePhase, descriptionApproved, shapeContractMissing }) {
+  const description = draft?.description?.trim();
+  const rootCause = draft?.brokenState?.rootCause?.trim();
+  const meta = draft?.meta || {};
+  const catalogueCategories = (meta.catalogueCategories || []).filter((c) => c !== 'global');
+  const services = (draft?.infra?.services || []).map((s) => (typeof s === 'string' ? s : s.name)).filter(Boolean);
+  const symptoms = draft?.brokenState?.validationSymptoms || [];
+  const arch = draft?.arch?.trim();
+  const metricsGuidance = draft?.metrics?.display?.guidance?.trim();
+  const missing = shapeContractMissing || [];
+
+  if (!description) {
     return (
       <div className="draft-preview-empty">
-        No draft yet. The agent will populate this as soon as you describe a concrete brokenState.
+        No design contract yet. Describe the incident in chat; the agent will emit a full
+        {' '}<code>&lt;shape_contract&gt;</code> JSON block when ready.
       </div>
     );
   }
+
+  const metaRows = [
+    meta.category && { label: 'Primary category', value: meta.category },
+    meta.difficulty && { label: 'Difficulty', value: meta.difficulty },
+    services.length > 0 && { label: 'Services', value: services.join(', ') },
+  ].filter(Boolean);
+
+  return (
+    <div className="description-panel">
+      {meta.name && <h3 className="contract-title">{meta.name}</h3>}
+
+      {catalogueCategories.length > 0 && (
+        <div className="contract-pills">
+          <span className="contract-pills-label">Catalogue</span>
+          {catalogueCategories.map((cat) => (
+            <span key={cat} className="contract-pill">{cat}</span>
+          ))}
+        </div>
+      )}
+
+      {metaRows.length > 0 && (
+        <dl className="contract-meta-grid">
+          {metaRows.map(({ label, value }) => (
+            <div key={label} className="contract-meta-row">
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
+      <section className="contract-section">
+        <h4 className="contract-section-title">Candidate story</h4>
+        <div className="description-body">{description}</div>
+      </section>
+
+      {arch && (
+        <section className="contract-section">
+          <h4 className="contract-section-title">Architecture</h4>
+          <p className="contract-prose">{arch}</p>
+        </section>
+      )}
+
+      {symptoms.length > 0 && (
+        <section className="contract-section">
+          <h4 className="contract-section-title">Validation intent</h4>
+          <ol className="contract-list">
+            {symptoms.map((s) => (
+              <li key={s.order || s.check}>{s.check}</li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {metricsGuidance && (
+        <section className="contract-section">
+          <h4 className="contract-section-title">Metrics intent</h4>
+          <p className="contract-prose">{metricsGuidance}</p>
+        </section>
+      )}
+
+      {rootCause && (
+        <details className="contract-details setter-only">
+          <summary>Root cause (setter-only)</summary>
+          <p className="contract-prose">{rootCause}</p>
+        </details>
+      )}
+
+      {missing.length > 0 && shapePhase === 'description' && !descriptionApproved && (
+        <p className="contract-footnote warn">
+          Still needed before approve: <strong>{missing.join(', ')}</strong>
+        </p>
+      )}
+      {shapePhase === 'description' && !descriptionApproved && missing.length === 0 && (
+        <p className="contract-footnote">
+          Design contract complete. Keep chatting to refine, or click <strong>Approve description</strong> when ready.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function SchemaPreview({ draft }) {
+  if (!draft?.infra?.services?.length) {
+    return (
+      <div className="draft-preview-empty">
+        Schema not generated yet. Approve the description, then run <strong>Generate schema</strong>.
+      </div>
+    );
+  }
+  const meta = draft.meta || {};
+  const title = meta.name || draft.title || '—';
+  const services = (draft.infra?.services || [])
+    .map((s) => (typeof s === 'string' ? s : `${s.name} (${s.image_hint || '?'})`))
+    .filter(Boolean);
+  const observeCount = draft.metrics?.observe?.length || 0;
+
   return (
     <div className="draft-preview">
       <div className="row">
         <span className="label">Title</span>
-        <span className="value">{draft.title || '—'}</span>
-      </div>
-      <div className="row">
-        <span className="label">Difficulty</span>
-        <span className="value">{draft.difficulty || '—'}</span>
+        <span className="value">{title}</span>
       </div>
       <div className="row">
         <span className="label">Category</span>
-        <span className="value">{draft.category || '—'}</span>
+        <span className="value">{meta.category || '—'}</span>
       </div>
       <div className="row">
-        <span className="label">Tags</span>
-        <span className="value">{(draft.tags || []).join(', ') || '—'}</span>
+        <span className="label">Services (catalogue)</span>
+        <span className="value">{services.join(', ') || '—'}</span>
+      </div>
+      <div className="row">
+        <span className="label">Observables</span>
+        <span className="value">{observeCount || '—'}</span>
       </div>
       <div className="row col">
-        <span className="label">Incident</span>
-        <span className="value">{draft.problemStatement?.incident || '—'}</span>
+        <span className="label">Root cause</span>
+        <span className="value">{draft.brokenState?.rootCause || '—'}</span>
       </div>
-      <div className="row col">
-        <span className="label">Broken state</span>
-        <span className="value">{draft.sandboxSpec?.brokenState || '—'}</span>
-      </div>
-      <div className="row col">
-        <span className="label">Validation approach</span>
-        <span className="value">{draft.sandboxSpec?.validationApproach || '—'}</span>
-      </div>
-      <div className="row col">
-        <span className="label">Services</span>
-        <span className="value">{(draft.sandboxSpec?.services || []).join(' · ') || '—'}</span>
-      </div>
+      <DesignValidationChecklist draft={draft} />
       <details className="json-toggle">
         <summary>Full JSON</summary>
         <pre>{JSON.stringify(draft, null, 2)}</pre>
@@ -90,7 +251,7 @@ function DraftPreview({ draft }) {
 }
 
 export default function ProblemSetterPage({
-  draft, llmConfig, onDraftChanged, onImportDraft, onDeleteDraft, onGoPipeline,
+  draft, llmConfig, onDraftChanged, onImportDraft, onDeleteDraft, onGoPipeline, onRefreshSession,
 }) {
   const [input, setInput] = useState('');
   const [streamingText, setStreamingText] = useState('');
@@ -98,6 +259,33 @@ export default function ProblemSetterPage({
   const [err, setErr] = useState(null);
   const scrollRef = useRef(null);
   const abortRef = useRef(null);
+
+  const shapePhase = draft?.shapePhase || 'description';
+  const descriptionApproved = !!draft?.descriptionApproved;
+  const schemaMaterialized = !!draft?.schemaMaterialized;
+  const draftReady = !!draft?.draftReady || isDraftBuildReadyLocal(draft?.draft);
+  const llmReady = !!llmConfig?.llmConfigured;
+  const canChat = shapePhase === 'description' && !descriptionApproved;
+  const shapeContractComplete = draft?.shapeContractComplete
+    ?? isShapeContractCompleteLocal(draft?.draft);
+  const shapeContractMissing = (draft?.shapeContractMissing?.length
+    && draft?.shapeContractComplete === false
+    && !isShapeContractCompleteLocal(draft?.draft))
+    ? draft.shapeContractMissing
+    : shapeContractMissingLocal(draft?.draft);
+  const canApprove = canChat && shapeContractComplete;
+  const canGenerateSchema = descriptionApproved
+    && shapePhase === 'schema'
+    && !schemaMaterialized
+    && !draftReady
+    && llmReady;
+  const canRevise = descriptionApproved && !schemaMaterialized && !draftReady;
+  const canGoBuild = draftReady && (schemaMaterialized || isDraftBuildReadyLocal(draft?.draft));
+  const schemaIncomplete = schemaMaterialized && !draftReady && !isDraftBuildReadyLocal(draft?.draft);
+  const showSchema = schemaMaterialized || draftReady || shapePhase === 'ready'
+    || (descriptionApproved && (draft?.draft?.infra?.services || []).some(
+      (s) => typeof s === 'object' && s.image_hint,
+    ));
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -109,18 +297,14 @@ export default function ProblemSetterPage({
     return <Empty onImport={onImportDraft} />;
   }
 
-  const llmReady = !!llmConfig?.llmConfigured;
-  const hasSandboxSpec = !!draft.draft?.sandboxSpec;
-
   const send = async () => {
-    if (!input.trim() || busy || !llmReady) return;
+    if (!input.trim() || busy || !llmReady || !canChat) return;
     const msg = input.trim();
     setInput('');
     setBusy(true);
     setErr(null);
     setStreamingText('');
 
-    // optimistically append the user's message
     const optimistic = {
       ...draft,
       messages: [...(draft.messages || []), { role: 'user', content: msg }],
@@ -131,25 +315,59 @@ export default function ProblemSetterPage({
     abortRef.current = controller;
 
     let assistantText = '';
-    let nextDraft = optimistic.draft;
+    let partial = optimistic.draft || {};
     try {
       await streamChat(draft.id, msg, (ev) => {
         if (ev.type === 'text') {
           assistantText += ev.delta;
           setStreamingText(assistantText);
-        } else if (ev.type === 'draft') {
-          nextDraft = ev.draft;
+        } else if (ev.type === 'description') {
+          const ex = ev.extracted || {};
+          partial = {
+            ...partial,
+            description: ex.description,
+            arch: ex.arch || partial.arch,
+            meta: {
+              ...(partial.meta || {}),
+              ...(ex.meta || {}),
+              ...(ex.catalogueCategories?.length
+                ? { catalogueCategories: ex.catalogueCategories }
+                : {}),
+            },
+            infra: ex.infra?.services?.length
+              ? { ...(partial.infra || {}), services: ex.infra.services }
+              : partial.infra,
+            brokenState: ex.brokenState
+              ? { ...(partial.brokenState || {}), ...ex.brokenState }
+              : partial.brokenState,
+            metrics: ex.metricsIntent
+              ? {
+                ...(partial.metrics || {}),
+                enabled: ex.metricsIntent.enabled ?? partial.metrics?.enabled,
+                display: {
+                  ...(partial.metrics?.display || {}),
+                  ...(ex.metricsIntent.guidance
+                    ? { guidance: ex.metricsIntent.guidance }
+                    : {}),
+                },
+              }
+              : partial.metrics,
+          };
+        } else if (ev.type === 'shape') {
+          // Applied after stream via onRefreshSession
         } else if (ev.type === 'error') {
           setErr(ev.message);
         }
       }, { signal: controller.signal });
 
-      const finalDraft = {
+      onDraftChanged({
         ...optimistic,
         messages: [...optimistic.messages, { role: 'assistant', content: assistantText }],
-        draft: nextDraft || optimistic.draft,
-      };
-      onDraftChanged(finalDraft);
+        draft: partial,
+        shapeContractComplete: isShapeContractCompleteLocal(partial),
+        shapeContractMissing: shapeContractMissingLocal(partial),
+      });
+      if (onRefreshSession) await onRefreshSession();
       setStreamingText('');
     } catch (e) {
       if (e.name !== 'AbortError') setErr(e.message);
@@ -159,7 +377,85 @@ export default function ProblemSetterPage({
     }
   };
 
-  const buildDisabled = busy || !hasSandboxSpec || !llmReady;
+  const handleApprove = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const { draft: updated } = await approveDescription(draft.id);
+      if (onRefreshSession) await onRefreshSession();
+      else onDraftChanged(updated);
+    } catch (e) {
+      setErr(e?.response?.data?.error
+        || (e?.response?.data?.missing?.length
+          ? `${e.response.data.error}: ${e.response.data.missing.join(', ')}`
+          : null)
+        || e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRevise = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const { draft: updated } = await reviseDescription(draft.id);
+      if (onRefreshSession) await onRefreshSession();
+      else onDraftChanged(updated);
+    } catch (e) {
+      setErr(e?.response?.data?.error || e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleGenerateSchema = async () => {
+    setBusy(true);
+    setErr(null);
+    setStreamingText('');
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    let assistantText = '';
+    let sessionPatch = draft;
+    try {
+      await generateSchema(draft.id, (ev) => {
+        if (ev.type === 'text') {
+          assistantText += ev.delta;
+          setStreamingText(assistantText);
+        } else if (ev.type === 'error') {
+          setErr(ev.message);
+        } else if (ev.type === 'draft' && onDraftChanged) {
+          sessionPatch = {
+            ...sessionPatch,
+            draft: ev.draft,
+            schemaMaterialized: true,
+          };
+          onDraftChanged(sessionPatch);
+        } else if (ev.type === 'shape' && onDraftChanged) {
+          sessionPatch = {
+            ...sessionPatch,
+            shapePhase: ev.shapePhase,
+            draftReady: ev.draftReady,
+            schemaMaterialized: true,
+          };
+          onDraftChanged(sessionPatch);
+        }
+      }, { signal: controller.signal });
+
+      if (onRefreshSession) {
+        await onRefreshSession();
+      }
+      setStreamingText('');
+    } catch (e) {
+      if (e.name !== 'AbortError') setErr(e.message);
+    } finally {
+      setBusy(false);
+      abortRef.current = null;
+    }
+  };
+
+  const buildDisabled = busy || !draftReady || !llmReady;
 
   return (
     <div className="setter-grid">
@@ -167,18 +463,24 @@ export default function ProblemSetterPage({
         <div className="panel-header">
           <div className="title">
             <span className="logo-dot" />
-            {draft.draft?.title || 'New draft'}
+            {draft.draft?.meta?.name || draft.draft?.title || 'New draft'}
+            <PhaseBadge
+              shapePhase={shapePhase}
+              descriptionApproved={descriptionApproved}
+              draftReady={draftReady}
+              schemaMaterialized={schemaMaterialized}
+            />
           </div>
-          <button className="ghost danger sm" onClick={() => onDeleteDraft(draft.id)}>
+          <button type="button" className="ghost danger sm" onClick={() => onDeleteDraft(draft.id)}>
             Delete draft
           </button>
         </div>
         <div className="chat-scroll" ref={scrollRef}>
           {(draft.messages || []).length === 0 && (
             <div className="chat-intro">
-              Describe the scenario you want to test. Mention the services involved
-              and what should be broken (e.g. <em>"a Postgres orders table is missing
-              an index, so /orders/&lt;user_id&gt; lookups take 300–600ms"</em>).
+              <strong>Phase 1:</strong> Define the full design contract — story, catalogue rows, architecture,
+              service names, root cause, and validation intent. The agent emits{' '}
+              <code>&lt;shape_contract&gt;</code> JSON when ready.
             </div>
           )}
           {(draft.messages || []).map((m, i) => (
@@ -189,8 +491,18 @@ export default function ProblemSetterPage({
         {err && <div className="alert" style={{ margin: '0 14px 12px' }}>{err}</div>}
         <div className="chat-input">
           <textarea
-            placeholder={llmReady ? 'Describe the broken state…' : 'Set ANTHROPIC_API_KEY in backend/.env to enable chat'}
-            disabled={!llmReady || busy}
+            placeholder={
+              !llmReady
+                ? 'Set API key in backend/.env'
+                : canChat
+                  ? 'Ask follow-ups or refine the design contract…'
+                  : canGoBuild
+                    ? 'Schema ready — click Build → Pipeline in the panel above →'
+                    : schemaMaterialized
+                      ? 'Schema generated — review the panel or regenerate if needed →'
+                      : 'Description locked — use Edit contract or Generate schema →'
+            }
+            disabled={!llmReady || busy || !canChat}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -203,8 +515,8 @@ export default function ProblemSetterPage({
           />
           <div className="chat-actions">
             <span className="hint">⌘/Ctrl + Enter to send</span>
-            <button onClick={send} disabled={!llmReady || busy || !input.trim()}>
-              {busy ? 'Streaming…' : 'Send'}
+            <button type="button" onClick={send} disabled={!llmReady || busy || !canChat || !input.trim()}>
+              {busy && canChat ? 'Streaming…' : 'Send'}
             </button>
           </div>
         </div>
@@ -212,18 +524,50 @@ export default function ProblemSetterPage({
 
       <section className="draft-col panel">
         <div className="panel-header">
-          <div className="title">Draft preview</div>
-          <button
-            className="primary sm"
-            disabled={buildDisabled}
-            onClick={onGoPipeline}
-            title={!hasSandboxSpec ? 'Sketch a sandboxSpec first' : !llmReady ? 'LLM not configured' : 'Open the pipeline tab to start a build'}
-          >
-            Build → Pipeline
-          </button>
+          <div className="title">{showSchema ? 'Schema preview' : 'Problem statement'}</div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {canApprove && (
+              <button type="button" className="sm" disabled={busy} onClick={handleApprove}>
+                Approve description
+              </button>
+            )}
+            {canRevise && (
+              <button type="button" className="ghost sm" disabled={busy} onClick={handleRevise}>
+                Edit contract
+              </button>
+            )}
+            {canGenerateSchema && (
+              <button type="button" className="sm" disabled={busy} onClick={handleGenerateSchema}>
+                {busy ? 'Generating…' : 'Generate schema'}
+              </button>
+            )}
+            {canGoBuild && (
+              <button
+                type="button"
+                className="primary sm"
+                disabled={buildDisabled}
+                onClick={onGoPipeline}
+                title="Open build pipeline"
+              >
+                Build → Pipeline
+              </button>
+            )}
+            {schemaIncomplete && (
+              <span className="pill warn sm">Schema incomplete — regenerate or edit contract</span>
+            )}
+          </div>
         </div>
         <div className="panel-body" style={{ overflow: 'auto' }}>
-          <DraftPreview draft={draft.draft} />
+          {showSchema ? (
+            <SchemaPreview draft={draft.draft} />
+          ) : (
+            <DescriptionPanel
+              draft={draft.draft}
+              shapePhase={shapePhase}
+              descriptionApproved={descriptionApproved}
+              shapeContractMissing={shapeContractMissing}
+            />
+          )}
         </div>
       </section>
     </div>

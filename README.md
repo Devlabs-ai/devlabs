@@ -28,7 +28,7 @@ npm run dev
 
 On startup the backend runs idempotent Postgres migrations, restores any in-flight sessions from the database, and seeds the `challenges` table from every `sandbox/verified/<slug>/challenge.json` it finds.
 
-On first boot when the `specialists` table is empty, the backend auto-seeds handbook rows from `backend/problems/seeds/imageCatalog.js` (~34 curated Docker recipes: Postgres, Kafka, Nginx, etc.). The build pipeline injects matching specialists (dos, donts, conf) on every GENERATE pass. Learned fixes are stored in `lessons` (requires `OPENAI_API_KEY` for embeddings) after a START or VALIDATE phase succeeds following prior failures in that build. Run `make seed-memory` manually; re-runs are idempotent. Use `make seed-memory-force` to refresh after editing the catalog.
+On first boot when the `catalogue` table is empty, the backend auto-seeds handbook rows from `backend/pipeline/catalogue/seeds/catalogue.js` (~30 curated Docker recipes: Postgres, Kafka, Nginx, etc.). The build pipeline injects matching `catalogueBrief` entries (dos, donts, conf) on every GENERATE pass. Learned fixes are stored in `lessons` (requires `OPENAI_API_KEY` for embeddings) after a START or VALIDATE phase succeeds following prior failures in that build. Run `make seed-catalogue-if-empty` manually; seeding is insert-only and never overwrites existing rows.
 
 ### 3. Frontend (port 5173)
 
@@ -74,6 +74,6 @@ sandbox/      Per-challenge Docker compose bundles
 
 ## Excluded From This MVP
 
-- AI-driven Problem Setter and build pipeline (`routes/problems.js`, `routes/reviews.js`, `problems/*`).
+- AI-driven Problem Setter and build pipeline (`routes/problems.js`, `routes/reviews.js`, `pipeline/*`).
 - Frontend pages: `ProblemSetterPage`, `PipelinePage`, `ReviewPage`.
 - Legacy `dockerode`-based sandbox path. All challenges must ship a `verifiedDir`.

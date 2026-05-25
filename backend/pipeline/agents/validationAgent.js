@@ -15,8 +15,15 @@
 // prove the sandbox actually reproduces it? Returns `{ passed, feedback,
 // suggestions }`.
 
-const composeManager = require('../sandbox/composeManager');
-const llm = require('../llm/client');
+const composeManager = require('../../sandbox/composeManager');
+const llm = require('../../llm/client');
+const { evaluateCheck } = require('../validation/validationChecks');
+const { normalizeDraft } = require('../draft/draftSchema');
+const { emitLog } = require('../build/buildLogger');
+const {
+  buildValidationChecklist,
+  applyValidationResults,
+} = require('../validation/validationChecklist');
 
 const SYSTEM_PROMPT = `You are the Build Validation Judge for a Docker-based
 interview platform. You will receive:
@@ -77,15 +84,16 @@ async function runStep(buildDir, portMap, step) {
     out.stdout = e.stdout || '';
   }
 
-  // simple synchronous `check` evaluator
   if (out.ok && step.check) {
-    if (step.check.contains && !`${out.stdout}\n${out.stderr}`.includes(step.check.contains)) {
+    const verdict = evaluateCheck({
+      stdout: out.stdout,
+      stderr: out.stderr,
+      statusCode: out.statusCode,
+      httpOk: out.ok,
+    }, step.check);
+    if (!verdict.ok) {
       out.ok = false;
-      out.error = `expected output to contain "${step.check.contains}"`;
-    }
-    if (step.check.statusOk && (!out.statusCode || out.statusCode >= 400)) {
-      out.ok = false;
-      out.error = `expected HTTP 2xx/3xx, got ${out.statusCode}`;
+      out.error = verdict.error;
     }
   }
 
@@ -102,25 +110,58 @@ function extractResult(text) {
   }
 }
 
-async function validate({ buildDir, portMap, sandboxSpec, validationSpec, onLog }) {
-  const log = (msg) => { if (onLog) onLog(msg); };
+async function validate({ buildDir, portMap, sandboxSpec, draft, validationSpec, onLog }) {
+  const log = (opts) => {
+    if (!onLog) return;
+    if (typeof opts === 'string') {
+      onLog(opts);
+      return;
+    }
+    emitLog(onLog, opts);
+  };
+
+  const normalized = draft ? normalizeDraft(draft) : null;
+  const spec = sandboxSpec || normalized?.sandboxSpec || {};
+  const broken = normalized?.brokenState || {};
+  const symptoms = broken.validationSymptoms || [];
 
   const steps = (validationSpec && validationSpec.steps) || [];
   const evidence = [];
+  let checklist = buildValidationChecklist(normalized, validationSpec);
 
   if (steps.length === 0) {
-    log('[validate] no validation steps defined — relying on LLM judgment alone');
+    log({
+      level: 'warn',
+      tag: 'validate',
+      message: 'No mechanical validation steps — judge will rely on symptoms only',
+      detail: { symptomCount: symptoms.length },
+    });
+  } else {
+    log({
+      level: 'phase',
+      tag: 'validate',
+      message: `Running ${steps.length} mechanical check(s) + ${symptoms.length} design symptom(s)`,
+    });
   }
 
   for (const step of steps) {
-    log(`[validate] step: ${step.type} ${step.service || ''} ${step.path || (step.cmd || []).join(' ')}`);
+    const label = step.type === 'http'
+      ? `${step.service}${step.path || '/'}`
+      : `${step.service}: ${(step.cmd || []).join(' ')}`;
+    log({ level: 'info', tag: 'validate', message: `Step: ${step.type} → ${label}` });
     // eslint-disable-next-line no-await-in-loop
     const result = await runStep(buildDir, portMap, step);
     evidence.push(result);
     const summary = result.error
-      ? `error: ${result.error}`
-      : result.ok ? 'ok' : 'check failed';
-    log(`[validate]   -> ${summary}`);
+      ? result.error
+      : result.ok ? 'passed' : 'check failed';
+    log({
+      level: result.ok ? 'ok' : 'error',
+      tag: 'validate',
+      message: result.ok ? `✓ ${label}` : `✗ ${label}`,
+      detail: result.error || (result.statusCode ? `status ${result.statusCode}` : null)
+        || (result.stdout ? String(result.stdout).slice(0, 400) : null),
+    });
   }
 
   // If the LLM isn't configured we fall back to a purely mechanical pass:
@@ -130,19 +171,26 @@ async function validate({ buildDir, portMap, sandboxSpec, validationSpec, onLog 
     const allOk = evidence.length > 0 && evidence.every((e) => e.ok);
     const provider = llm.getProvider();
     const keyName = provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY';
+    const passed = allOk;
+    const feedback = passed
+      ? `Mechanical validation passed (LLM judge skipped — no ${keyName}).`
+      : `Mechanical validation failed. Configure ${keyName} for richer feedback.`;
+    checklist = applyValidationResults(checklist, { evidence, passed, feedback });
     return {
-      passed: allOk,
-      feedback: allOk
-        ? `Mechanical validation passed (LLM judge skipped — no ${keyName}).`
-        : `Mechanical validation failed. Configure ${keyName} for richer feedback.`,
+      passed,
+      feedback,
       suggestions: [],
       evidence,
+      checklist,
     };
   }
 
   const userMessage = JSON.stringify({
-    brokenState: sandboxSpec?.brokenState || '(not specified)',
-    validationApproach: sandboxSpec?.validationApproach || '(not specified)',
+    brokenState: spec.brokenState || broken.rootCause || '(not specified)',
+    validationApproach: spec.validationApproach
+      || symptoms.map((s) => s.check).filter(Boolean).join('; ')
+      || '(not specified)',
+    validationSymptoms: symptoms,
     evidence: evidence.map((e) => ({
       step: e.step,
       ok: e.ok,
@@ -153,7 +201,7 @@ async function validate({ buildDir, portMap, sandboxSpec, validationSpec, onLog 
     })),
   }, null, 2);
 
-  log('[validate] asking LLM judge to evaluate evidence...');
+  log({ level: 'phase', tag: 'validate', message: 'Asking validation judge to evaluate evidence…' });
   const text = await llm.completeMessage({
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userMessage }],
@@ -166,6 +214,17 @@ async function validate({ buildDir, portMap, sandboxSpec, validationSpec, onLog 
     suggestions: [],
   };
   parsed.evidence = evidence;
+  parsed.checklist = applyValidationResults(checklist, {
+    evidence,
+    passed: parsed.passed,
+    feedback: parsed.feedback,
+  });
+  log({
+    level: parsed.passed ? 'ok' : 'error',
+    tag: 'validate',
+    message: parsed.passed ? 'Judge: PASS' : 'Judge: FAIL',
+    detail: parsed.feedback,
+  });
   return parsed;
 }
 

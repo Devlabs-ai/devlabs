@@ -5,7 +5,7 @@
 // in the table name is historical and refers to the draft session, not a
 // gameplay session).
 
-const pool = require('../db/pool');
+const pool = require('../../db/pool');
 
 async function upsert({ draftSessionId, title, builtChallenge, buildValidation, buildDir }) {
   await pool.query(

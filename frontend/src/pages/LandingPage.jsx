@@ -101,7 +101,7 @@ export default function LandingPage({ onLoggedIn, candidateError }) {
         <section className="landing-footer-cta">
           <div className="landing-footer-card">
             <h2>Ready to run your next interview?</h2>
-            <p>Sign in to open the challenge library, authoring tools, and specialist memories.</p>
+            <p>Sign in to open the challenge library, authoring tools, and catalogue memories.</p>
             <button type="button" onClick={() => setLoginOpen(true)}>
               Sign in to Devlabs
             </button>

@@ -10,19 +10,26 @@
 //   - Redis (transient build state: status / phase / attempt / dir / logs)
 
 const { v4: uuidv4 } = require('uuid');
-const pool = require('../db/pool');
-const redis = require('../cache/redis');
+const pool = require('../../db/pool');
+const redis = require('../../cache/redis');
+const { defaultShapeState, syncShapePhase } = require('../shape/shapeState');
+const { stripInfraImplementation, repairSchemaFromMessages, storedServicesMissingImageHints } = require('../shape/shapeContract');
+const { normalizeDraft, isDraftReady } = require('../draft/draftSchema');
 
 // id -> draft session object
 const drafts = new Map();
 
-function makeDraft({ id = uuidv4(), draft = null } = {}) {
+function makeDraft({ id = uuidv4(), draft = null, shapePhase, descriptionApproved, schemaMaterialized } = {}) {
+  const shape = defaultShapeState();
   return {
     id,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     messages: [],
     draft,
+    shapePhase: shapePhase || shape.shapePhase,
+    descriptionApproved: descriptionApproved ?? shape.descriptionApproved,
+    schemaMaterialized: schemaMaterialized ?? shape.schemaMaterialized,
     testSessionId: null,
     buildStatus: null,        // null | 'building' | 'review_ready' | 'failed'
     buildSessionId: null,     // sandbox/builds/<buildId> identifier
@@ -65,10 +72,15 @@ async function persist(d) {
       d.buildDir || null,
       JSON.stringify({
         messages: d.messages || [],
+        shapePhase: d.shapePhase,
+        descriptionApproved: d.descriptionApproved,
+        schemaMaterialized: d.schemaMaterialized,
         buildStatus: d.buildStatus,
         buildSessionId: d.buildSessionId,
         buildAttempts: d.buildAttempts,
         buildLogs: d.buildLogs || [],
+        buildChecklists: d.buildChecklists || [],
+        buildLatestChecklist: d.buildLatestChecklist || null,
         builtChallenge: d.builtChallenge,
         buildValidation: d.buildValidation,
         buildCurrentPhase: d.buildCurrentPhase,
@@ -90,6 +102,9 @@ async function restoreFromDB() {
       createdAt: Number(row.created_at) || Date.now(),
       updatedAt: Number(row.updated_at) || Date.now(),
       messages: Array.isArray(meta.messages) ? meta.messages : [],
+      shapePhase: meta.shapePhase || 'description',
+      descriptionApproved: !!meta.descriptionApproved,
+      schemaMaterialized: !!meta.schemaMaterialized,
       draft: row.draft || null,
       testSessionId: null,
       buildStatus: meta.buildStatus || null,
@@ -97,12 +112,32 @@ async function restoreFromDB() {
       buildDir: row.build_dir || null,
       buildAttempts: meta.buildAttempts || 0,
       buildLogs: Array.isArray(meta.buildLogs) ? meta.buildLogs : [],
+      buildChecklists: Array.isArray(meta.buildChecklists) ? meta.buildChecklists : [],
+      buildLatestChecklist: meta.buildLatestChecklist || null,
       builtChallenge: meta.builtChallenge || null,
       buildValidation: meta.buildValidation || null,
       buildCurrentPhase: meta.buildCurrentPhase || null,
       buildCurrentAttempt: meta.buildCurrentAttempt || 0,
     };
+    const persistedPhase = meta.shapePhase || 'description';
+    if (d.draft?.infra && !d.schemaMaterialized) {
+      d.draft = { ...d.draft, infra: stripInfraImplementation(d.draft.infra) };
+    }
+    syncShapePhase(d);
+    let healed = repairSchemaFromMessages(d);
+    if (!healed && d.schemaMaterialized && d.draft && storedServicesMissingImageHints(d.draft)) {
+      const normalized = normalizeDraft(d.draft);
+      if (isDraftReady(normalized)) {
+        d.draft = normalized;
+        syncShapePhase(d);
+        healed = true;
+      }
+    }
     drafts.set(d.id, d);
+    if (healed || persistedPhase !== d.shapePhase || (persistedPhase === 'ready' && !d.schemaMaterialized)) {
+      // eslint-disable-next-line no-await-in-loop
+      await persist(d);
+    }
     restored += 1;
   }
   console.log(`[drafts] restored ${restored} draft sessions from db`);

@@ -4,6 +4,7 @@
   "description": "A Spark job is running but not utilizing the cluster resources efficiently, leading to increased execution time.",
   "difficulty": "Easy",
   "category": "Resource Management",
+  "bucket": "data-engineer",
   "tags": [
     "spark",
     "resource-allocation",

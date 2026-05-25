@@ -47,6 +47,14 @@ function PhaseTracker({ phase, attempt, total, status, validation, running }) {
   );
 }
 
+function logLineClass(line) {
+  if (line.includes('✗') || line.includes(' FAIL') || line.includes('failed')) return 'log-error';
+  if (line.includes('✓') || line.includes(' PASS') || line.includes('passed')) return 'log-ok';
+  if (line.includes('⚠')) return 'log-warn';
+  if (line.includes('►')) return 'log-phase';
+  return '';
+}
+
 function LogStream({ lines }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -55,7 +63,66 @@ function LogStream({ lines }) {
   return (
     <div className="log-stream" ref={ref}>
       {lines.length === 0 && <div className="log-empty">Logs will appear here once the build starts.</div>}
-      {lines.map((l, i) => <div key={i} className="log-line">{l}</div>)}
+      {lines.map((l, i) => (
+        <div key={i} className={`log-line ${logLineClass(l)}`}>{l}</div>
+      ))}
+    </div>
+  );
+}
+
+function statusIcon(status) {
+  if (status === 'pass') return '✓';
+  if (status === 'fail') return '✗';
+  if (status === 'skip') return '–';
+  return '○';
+}
+
+function IterationChecklist({ checklist }) {
+  if (!checklist) return null;
+  return (
+    <div className={`iteration-checklist ${checklist.passed ? 'passed' : 'failed'}`}>
+      <div className="iteration-checklist-head">
+        <span className="badge">
+          Iteration {checklist.attempt}/{checklist.total}
+          {checklist.passed ? ' · passed' : checklist.failedPhase ? ` · failed at ${checklist.failedPhase}` : ''}
+        </span>
+        {checklist.feedback && <span className="feedback dim">{checklist.feedback}</span>}
+      </div>
+      <div className="checklist-section">
+        <div className="checklist-section-title">Pipeline phases</div>
+        <ul className="checklist">
+          {(checklist.phases || []).map((p) => (
+            <li key={p.id} className={`check-${p.status}`}>
+              <span className="check-icon">{statusIcon(p.status)}</span>
+              <span className="check-label">{p.label}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      {(checklist.items || []).length > 0 && (
+        <div className="checklist-section">
+          <div className="checklist-section-title">Validation checklist</div>
+          <ul className="checklist">
+            {checklist.items.map((item) => (
+              <li key={item.id} className={`check-${item.status}`}>
+                <span className="check-icon">{statusIcon(item.status)}</span>
+                <span className="check-label">
+                  {item.kind === 'symptom' && <span className="check-kind">symptom</span>}
+                  {item.kind === 'step' && <span className="check-kind">step</span>}
+                  {item.kind === 'judge' && <span className="check-kind">judge</span>}
+                  {item.label}
+                </span>
+                {item.detail && <span className="check-detail">{item.detail}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {Array.isArray(checklist.suggestions) && checklist.suggestions.length > 0 && (
+        <ul className="suggestions">
+          {checklist.suggestions.map((s, i) => <li key={i}>{s}</li>)}
+        </ul>
+      )}
     </div>
   );
 }
@@ -89,6 +156,8 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
   const [attempt, setAttempt] = useState(0);
   const [logs, setLogs] = useState([]);
   const [validation, setValidation] = useState(null);
+  const [latestChecklist, setLatestChecklist] = useState(null);
+  const [checklistHistory, setChecklistHistory] = useState([]);
   const [status, setStatus] = useState(null); // 'building' | 'review_ready' | 'failed'
   const [err, setErr] = useState(null);
   const abortRef = useRef(null);
@@ -101,6 +170,8 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
     setPhase(draft.buildCurrentPhase || null);
     setLogs(draft.buildLogs || []);
     setValidation(draft.buildValidation || null);
+    setLatestChecklist(draft.buildLatestChecklist || null);
+    setChecklistHistory(draft.buildChecklists || []);
   }, [draft?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
@@ -117,9 +188,14 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
     );
   }
 
-  const hasSandboxSpec = !!draft.draft?.sandboxSpec;
+  const draftReady = draft.draftReady ?? (
+    !!draft.draft?.brokenState?.rootCause
+    && !!draft.draft?.infra?.services?.length
+    && !!draft.draft?.description?.trim()
+  );
   const llmReady = !!llmConfig?.llmConfigured;
-  const startDisabled = running || !hasSandboxSpec || !llmReady;
+  const maxAttempts = llmConfig?.maxIterations ?? 10;
+  const startDisabled = running || !draftReady || !llmReady;
 
   const start = async () => {
     setRunning(true);
@@ -128,6 +204,8 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
     setPhase(null);
     setAttempt(0);
     setValidation(null);
+    setLatestChecklist(null);
+    setChecklistHistory([]);
     setStatus('building');
 
     const controller = new AbortController();
@@ -145,6 +223,12 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
           setAttempt(ev.attempt);
         } else if (ev.type === 'validation') {
           setValidation(ev.result);
+        } else if (ev.type === 'checklist' && ev.checklist) {
+          setLatestChecklist(ev.checklist);
+          setChecklistHistory((prev) => {
+            const next = [...prev, ev.checklist];
+            return next.length > 20 ? next.slice(next.length - 20) : next;
+          });
         } else if (ev.type === 'done') {
           setStatus('review_ready');
         } else if (ev.type === 'error') {
@@ -178,7 +262,7 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
             <button
               onClick={start}
               disabled={startDisabled}
-              title={!hasSandboxSpec ? 'No sandboxSpec on the draft' : !llmReady ? 'LLM not configured' : ''}
+              title={!draftReady ? 'Draft incomplete (description, rootCause, infra.services)' : !llmReady ? 'LLM not configured' : ''}
             >
               {running ? 'Running…' : status === 'review_ready' ? 'Rebuild' : 'Start build'}
             </button>
@@ -188,13 +272,24 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
           <PhaseTracker
             phase={phase}
             attempt={attempt}
-            total={5}
+            total={maxAttempts}
             status={status}
             validation={validation}
             running={running}
           />
           {err && <div className="alert">{err}</div>}
+          {latestChecklist && <IterationChecklist checklist={latestChecklist} />}
           {validation && <ValidationCard result={validation} />}
+          {checklistHistory.length > 1 && (
+            <details className="checklist-history">
+              <summary>Previous iterations ({checklistHistory.length - 1})</summary>
+              <div className="checklist-history-list">
+                {[...checklistHistory].slice(0, -1).reverse().map((c) => (
+                  <IterationChecklist key={`iter-${c.attempt}`} checklist={c} />
+                ))}
+              </div>
+            </details>
+          )}
           <LogStream lines={logs} />
         </div>
       </section>

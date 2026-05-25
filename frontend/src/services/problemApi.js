@@ -100,6 +100,33 @@ export function streamChat(sessionId, message, onEvent, { signal } = {}) {
   });
 }
 
+export async function approveDescription(sessionId) {
+  const { data } = await axios.post(
+    `/api/problems/${sessionId}/approve-description`,
+    {},
+    { headers: getAuthHeader() },
+  );
+  return data;
+}
+
+export async function reviseDescription(sessionId) {
+  const { data } = await axios.post(
+    `/api/problems/${sessionId}/revise-description`,
+    {},
+    { headers: getAuthHeader() },
+  );
+  return data;
+}
+
+export function generateSchema(sessionId, onEvent, { signal } = {}) {
+  return streamSse({
+    url: `/api/problems/${sessionId}/generate-schema`,
+    body: {},
+    onEvent,
+    signal,
+  });
+}
+
 export function streamBuild(sessionId, onEvent, { signal } = {}) {
   return streamSse({
     url: `/api/problems/${sessionId}/build`,

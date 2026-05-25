@@ -3,10 +3,11 @@
 const express = require('express');
 
 const { requireInterviewer } = require('../auth/middleware');
-const reviewStore = require('../problems/reviewStore');
-const draftStore = require('../problems/problemDraftStore');
-const buildAgent = require('../problems/buildAgentService');
-const { promote } = require('../problems/promoteToVerified');
+const reviewStore = require('../pipeline/stores/reviewStore');
+const draftStore = require('../pipeline/stores/problemDraftStore');
+const buildAgent = require('../pipeline/agents/buildAgent');
+const { promote } = require('../pipeline/promoteToVerified');
+const { normalizeBucket } = require('../challenges/buckets');
 
 const router = express.Router();
 router.use(requireInterviewer);
@@ -31,6 +32,15 @@ router.post('/:sessionId/push', async (req, res, next) => {
     const review = await reviewStore.get(req.params.sessionId);
     if (!review) return res.status(404).json({ error: 'review not found' });
 
+    const requestedBucket = req.body?.bucket;
+    if (!requestedBucket) {
+      return res.status(400).json({ error: 'bucket is required to push a review' });
+    }
+    const bucket = normalizeBucket(requestedBucket);
+    if (!bucket) {
+      return res.status(400).json({ error: `unknown bucket: ${requestedBucket}` });
+    }
+
     let draft = draftStore.get(req.params.sessionId);
     if (!draft) {
       draft = draftStore.makeDraft({ id: req.params.sessionId });
@@ -44,6 +54,7 @@ router.post('/:sessionId/push', async (req, res, next) => {
       buildDir: draft.buildDir,
       builtChallenge: draft.builtChallenge,
       fallbackTitle: review.title || draft.id,
+      bucket,
     });
 
     if (draft.buildDir) {

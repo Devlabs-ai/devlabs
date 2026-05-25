@@ -2,8 +2,8 @@
 
 const express = require('express');
 const { requireInterviewer } = require('../auth/middleware');
-const specialistStore = require('../problems/specialistStore');
-const lessonStore = require('../problems/lessonStore');
+const catalogueStore = require('../pipeline/catalogue/catalogueStore');
+const lessonStore = require('../pipeline/stores/lessonStore');
 
 const router = express.Router();
 
@@ -17,10 +17,10 @@ function parsePageQuery(req) {
   };
 }
 
-router.get('/specialists', async (req, res, next) => {
+router.get('/catalogue', async (req, res, next) => {
   try {
     const { page, limit, category } = parsePageQuery(req);
-    const result = await specialistStore.listPaginated({ page, limit, category });
+    const result = await catalogueStore.listPaginated({ page, limit, category });
     res.json(result);
   } catch (e) {
     next(e);
@@ -43,11 +43,11 @@ router.get('/lessons', async (req, res, next) => {
 
 router.get('/stats', async (_req, res, next) => {
   try {
-    const [specialists, lessons] = await Promise.all([
-      specialistStore.count(),
+    const [catalogue, lessons] = await Promise.all([
+      catalogueStore.count(),
       lessonStore.count(),
     ]);
-    res.json({ specialists, lessons });
+    res.json({ catalogue, lessons });
   } catch (e) {
     next(e);
   }

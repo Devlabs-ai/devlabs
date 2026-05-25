@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { listReviews, pushReview, dismissReview } from '../services/reviewApi.js';
+import { BUCKETS } from '../constants/buckets.js';
 
 function ReviewRow({ r, active, onClick }) {
   return (
@@ -15,11 +16,12 @@ function ReviewRow({ r, active, onClick }) {
   );
 }
 
-function ReviewDetail({ r, onPush, onDismiss, busy }) {
+function ReviewDetail({ r, onPush, onDismiss, busy, bucket, onBucketChange }) {
   if (!r) {
     return <div className="review-empty">Pick a build from the list to inspect it.</div>;
   }
   const c = r.builtChallenge || {};
+  const canPush = !busy && r.buildValidation?.passed && !!bucket;
   return (
     <div className="review-detail">
       <header>
@@ -28,8 +30,22 @@ function ReviewDetail({ r, onPush, onDismiss, busy }) {
           <p className="dim">{c.description}</p>
         </div>
         <div className="actions">
+          <div className="review-bucket-picker">
+            <label htmlFor="review-bucket">Push to</label>
+            <select
+              id="review-bucket"
+              value={bucket || ''}
+              onChange={(e) => onBucketChange(e.target.value || null)}
+              disabled={busy}
+            >
+              <option value="">Pick a bucket…</option>
+              {BUCKETS.map((b) => (
+                <option key={b.id} value={b.id}>{b.label}</option>
+              ))}
+            </select>
+          </div>
           <button className="ghost danger" onClick={() => onDismiss(r.sessionId)} disabled={busy}>Dismiss</button>
-          <button onClick={() => onPush(r.sessionId)} disabled={busy || !r.buildValidation?.passed}>
+          <button onClick={() => onPush(r.sessionId)} disabled={!canPush}>
             {busy ? 'Pushing…' : 'Push to verified'}
           </button>
         </div>
@@ -41,6 +57,22 @@ function ReviewDetail({ r, onPush, onDismiss, busy }) {
         <div><span className="label">Tags</span><span>{(c.tags || []).join(', ') || '—'}</span></div>
         <div><span className="label">Build dir</span><code className="path">{r.buildDir || '—'}</code></div>
       </div>
+
+      {c.metrics?.observed?.values && Object.keys(c.metrics.observed.values).length > 0 && (
+        <section>
+          <h4>Observed metrics (baseline)</h4>
+          <ul className="suggestions">
+            {Object.entries(c.metrics.observed.values)
+              .filter(([, v]) => v?.value != null)
+              .map(([id, v]) => (
+                <li key={id}><strong>{id}</strong>: {v.value}</li>
+              ))}
+          </ul>
+          <p className="dim">
+            {c.metrics.observed.sampleCount} samples from {c.metrics.observed.service}
+          </p>
+        </section>
+      )}
 
       {r.buildValidation && (
         <section>
@@ -96,6 +128,9 @@ export default function ReviewPage({ onPromoted, refreshKey }) {
   const [activeId, setActiveId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  // Per-review bucket selection so switching between rows doesn't blow away
+  // a choice the reviewer already made on another card.
+  const [buckets, setBuckets] = useState({});
 
   const reload = useCallback(async () => {
     try {
@@ -112,13 +147,29 @@ export default function ReviewPage({ onPromoted, refreshKey }) {
   useEffect(() => { reload(); }, [reload, refreshKey]);
 
   const active = reviews.find((r) => r.sessionId === activeId) || null;
+  const activeBucket = active ? buckets[active.sessionId] || null : null;
+
+  const handleBucketChange = (value) => {
+    if (!active) return;
+    setBuckets((prev) => ({ ...prev, [active.sessionId]: value }));
+  };
 
   const handlePush = async (id) => {
+    const bucket = buckets[id];
+    if (!bucket) {
+      setErr('Pick a bucket before pushing this challenge to verified.');
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
-      const out = await pushReview(id);
+      const out = await pushReview(id, { bucket });
       if (onPromoted) onPromoted(out.slug);
+      setBuckets((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       await reload();
       setActiveId(null);
     } catch (e) {
@@ -171,7 +222,14 @@ export default function ReviewPage({ onPromoted, refreshKey }) {
           <div className="title">Build artefacts</div>
         </div>
         <div className="panel-body" style={{ overflow: 'auto' }}>
-          <ReviewDetail r={active} onPush={handlePush} onDismiss={handleDismiss} busy={busy} />
+          <ReviewDetail
+            r={active}
+            onPush={handlePush}
+            onDismiss={handleDismiss}
+            busy={busy}
+            bucket={activeBucket}
+            onBucketChange={handleBucketChange}
+          />
         </div>
       </section>
     </div>
