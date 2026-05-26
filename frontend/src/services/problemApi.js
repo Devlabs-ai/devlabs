@@ -35,6 +35,15 @@ export async function deleteProblemSession(sessionId) {
   return data;
 }
 
+export async function updateDraftMeta(sessionId, patch) {
+  const { data } = await axios.patch(
+    `/api/problems/${sessionId}/meta`,
+    patch,
+    { headers: getAuthHeader() },
+  );
+  return data.draft;
+}
+
 export async function pushToSandbox(sessionId) {
   const { data } = await axios.post(
     `/api/problems/${sessionId}/push-to-sandbox`,

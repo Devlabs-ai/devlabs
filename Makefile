@@ -19,6 +19,7 @@ SHELL := /bin/bash
 
 .PHONY: help install infra-up infra-down infra-reset backend frontend dev stop \
         build clean reset seed-catalogue seed-catalogue-if-empty seed-catalogue-dry \
+        backfill-buckets \
         prod-build prod-pull prod-up prod-deploy prod-restart prod-down prod-logs
 
 help:
@@ -39,7 +40,8 @@ help:
 	@printf "  %-14s %s\n" "prod-restart"  "pull latest images + recreate containers"
 	@printf "  %-14s %s\n" "prod-down"     "stop production compose stack"
 	@printf "  %-14s %s\n" "prod-logs"     "tail production compose logs"
-	@printf "  %-14s %s\n" "seed-catalogue" "seed catalogue table from seeds/catalogue.js (insert-only)"
+	@printf "  %-14s %s\n" "seed-catalogue"   "seed catalogue table from seeds/catalogue.js (insert-only)"
+	@printf "  %-14s %s\n" "backfill-buckets" "audit / repair NULL bucket on challenges (see scripts/backfillBuckets.js)"
 	@printf "  %-14s %s\n" "clean"       "remove node_modules, dist, ephemeral sandbox dirs"
 	@printf "  %-14s %s\n" "reset"       "clean + infra-reset (full wipe)"
 	@printf "\n"
@@ -155,6 +157,20 @@ seed-catalogue-if-empty:
 
 seed-catalogue-dry:
 	cd backend && node scripts/seedCatalogue.js --dry-run $(ARGS)
+
+# ---------------------------------------------------------------------------
+# bucket backfill
+# ---------------------------------------------------------------------------
+#
+# Audit / repair NULL `bucket` values in the challenges table. See
+# backend/scripts/backfillBuckets.js for details.
+#
+#   make backfill-buckets                          # audit only
+#   make backfill-buckets ARGS="--from-disk"       # backfill from challenge.json
+#   make backfill-buckets ARGS="--apply=slug=data-engineer,other-slug=devops"
+
+backfill-buckets:
+	cd backend && node scripts/backfillBuckets.js $(ARGS)
 
 clean:
 	@echo "==> removing node_modules + build output"

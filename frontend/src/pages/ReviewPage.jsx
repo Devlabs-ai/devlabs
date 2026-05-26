@@ -1,8 +1,15 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { listReviews, pushReview, dismissReview } from '../services/reviewApi.js';
-import { BUCKETS } from '../constants/buckets.js';
+import { BUCKETS, bucketLabel } from '../constants/buckets.js';
+
+function bucketFromReview(r) {
+  return r?.builtChallenge?.bucket
+    || r?.builtChallenge?.meta?.bucket
+    || null;
+}
 
 function ReviewRow({ r, active, onClick }) {
+  const presetBucket = bucketFromReview(r);
   return (
     <button className={`review-row ${active ? 'active' : ''}`} onClick={onClick}>
       <div className="title">{r.title || r.builtChallenge?.title || '(untitled)'}</div>
@@ -10,6 +17,11 @@ function ReviewRow({ r, active, onClick }) {
         <span className={`pill ${r.buildValidation?.passed ? 'pass' : 'fail'}`}>
           {r.buildValidation?.passed ? 'validation ✓' : 'validation ✗'}
         </span>
+        {presetBucket && (
+          <span className="pill bucket-pill" data-bucket={presetBucket}>
+            {bucketLabel(presetBucket)}
+          </span>
+        )}
         <span className="dim">{new Date(r.savedAt).toLocaleString()}</span>
       </div>
     </button>
@@ -22,11 +34,17 @@ function ReviewDetail({ r, onPush, onDismiss, busy, bucket, onBucketChange }) {
   }
   const c = r.builtChallenge || {};
   const canPush = !busy && r.buildValidation?.passed && !!bucket;
+  const bucketName = bucketLabel(bucket);
   return (
     <div className="review-detail">
       <header>
         <div>
           <h3>{c.title || r.title}</h3>
+          {bucketName && (
+            <span className="review-detail-bucket pill bucket-pill" data-bucket={bucket}>
+              Ships to {bucketName}
+            </span>
+          )}
           <p className="dim">{c.description}</p>
         </div>
         <div className="actions">
@@ -145,6 +163,25 @@ export default function ReviewPage({ onPromoted, refreshKey }) {
   }, [activeId]);
 
   useEffect(() => { reload(); }, [reload, refreshKey]);
+
+  // Pre-fill any review's bucket from its built challenge so a reviewer who
+  // already set the bucket during authoring just confirms with Push. The manual
+  // override in `buckets[id]` still wins — we only seed missing entries.
+  useEffect(() => {
+    setBuckets((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const r of reviews) {
+        if (next[r.sessionId] !== undefined) continue;
+        const seed = bucketFromReview(r);
+        if (seed) {
+          next[r.sessionId] = seed;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [reviews]);
 
   const active = reviews.find((r) => r.sessionId === activeId) || null;
   const activeBucket = active ? buckets[active.sessionId] || null : null;

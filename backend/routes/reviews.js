@@ -32,7 +32,9 @@ router.post('/:sessionId/push', async (req, res, next) => {
     const review = await reviewStore.get(req.params.sessionId);
     if (!review) return res.status(404).json({ error: 'review not found' });
 
-    const requestedBucket = req.body?.bucket;
+    const requestedBucket = req.body?.bucket
+      || review.builtChallenge?.bucket
+      || review.builtChallenge?.meta?.bucket;
     if (!requestedBucket) {
       return res.status(400).json({ error: 'bucket is required to push a review' });
     }
