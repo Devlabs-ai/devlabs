@@ -864,6 +864,66 @@ a:hover { text-decoration: underline; }
   font-size: 12.5px;
 }
 
+/* Reusable bucket pill, themed via data-bucket. Used on Review rows + detail. */
+.pill.bucket-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--bucket-pill-fg, var(--text));
+  background: var(--bucket-pill-bg, var(--surface-3));
+  border: 1px solid var(--bucket-pill-border, var(--border));
+}
+.pill.bucket-pill[data-bucket="software-engineer"] {
+  --bucket-pill-fg: #93c5fd;
+  --bucket-pill-bg: rgba(96, 165, 250, 0.12);
+  --bucket-pill-border: rgba(96, 165, 250, 0.35);
+}
+.pill.bucket-pill[data-bucket="data-engineer"] {
+  --bucket-pill-fg: #d8b4fe;
+  --bucket-pill-bg: rgba(192, 132, 252, 0.12);
+  --bucket-pill-border: rgba(192, 132, 252, 0.35);
+}
+.pill.bucket-pill[data-bucket="platform-engineer"] {
+  --bucket-pill-fg: #fdba74;
+  --bucket-pill-bg: rgba(251, 146, 60, 0.12);
+  --bucket-pill-border: rgba(251, 146, 60, 0.35);
+}
+.pill.bucket-pill[data-bucket="devops"] {
+  --bucket-pill-fg: #6ee7b7;
+  --bucket-pill-bg: rgba(52, 211, 153, 0.12);
+  --bucket-pill-border: rgba(52, 211, 153, 0.35);
+}
+.review-detail-bucket {
+  margin: 4px 0 8px;
+}
+
+/* Authoring workspace top-bar bucket picker. */
+.authoring-bucket-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+.authoring-bucket-picker-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+}
+.authoring-bucket-picker select {
+  padding: 5px 8px;
+  font-size: 12px;
+  min-width: 150px;
+}
+
 /* ---------- Login ---------- */
 
 .login-page {

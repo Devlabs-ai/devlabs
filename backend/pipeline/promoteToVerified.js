@@ -69,7 +69,11 @@ async function promote({ buildDir, builtChallenge, fallbackTitle, bucket }) {
     description: built.description || cur.description,
     difficulty: built.difficulty || built.meta?.difficulty || cur.difficulty || 'Medium',
     category: built.category || built.meta?.category || cur.category || 'General',
-    bucket: normalizedBucket || normalizeBucket(cur.bucket) || null,
+    bucket: normalizedBucket
+      || normalizeBucket(built.bucket)
+      || normalizeBucket(built.meta?.bucket)
+      || normalizeBucket(cur.bucket)
+      || null,
     tags: built.tags || built.meta?.tags || cur.tags || [],
     finalized: true,
     sandboxType: 'compose',

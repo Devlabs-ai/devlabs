@@ -4,6 +4,7 @@ import AppPageHeader from '../components/AppPageHeader.jsx';
 import ProblemSetterPage from './ProblemSetterPage.jsx';
 import PipelinePage from './PipelinePage.jsx';
 import ReviewPage from './ReviewPage.jsx';
+import { BUCKETS } from '../constants/buckets.js';
 
 import {
   listProblemSessions,
@@ -12,6 +13,7 @@ import {
   getProblemSession,
   deleteProblemSession,
   getProblemConfig,
+  updateDraftMeta,
 } from '../services/problemApi.js';
 
 const WORKFLOW = [
@@ -39,7 +41,8 @@ function formatRelativeTime(iso) {
   return new Date(iso).toLocaleDateString();
 }
 
-function WorkflowNav({ tab, onTab, activeDraft }) {
+function WorkflowNav({ tab, onTab, activeDraft, onBucketChange, bucketBusy }) {
+  const currentBucket = activeDraft?.draft?.meta?.bucket || '';
   return (
     <nav className="authoring-workflow" aria-label="Authoring workflow">
       {WORKFLOW.map((w, i) => (
@@ -59,14 +62,27 @@ function WorkflowNav({ tab, onTab, activeDraft }) {
         </React.Fragment>
       ))}
       {activeDraft && (
-        <div className="authoring-active-draft" title={activeDraft.draft?.title || 'Untitled'}>
+        <div className="authoring-active-draft" title={activeDraft.draft?.meta?.name || activeDraft.draft?.title || 'Untitled'}>
           <span className="authoring-active-draft-label">Working on</span>
-          <strong>{activeDraft.draft?.title || 'Untitled draft'}</strong>
+          <strong>{activeDraft.draft?.meta?.name || activeDraft.draft?.title || 'Untitled draft'}</strong>
           {activeDraft.buildStatus && (
             <span className={`pill ${activeDraft.buildStatus}`}>
               {statusLabel(activeDraft.buildStatus)}
             </span>
           )}
+          <label className="authoring-bucket-picker" title="Role bucket this challenge ships to">
+            <span className="authoring-bucket-picker-label">Bucket</span>
+            <select
+              value={currentBucket}
+              onChange={(e) => onBucketChange(e.target.value || null)}
+              disabled={bucketBusy}
+            >
+              <option value="">Unassigned</option>
+              {BUCKETS.map((b) => (
+                <option key={b.id} value={b.id}>{b.label}</option>
+              ))}
+            </select>
+          </label>
         </div>
       )}
     </nav>
@@ -83,6 +99,7 @@ export default function AuthoringWorkspace({ onPromoted }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
+  const [bucketBusy, setBucketBusy] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -160,6 +177,20 @@ export default function AuthoringWorkspace({ onPromoted }) {
     setDrafts((prev) => prev.map((d) => (d.id === next.id ? next : d)));
   };
 
+  const handleBucketChange = async (bucket) => {
+    if (!activeDraftId) return;
+    setBucketBusy(true);
+    setError(null);
+    try {
+      const updated = await updateDraftMeta(activeDraftId, { bucket });
+      handleDraftChanged(updated);
+    } catch (e) {
+      setError(e?.response?.data?.error || e.message);
+    } finally {
+      setBucketBusy(false);
+    }
+  };
+
   const llmKey = llmConfig?.provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY';
 
   return (
@@ -171,7 +202,13 @@ export default function AuthoringWorkspace({ onPromoted }) {
         lead="Shape incidents with the agent, run the build pipeline, and promote verified labs."
         aside={(
           <>
-            <WorkflowNav tab={tab} onTab={setTab} activeDraft={activeDraft} />
+            <WorkflowNav
+              tab={tab}
+              onTab={setTab}
+              activeDraft={activeDraft}
+              onBucketChange={handleBucketChange}
+              bucketBusy={bucketBusy}
+            />
             <div className="authoring-studio-status">
               {llmConfig?.llmConfigured ? (
                 <span className="authoring-llm-pill ok">

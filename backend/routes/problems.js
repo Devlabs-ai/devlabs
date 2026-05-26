@@ -17,6 +17,7 @@ const {
   storedServicesMissingImageHints,
 } = require('../pipeline/shape/shapeContract');
 const { normalizeDraft, isDraftReady } = require('../pipeline/draft/draftSchema');
+const { normalizeBucket } = require('../challenges/buckets');
 
 const router = express.Router();
 
@@ -144,6 +145,38 @@ router.delete('/:sessionId', async (req, res, next) => {
     await draftStore.remove(req.params.sessionId);
     await reviewStore.remove(req.params.sessionId);
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Patch a small, safe subset of draft.meta. Currently only `bucket` is allowed;
+// extend this allow-list deliberately rather than blanket-merging req.body so we
+// never let clients overwrite agent-emitted contract fields (name/category/etc).
+router.patch('/:sessionId/meta', async (req, res, next) => {
+  try {
+    const d = draftStore.get(req.params.sessionId);
+    if (!d) return res.status(404).json({ error: 'draft session not found' });
+
+    const patch = {};
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'bucket')) {
+      const raw = req.body.bucket;
+      if (raw === null || raw === '') {
+        patch.bucket = null;
+      } else {
+        const bucket = normalizeBucket(raw);
+        if (!bucket) return res.status(400).json({ error: `unknown bucket: ${raw}` });
+        patch.bucket = bucket;
+      }
+    }
+
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({ error: 'no editable meta fields in request body' });
+    }
+
+    d.draft = d.draft || {};
+    d.draft.meta = { ...(d.draft.meta || {}), ...patch };
+    draftStore.set(d.id, d);
+    await draftStore.persist(d);
+    res.json({ draft: publicDraft(d) });
   } catch (e) { next(e); }
 });
 
