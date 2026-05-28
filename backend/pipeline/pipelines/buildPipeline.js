@@ -1,14 +1,14 @@
 'use strict';
 
 // Build pipeline — runs up to MAX_ITERATIONS attempts of
-// GENERATE (codeAgent) → WRITE → START → VALIDATE. Each attempt is fully
+// GENERATE (codeAgent) → WRITE → SPIN → VALIDATE. Each attempt is fully
 // self-contained: if validation fails, the compose stack is torn down and
 // failure context is folded into the next codeAgent call.
 //
 // The caller drives the loop via `runBuildLoop({ draft, draftSessionId,
 // onEvent, ... })`. `onEvent` receives SSE-shaped events:
 //   { type: 'log',       message }
-//   { type: 'phase',     phase: 'GENERATE|WRITE|START|VALIDATE', attempt, total }
+//   { type: 'phase',     phase: 'GENERATE|WRITE|SPIN|VALIDATE', attempt, total }
 //   { type: 'buildDir',  buildDir }
 //   { type: 'validation', result: { passed, feedback, ... } }
 //   { type: 'done',      buildSessionId, builtChallenge, buildValidation,
@@ -19,8 +19,9 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
-const { assertLlmConfigured } = require('../agents/agentRuntime');
+const { assertLlmConfigured } = require('../helpers/agentRuntime');
 const codeAgent = require('../agents/codeAgent');
+const spinAgent = require('../agents/spinAgent');
 const composeManager = require('../../sandbox/composeManager');
 const portAllocator = require('../../sandbox/portAllocator');
 const validationAgent = require('../agents/validationAgent');
@@ -31,7 +32,7 @@ const { emitLog } = require('../build/buildLogger');
 const { buildIterationChecklist } = require('../validation/validationChecklist');
 const { BUILDS_ROOT } = require('../../sandbox/paths');
 
-const MAX_ITERATIONS = 10;
+const MAX_ITERATIONS = 3;
 
 // GENERATE (LLM) lives in codeAgent.js
 
@@ -114,20 +115,6 @@ function cap(s, max) {
   return `${str.slice(0, max)}\n…[truncated ${str.length - max} chars]`;
 }
 
-// Pull whatever logs we can after a failed `docker compose up` / wait. If the
-// project isn't even up yet (image build error), this typically returns
-// stderr from previous build steps, which is still useful.
-async function captureComposeLogs(buildDir, portMap) {
-  try {
-    const { stdout, stderr } = await composeManager.runCompose(
-      ['logs', '--no-color', '--tail=200'],
-      { cwd: buildDir, env: portMap ? Object.fromEntries(Object.entries(portMap).map(([k, v]) => [k, String(v)])) : {} },
-    );
-    return [stdout, stderr].filter(Boolean).join('\n');
-  } catch (e) {
-    return [e.stdout, e.stderr, e.message].filter(Boolean).join('\n');
-  }
-}
 
 function pickCategory(draft) {
   const n = normalizeDraft(draft);
@@ -184,7 +171,58 @@ function emitIterationSummary(onEvent, {
   onEvent({ type: 'checklist', checklist });
 }
 
-async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = null }) {
+function loadResumeContext(resumeBuildDir) {
+  if (!resumeBuildDir || !fs.existsSync(resumeBuildDir)) return null;
+  try {
+    const challengeRaw = fs.readFileSync(path.join(resumeBuildDir, 'challenge.json'), 'utf8');
+    const challenge = JSON.parse(challengeRaw);
+    const composeRaw = fs.readFileSync(path.join(resumeBuildDir, 'docker-compose.yml'), 'utf8');
+
+    const services = {};
+    const servicesDir = path.join(resumeBuildDir, 'services');
+    if (fs.existsSync(servicesDir)) {
+      for (const svc of fs.readdirSync(servicesDir)) {
+        const svcPath = path.join(servicesDir, svc);
+        if (!fs.statSync(svcPath).isDirectory()) continue;
+        services[svc] = {};
+        for (const file of fs.readdirSync(svcPath)) {
+          services[svc][file] = fs.readFileSync(path.join(svcPath, file), 'utf8');
+        }
+      }
+    }
+
+    const initFiles = {};
+    const initDir = path.join(resumeBuildDir, 'init');
+    if (fs.existsSync(initDir)) {
+      for (const file of fs.readdirSync(initDir)) {
+        initFiles[file] = fs.readFileSync(path.join(initDir, file), 'utf8');
+      }
+    }
+
+    return {
+      assets: {
+        title: challenge.title,
+        description: challenge.description,
+        difficulty: challenge.difficulty,
+        category: challenge.category,
+        tags: challenge.tags,
+        problemStatement: challenge.problemStatement,
+        dockerCompose: composeRaw,
+        services,
+        initFiles,
+        validationSpec: challenge.validationSpec,
+      },
+    };
+  } catch (e) {
+    console.warn(`[build] failed to load resume context from ${resumeBuildDir}: ${e.message}`);
+    return null;
+  }
+}
+
+async function runBuildLoop({
+  draft, draftSessionId, onEvent, terminalWsBase = null,
+  resumeBuildDir = null, resumeFailurePhase = null, resumeFailureMsg = null,
+}) {
   try {
     assertLlmConfigured('code', { label: 'code agent (build pipeline)' });
   } catch (e) {
@@ -202,14 +240,21 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
   const serviceSummary = (normalized.infra?.services || [])
     .map((s) => `${s.name} (${s.image_hint || 'no image'})`)
     .join(', ');
+
+  // Load assets + failure context from a prior failed build if requested
+  const resumeCtx = resumeBuildDir ? loadResumeContext(resumeBuildDir) : null;
+
   emitLog(onEvent, {
     level: 'phase',
     tag: 'build',
-    message: `Starting build pipeline (max ${MAX_ITERATIONS} iterations)`,
+    message: resumeCtx
+      ? `Resuming build pipeline from prior ${resumeFailurePhase || 'VALIDATE'} failure (max ${MAX_ITERATIONS} iterations)`
+      : `Starting build pipeline (max ${MAX_ITERATIONS} iterations)`,
     detail: {
       title: normalized.meta?.name || normalized.title,
       services: serviceSummary,
       rootCause: cap(normalized.brokenState?.rootCause, 200),
+      ...(resumeCtx ? { resumedFrom: resumeBuildDir } : {}),
     },
   });
 
@@ -219,16 +264,16 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
   const buildDir = path.join(BUILDS_ROOT, buildSessionId);
 
   let lastAttempt = null;
-  let lastAssets = null;
-  let startFailureMsg = null;
-  let validateFailureMsg = null;
-  const startFailureHistory = [];
+  let lastAssets = resumeCtx?.assets || null;
+  let spinFailureMsg = (resumeCtx && resumeFailurePhase === 'SPIN') ? resumeFailureMsg : null;
+  let validateFailureMsg = (resumeCtx && resumeFailurePhase === 'VALIDATE') ? resumeFailureMsg : null;
+  const spinFailureHistory = [];
   const validateFailureHistory = [];
 
   for (let attempt = 1; attempt <= MAX_ITERATIONS; attempt++) {
     onEvent({ type: 'phase', phase: 'GENERATE', attempt, total: MAX_ITERATIONS });
-    const retryHint = startFailureMsg
-      ? 'START'
+    const retryHint = spinFailureMsg
+      ? 'SPIN'
       : (validateFailureMsg ? 'VALIDATE' : (lastAttempt ? lastAttempt.phase : null));
     emitLog(onEvent, {
       level: 'phase',
@@ -242,10 +287,10 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
     let rawText = null;
     try {
       let lessonsBlock = { relatedLessons: [] };
-      if (startFailureMsg || validateFailureMsg) {
+      if (spinFailureMsg || validateFailureMsg) {
         lessonsBlock = await lessonStore.findForRetry({
           draft: normalized,
-          startFailureMsg,
+          spinFailureMsg,
           validateFailureMsg,
         });
         if (lessonsBlock.relatedLessons.length) {
@@ -275,7 +320,7 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
         draft: normalized,
         lessonsBlock,
         lastAssets,
-        startFailureMsg,
+        spinFailureMsg,
         validateFailureMsg,
         previousAttempt: prevForGenerate,
       });
@@ -318,7 +363,7 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
       // Validate every build.context referenced by the compose file actually
       // exists on disk with a Dockerfile. Catches the very common mistake of
       // emitting `build: ./service-name` while the writer puts files under
-      // `./services/service-name` — without this, START wastes 30-60s pulling
+      // `./services/service-name` — without this, SPIN wastes 30-60s pulling
       // base images before docker discovers the missing directory.
       const composeYaml = assets.dockerCompose || '';
       const buildCtxs = composeManager.extractBuildContexts(composeYaml);
@@ -372,105 +417,58 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
       continue;
     }
 
-    onEvent({ type: 'phase', phase: 'START', attempt, total: MAX_ITERATIONS });
+    onEvent({ type: 'phase', phase: 'SPIN', attempt, total: MAX_ITERATIONS });
     const buildCategory = normalized.meta?.category || normalized.category || null;
     let portMap;
     try {
-      const { content: composeYaml } = composeManager.readComposeFile(buildDir);
-      portMap = await composeManager.resolvePortMap(
-        buildDir, composeYaml, buildSessionId, { pool: 'build' },
-      );
-      emitLog(onEvent, {
-        level: 'info',
-        tag: 'start',
-        message: 'Allocated host ports',
-        detail: portMap,
-      });
-      emitLog(onEvent, { level: 'info', tag: 'start', message: 'Running docker compose up…' });
-      await composeManager.up(buildDir, portMap);
-      await composeManager.waitForServices(buildDir, portMap, 90_000);
-      emitLog(onEvent, { level: 'ok', tag: 'start', message: 'All services reported running' });
+      ({ portMap } = await spinAgent.spin({ buildDir, buildSessionId, onEvent }));
 
-      startFailureMsg = null;
-      if (startFailureHistory.length > 0) {
+      spinFailureMsg = null;
+      if (spinFailureHistory.length > 0) {
         const lessonId = await lessonStore.record({
-          phase: 'start',
+          phase: 'spin',
           draftSessionId,
           buildSessionId,
           category: buildCategory,
           title: normalized.meta?.name || normalized.title || assets?.title,
           draft: normalized,
-          failures: [...startFailureHistory],
+          failures: [...spinFailureHistory],
           assets,
         });
         if (lessonId) {
           emitLog(onEvent, {
             level: 'info',
             tag: 'lessons',
-            message: `Recorded START lesson #${lessonId}`,
-            detail: `${startFailureHistory.length} prior failure(s) before this success`,
+            message: `Recorded SPIN lesson #${lessonId}`,
+            detail: `${spinFailureHistory.length} prior failure(s) before this success`,
           });
         }
-        startFailureHistory.length = 0;
+        spinFailureHistory.length = 0;
       }
     } catch (e) {
-      // Strip docker pull-progress noise BEFORE we log, show, or stash for
-      // retry. Without this, a single failed Kafka pull can dump 250KB of
-      // "Downloading [==>]" lines into the retry context and blow the LLM's
-      // token-per-minute budget on the very next iteration.
-      const cleanMsg = composeManager.stripDockerNoise(e.message || '');
-      const cleanStderr = composeManager.stripDockerNoise(e.stderr || '');
-      const cleanStdout = composeManager.stripDockerNoise(e.stdout || '');
-      emitLog(onEvent, {
-        level: 'error',
-        tag: 'start',
-        message: 'Compose start failed',
-        detail: cap(cleanMsg, 1500),
-      });
-      if (cleanStderr) {
-        emitLog(onEvent, {
-          level: 'detail',
-          tag: 'start',
-          message: 'Compose stderr',
-          detail: cap(cleanStderr, 1500),
-        });
-      }
-      const rawLogs = await captureComposeLogs(buildDir, portMap).catch(() => null);
-      const logs = rawLogs ? composeManager.stripDockerNoise(rawLogs) : null;
-      if (logs) {
-        const head = logs.split('\n').slice(0, 40).join('\n');
-        emitLog(onEvent, {
-          level: 'detail',
-          tag: 'start',
-          message: `Container logs (${logs.length} bytes captured)`,
-          detail: head,
-        });
-      }
-      await composeManager.down(buildDir).catch(() => {});
-      await portAllocator.releaseIn('build', buildSessionId).catch(() => {});
-      startFailureMsg = {
-        message: cleanMsg || e.message,
-        composeStdout: cleanStdout || null,
-        composeStderr: cleanStderr || null,
-        logs,
+      spinFailureMsg = {
+        message: e.message,
+        composeStdout: e.composeStdout || null,
+        composeStderr: e.composeStderr || null,
+        logs: e.logs || null,
       };
       lastAttempt = {
-        phase: 'START',
-        message: startFailureMsg.message,
+        phase: 'SPIN',
+        message: spinFailureMsg.message,
         artifacts: assets,
         rawText: null,
         details: {
-          composeStdout: startFailureMsg.composeStdout,
-          composeStderr: startFailureMsg.composeStderr,
-          logs: startFailureMsg.logs,
+          composeStdout: spinFailureMsg.composeStdout,
+          composeStderr: spinFailureMsg.composeStderr,
+          logs: spinFailureMsg.logs,
         },
       };
-      const snap = captureFailureSnapshot({ attempt, phase: 'START', lastAttempt });
-      if (snap) startFailureHistory.push(snap);
+      const snap = captureFailureSnapshot({ attempt, phase: 'SPIN', lastAttempt });
+      if (snap) spinFailureHistory.push(snap);
       emitIterationSummary(onEvent, {
         attempt,
         total: MAX_ITERATIONS,
-        failedPhase: 'START',
+        failedPhase: 'SPIN',
         validation: null,
         draft: normalized,
         validationSpec: assets?.validationSpec,
@@ -628,13 +626,25 @@ async function runBuildLoop({ draft, draftSessionId, onEvent, terminalWsBase = n
   }
 
   // exhausted retries
-  cleanupBuild(buildDir);
+  const failedBuildDir = process.env.KEEP_FAILED_BUILDS === 'true' ? buildDir : null;
+  if (failedBuildDir) {
+    console.warn(`[build] KEEP_FAILED_BUILDS=true — preserving failed build at: ${buildDir}`);
+  } else {
+    cleanupBuild(buildDir);
+  }
   const err = new Error(`build pipeline exhausted ${MAX_ITERATIONS} iterations without a passing build`);
   err.lastFailure = lastAttempt
     ? `${lastAttempt.phase}: ${lastAttempt.message}`
     : null;
   err.lastAttempt = lastAttempt;
-  onEvent({ type: 'error', message: err.message, lastAttempt });
+  // failedBuildDir and lastAttempt are emitted so the route can persist them for resume
+  onEvent({
+    type: 'error',
+    message: err.message,
+    lastAttempt,
+    failedBuildDir,
+    failedBuildSessionId: buildSessionId,
+  });
   throw err;
 }
 

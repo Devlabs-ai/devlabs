@@ -1,35 +1,10 @@
 'use strict';
 
-const { streamWithEvents } = require('./agentRuntime');
+const { streamWithEvents } = require('../helpers/agentRuntime');
 const catalogueBrief = require('../catalogue/catalogueBrief');
 const { loadDraftDefaults } = require('../catalogue/draftFromCatalogue');
 const { primaryCategoryFromList, getExplicitCatalogueCategories } = require('../catalogue/catalogueCategories');
-const { V1_SCHEMA_PROMPT } = require('../draft/draftSchema');
-
-const SYSTEM_PROMPT = `You are the Schema Agent for "Devlabs" — Phase 2: MATERIALIZE v1 DRAFT JSON.
-
-The interviewer has APPROVED a locked Phase 1 design contract.
-You must emit schemaVersion: 1 inside <challenge_draft>...</challenge_draft>.
-
-Phase 2 is IMPLEMENTATION ONLY. The payload includes lockedContract with fields finalized in Phase 1.
-DO NOT change or contradict lockedContract.
-
-The user payload includes:
-- lockedContract: description, meta, arch, infra service names, brokenState, metricsIntent
-- catalogueBrief: catalogue rows for catalogueCategories (images, limits, handbook, observables)
-- catalogueDefaults: baseline infra/metrics from primary category draftDefaults
-
-RULES:
-1. Copy lockedContract.description, meta (including catalogueCategories), arch, brokenState verbatim.
-2. For each service in lockedContract.infra.services, fill image_hint and limits from catalogueBrief — names must match exactly.
-3. Do NOT add/remove/rename services unless lockedContract lists them.
-4. App/API services use python row image_hint unless catalogue says otherwise.
-5. Include load-generator with catalogue image when lockedContract.metricsIntent.enabled or metrics enabled.
-6. Do NOT emit metrics.observed or metrics.observe (pipeline fills observe from catalogue).
-7. Fill codebase.artifacts and data to support the locked story; refine validationSymptoms wording only if needed for build checks — keep the same meaning.
-8. Emit strictly valid JSON inside <challenge_draft> tags only.
-
-${V1_SCHEMA_PROMPT}`;
+const { SYSTEM_PROMPT } = require('../prompts/schemaAgent.prompt');
 
 function extractDraft(text) {
   const re = /<challenge_draft>([\s\S]*?)<\/challenge_draft>/g;
@@ -69,10 +44,6 @@ function buildSchemaPayload(sessionDraft) {
     arch: sessionDraft?.arch || '',
     infra: sessionDraft?.infra || { services: [] },
     brokenState: sessionDraft?.brokenState || { rootCause: '', validationSymptoms: [] },
-    metricsIntent: {
-      enabled: sessionDraft?.metrics?.enabled ?? false,
-      guidance: sessionDraft?.metrics?.display?.guidance || '',
-    },
   };
 
   return {

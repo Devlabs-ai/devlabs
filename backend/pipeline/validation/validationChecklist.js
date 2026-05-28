@@ -20,9 +20,9 @@ function buildValidationChecklist(draft, validationSpec) {
     const label = String(s.check || '').trim();
     if (!label) continue;
     items.push({
-      id: `symptom-${s.order ?? items.length + 1}`,
+      id: `symptom-${s.id ?? items.length + 1}`,
       kind: 'symptom',
-      order: s.order,
+      order: s.id ?? items.length + 1,
       label,
       status: 'pending',
       detail: null,
@@ -92,7 +92,7 @@ function applyValidationResults(checklist, { evidence = [], passed, feedback }) 
 const PIPELINE_PHASES = [
   { id: 'generate', phase: 'GENERATE', label: 'Generate challenge assets' },
   { id: 'write', phase: 'WRITE', label: 'Write files to build directory' },
-  { id: 'start', phase: 'START', label: 'Docker compose up & services running' },
+  { id: 'spin', phase: 'SPIN', label: 'Docker compose up & services running' },
   { id: 'validate', phase: 'VALIDATE', label: 'Validation checklist & judge' },
 ];
 

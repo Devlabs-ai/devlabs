@@ -22,13 +22,9 @@ const SHAPE_CONTRACT_HINT = `shape_contract JSON (schemaVersion implied 1, Phase
   "brokenState": {
     "rootCause": "exact technical root cause (setter-only)",
     "validationSymptoms": [
-      { "order": 1, "check": "broken: qualitative symptom candidate or metrics should show" },
-      { "order": 2, "check": "fixed: qualitative symptom after correct fix" }
+      { "id": 1, "check": "Concrete observable probe: e.g. GET /products/1 returns X, then PUT /products/1 with new value, then GET /products/1 again — still returns old X (stale data served)." },
+      { "id": 2, "check": "Another probe a candidate would run that further confirms the bug is present." }
     ]
-  },
-  "metricsIntent": {
-    "enabled": true,
-    "guidance": "what the candidate should watch in the metrics panel (qualitative)"
   }
 }`;
 
@@ -62,10 +58,10 @@ function normalizeValidationSymptoms(symptoms) {
   return symptoms
     .map((s, i) => {
       if (typeof s === 'string' && s.trim()) {
-        return { order: i + 1, check: s.trim() };
+        return { id: i + 1, check: s.trim() };
       }
       if (s && typeof s === 'object' && s.check) {
-        return { order: s.order || i + 1, check: String(s.check).trim() };
+        return { id: s.id ?? s.order ?? i + 1, check: String(s.check).trim() };
       }
       return null;
     })
@@ -106,7 +102,6 @@ function normalizeExtracted(extracted) {
     arch: extracted.arch?.trim() || '',
     infra: { services: normalizeServiceList(extracted.infra?.services) },
     brokenState,
-    metricsIntent: extracted.metricsIntent || null,
   };
 }
 
@@ -122,7 +117,6 @@ function extractShapeContract(text) {
       arch: contract.arch,
       infra: contract.infra,
       brokenState: contract.brokenState,
-      metricsIntent: contract.metricsIntent,
     });
   }
 
@@ -171,11 +165,6 @@ function extractShapeContract(text) {
     }
   }
 
-  const metricsRaw = extractTag(text, 'metrics_intent');
-  if (metricsRaw) {
-    try { out.metricsIntent = JSON.parse(metricsRaw); } catch (_e) { /* noop */ }
-  }
-
   return normalizeExtracted(out);
 }
 
@@ -201,16 +190,6 @@ function applyShapeContractToDraft(draft, extracted) {
       ? extracted.brokenState.validationSymptoms
       : (next.brokenState?.validationSymptoms || []),
   };
-  if (extracted.metricsIntent) {
-    next.metrics = next.metrics || {};
-    if (extracted.metricsIntent.enabled != null) next.metrics.enabled = extracted.metricsIntent.enabled;
-    if (extracted.metricsIntent.guidance) {
-      next.metrics.display = {
-        ...(next.metrics.display || {}),
-        guidance: extracted.metricsIntent.guidance,
-      };
-    }
-  }
   return next;
 }
 
@@ -268,17 +247,6 @@ function mergeLockedPhase1Fields(phase1Draft, generatedRaw) {
     catalogueCategories: locked.meta?.catalogueCategories || gen.meta?.catalogueCategories,
   };
 
-  const metrics = {
-    ...(gen.metrics || {}),
-    enabled: locked.metrics?.enabled ?? gen.metrics?.enabled,
-    display: {
-      ...(gen.metrics?.display || {}),
-      ...(locked.metrics?.display?.guidance
-        ? { guidance: locked.metrics.display.guidance }
-        : {}),
-    },
-  };
-
   return {
     ...gen,
     description: locked.description,
@@ -297,7 +265,7 @@ function mergeLockedPhase1Fields(phase1Draft, generatedRaw) {
         ? locked.brokenState.validationSymptoms
         : (gen.brokenState?.validationSymptoms || []),
     },
-    metrics,
+    metrics: gen.metrics || {},
   };
 }
 

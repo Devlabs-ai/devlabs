@@ -1,6 +1,6 @@
 'use strict';
 
-// Learned lessons from builds: recorded once when START or VALIDATE succeeds
+// Learned lessons from builds: recorded once when SPIN or VALIDATE succeeds
 // after one or more failures in that phase. Retrieved by semantic similarity
 // on retry. Best-effort — never blocks a build.
 
@@ -41,7 +41,7 @@ function buildFailureSummary(failures) {
 }
 
 function buildLessonText({ phase, category, failures, compose, validationFeedback }) {
-  const phaseLabel = phase === 'start' ? 'START' : 'VALIDATE';
+  const phaseLabel = phase === 'spin' ? 'SPIN' : 'VALIDATE';
   const lines = [];
   lines.push(`${phaseLabel} phase succeeded${category ? ` for category ${category}` : ''}.`);
   lines.push(`Failures observed before this success (${failures.length}):`);
@@ -68,12 +68,12 @@ async function record({
   validationFeedback = null,
 }) {
   if (!failures || failures.length === 0) return null;
-  if (phase !== 'start' && phase !== 'validate') return null;
+  if (phase !== 'spin' && phase !== 'validate') return null;
 
   const compose = assets?.dockerCompose || '';
   const problem_context = buildProblemContext(draft);
   const failure_summary = buildFailureSummary(failures);
-  const fix_summary = phase === 'start'
+  const fix_summary = phase === 'spin'
     ? 'Docker compose stack reached a healthy running state.'
     : 'Validation steps confirmed the broken state is observable in the sandbox.';
   const lesson_text = buildLessonText({
@@ -173,12 +173,12 @@ function shapeLessonForPrompt(lesson) {
   };
 }
 
-async function findForRetry({ draft, startFailureMsg, validateFailureMsg, k = LESSONS_K }) {
+async function findForRetry({ draft, spinFailureMsg, validateFailureMsg, k = LESSONS_K }) {
   const parts = [];
-  if (startFailureMsg) {
-    parts.push(startFailureMsg.message || '');
-    parts.push(startFailureMsg.composeStderr || '');
-    parts.push(startFailureMsg.logs || '');
+  if (spinFailureMsg) {
+    parts.push(spinFailureMsg.message || '');
+    parts.push(spinFailureMsg.composeStderr || '');
+    parts.push(spinFailureMsg.logs || '');
   }
   if (validateFailureMsg) {
     parts.push(validateFailureMsg.message || '');
@@ -194,11 +194,11 @@ async function findForRetry({ draft, startFailureMsg, validateFailureMsg, k = LE
   const byId = new Map();
   for (const h of hits) byId.set(h.id, h);
 
-  if (startFailureMsg && validateFailureMsg) {
+  if (spinFailureMsg && validateFailureMsg) {
     const startHits = await findSimilar({
-      text: [startFailureMsg.message, startFailureMsg.logs].filter(Boolean).join('\n'),
+      text: [spinFailureMsg.message, spinFailureMsg.logs].filter(Boolean).join('\n'),
       k: Math.ceil(k / 2),
-      phase: 'start',
+      phase: 'spin',
       category,
     });
     const valHits = await findSimilar({
@@ -248,7 +248,7 @@ async function listPaginated({ page = 1, limit = 20, phase = null, category = nu
   const params = [];
   let n = 1;
 
-  if (phase === 'start' || phase === 'validate') {
+  if (phase === 'spin' || phase === 'validate') {
     where.push(`phase = $${n}`);
     params.push(phase);
     n += 1;

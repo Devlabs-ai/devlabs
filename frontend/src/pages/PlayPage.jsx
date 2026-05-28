@@ -4,8 +4,7 @@ import AppPageHeader from '../components/AppPageHeader.jsx';
 import ChallengeLibrary from '../components/ChallengeLibrary.jsx';
 import ProblemStatement from '../components/ProblemStatement.jsx';
 import TerminalWorkspace from '../components/TerminalWorkspace.jsx';
-import MetricsDashboard from '../components/MetricsDashboard.jsx';
-import AlertsPanel from '../components/AlertsPanel.jsx';
+import CodeEditor from '../components/CodeEditor.jsx';
 import { BUCKETS, UNBUCKETED } from '../constants/buckets.js';
 
 const ALL_FILTER = '__all__';
@@ -116,14 +115,11 @@ export default function PlayPage() {
     activeSession,
     activeChallenge,
     endResult,
-    activeTab,
-    setActiveTab,
-    series,
-    latest,
-    recovered,
     onSelectChallenge,
     onBackToLibrary,
   } = useAppState();
+
+  const [rightTab, setRightTab] = useState('terminal');
 
   if (playState === 'library') {
     return (
@@ -158,51 +154,15 @@ export default function PlayPage() {
         <div className="col">
           <div className="panel" style={{ flex: 1 }}>
             <div className="panel-header">
-              <div className="panel-tabs">
-                <button
-                  type="button"
-                  className={`panel-tab ${activeTab === 'problem' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('problem')}
-                >
-                  <span className="icon">◆</span> Incident Brief
-                </button>
-                <button
-                  type="button"
-                  className={`panel-tab ${activeTab === 'metrics' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('metrics')}
-                >
-                  <span className="icon">▲</span> Live Metrics
-                  {latest && (
-                    <span className={`tab-pill ${latest.latency < 50 ? 'ok' : latest.latency < 200 ? 'warn' : 'bad'}`}>
-                      {Math.round(latest.latency)}ms
-                    </span>
-                  )}
-                  {recovered && <span className="tab-pill ok">✓</span>}
-                </button>
+              <div className="title">
+                <span className="icon">◆</span> Inc Brief
               </div>
-              {activeTab === 'problem' && activeChallenge?.difficulty && (
+              {activeChallenge?.difficulty && (
                 <span className="meta">{activeChallenge.difficulty}</span>
               )}
-              {activeTab === 'metrics' && (
-                <span className="meta">1 Hz</span>
-              )}
             </div>
-            <div className="panel-body tab-body">
-              <div className="tab-pane" style={{ display: activeTab === 'problem' ? 'block' : 'none' }}>
-                <ProblemStatement challenge={activeChallenge} />
-              </div>
-              <div
-                className="tab-pane tab-pane-flex"
-                style={{ display: activeTab === 'metrics' ? 'flex' : 'none' }}
-              >
-                <AlertsPanel latest={latest} />
-                <MetricsDashboard
-                  series={series}
-                  latest={latest}
-                  recovered={recovered}
-                  portMap={activeSession.portMap}
-                />
-              </div>
+            <div className="panel-body">
+              <ProblemStatement challenge={activeChallenge} />
             </div>
           </div>
         </div>
@@ -210,22 +170,47 @@ export default function PlayPage() {
         <div className="col col-main">
           <div className="panel" style={{ flex: 1 }}>
             <div className="panel-header">
-              <div className="title">
-                <span className="term-dots"><span /><span /><span /></span>
-                Terminal — {activeChallenge?.id || 'sandbox'}
+              <div className="panel-tabs">
+                <button
+                  type="button"
+                  className={`panel-tab ${rightTab === 'terminal' ? 'active' : ''}`}
+                  onClick={() => setRightTab('terminal')}
+                >
+                  <span className="term-dots"><span /><span /><span /></span>
+                  Terminal
+                </button>
+                <button
+                  type="button"
+                  className={`panel-tab ${rightTab === 'editor' ? 'active' : ''}`}
+                  onClick={() => setRightTab('editor')}
+                >
+                  <span className="icon">&#9632;</span> Editor
+                </button>
               </div>
               <span className="meta">
                 {(activeSession.services || []).length}{' '}
                 {(activeSession.services || []).length === 1 ? 'container' : 'containers'} ·{' '}
-                {activeSession.id.slice(0, 8)}
+                <span title={activeSession.id} style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                  {activeSession.id.slice(0, 8)}
+                </span>
               </span>
             </div>
             <div className="panel-body flush">
-              <TerminalWorkspace
-                services={activeSession.services}
-                baseWsUrl={activeSession.terminalWsUrl}
-                defaultService={activeSession.terminalService}
-              />
+              {/* Terminal stays mounted to keep WebSocket alive */}
+              <div style={{ display: rightTab === 'terminal' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                <TerminalWorkspace
+                  services={activeSession.services}
+                  baseWsUrl={activeSession.terminalWsUrl}
+                  defaultService={activeSession.terminalService}
+                />
+              </div>
+              <div style={{ display: rightTab === 'editor' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                <CodeEditor
+                  sessionId={activeSession.id}
+                  services={activeSession.services}
+                  defaultContainer={activeSession.terminalService}
+                />
+              </div>
             </div>
           </div>
         </div>

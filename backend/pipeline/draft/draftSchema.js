@@ -273,7 +273,8 @@ const V1_SCHEMA_PROMPT = `DRAFT JSON SCHEMA (schemaVersion: 1):
   "brokenState": {
     "rootCause": "setter-only: exact technical cause",
     "validationSymptoms": [
-      { "order": 1, "check": "qualitative symptom the built sandbox must exhibit" }
+      { "id": 1, "check": "Concrete probe + wrong result that proves the bug: action a candidate takes and the surprising output they see." },
+      { "id": 2, "check": "Another reproducible probe that further confirms the broken state. Do NOT describe the fixed/healthy state." }
     ]
   }
 }
@@ -283,6 +284,9 @@ RULES:
 - description must NOT include precise SLA numbers (no p99=500ms, no 800 RPS).
 - Put sizing knobs in data.distribution and infra.limits, not in description.
 - Custom app services: Python (Flask) unless category requires JVM (spark).
+- description must NOT mention the load generator, traffic generator, simulated traffic,
+  load simulation, or any internal tooling. The candidate should not know that synthetic
+  traffic is being generated. Write only from the perspective of real user-reported symptoms.
 - Emit inside <challenge_draft>...</challenge_draft> as strict JSON.`;
 
 module.exports = {

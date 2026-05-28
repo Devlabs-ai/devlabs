@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { spawn } = require('child_process');
 const { requireSessionAccess } = require('../auth/middleware');
 const lifecycle = require('../sandbox/sessionLifecycle');
 const sessionStore = require('../db/sessionStore');
@@ -10,8 +11,106 @@ const terminalEventBus = require('../observability/terminalEventBus');
 
 const router = express.Router();
 
+// Reject any path containing ".." segments to prevent path traversal.
+function safePath(p) {
+  if (!p || typeof p !== 'string') return null;
+  const parts = p.split('/');
+  if (parts.some((seg) => seg === '..')) return null;
+  return p.startsWith('/') ? p : `/${p}`;
+}
+
+function getSession(id, res) {
+  const session = sessionStore.get(id);
+  if (!session) { res.status(404).json({ error: 'session not found' }); return null; }
+  if (!session.buildDir) { res.status(409).json({ error: 'sandbox not running' }); return null; }
+  return session;
+}
+
+// GET /api/session/:id/file?path=<abs-path>&container=<service>
+router.get('/:id/file', async (req, res) => {
+  const session = getSession(req.params.id, res);
+  if (!session) return;
+
+  const filePath = safePath(req.query.path);
+  if (!filePath) return res.status(400).json({ error: 'invalid path' });
+
+  const container = req.query.container || session.terminalService || (session.services || [])[0];
+  if (!container) return res.status(400).json({ error: 'no container specified' });
+
+  const child = spawn(
+    'docker',
+    ['compose', 'exec', '-T', container, 'cat', filePath],
+    { cwd: session.buildDir, env: process.env },
+  );
+
+  let content = '';
+  let stderr = '';
+  child.stdout.on('data', (d) => { content += d.toString(); });
+  child.stderr.on('data', (d) => { stderr += d.toString(); });
+  child.on('error', (err) => res.status(500).json({ error: err.message }));
+  child.on('close', (code) => {
+    if (code !== 0) {
+      return res.status(404).json({ error: `file not found or unreadable: ${stderr.trim()}` });
+    }
+    res.json({ path: filePath, container, content });
+  });
+});
+
+// POST /api/session/:id/file  { path, content, container }
+router.post('/:id/file', express.json({ limit: '2mb' }), async (req, res) => {
+  const session = getSession(req.params.id, res);
+  if (!session) return;
+
+  const filePath = safePath(req.body?.path);
+  if (!filePath) return res.status(400).json({ error: 'invalid path' });
+
+  const { content = '', container: reqContainer } = req.body || {};
+  const container = reqContainer || session.terminalService || (session.services || [])[0];
+  if (!container) return res.status(400).json({ error: 'no container specified' });
+
+  // Use `tee` to write content from stdin into the file inside the container.
+  const child = spawn(
+    'docker',
+    ['compose', 'exec', '-T', container, 'sh', '-c', `tee '${filePath}' > /dev/null`],
+    { cwd: session.buildDir, env: process.env },
+  );
+
+  let stderr = '';
+  child.stderr.on('data', (d) => { stderr += d.toString(); });
+  child.on('error', (err) => res.status(500).json({ error: err.message }));
+  child.on('close', (code) => {
+    if (code !== 0) {
+      return res.status(500).json({ error: `write failed: ${stderr.trim()}` });
+    }
+    res.json({ ok: true, path: filePath, container });
+  });
+
+  child.stdin.write(content);
+  child.stdin.end();
+});
+
 const PORT = parseInt(process.env.PORT || '4000', 10);
 const BACKEND_HOST = `localhost:${PORT}`;
+
+// Services that run in the background for metrics/load but should never be
+// exposed to candidates as interactive terminal tabs or editor targets.
+const HIDDEN_SERVICE_PATTERNS = [
+  /^load[-_]?gen(erator)?$/i,
+  /^load[-_]?generator[-_]/i,
+  /^traffic[-_]?gen(erator)?$/i,
+];
+
+function isHiddenService(name) {
+  return HIDDEN_SERVICE_PATTERNS.some((re) => re.test(name));
+}
+
+function candidateServices(allServices) {
+  const list = Array.isArray(allServices) && allServices.length > 0
+    ? allServices
+    : [];
+  const visible = list.filter((s) => !isHiddenService(s));
+  return visible.length > 0 ? visible : list; // fallback: show all if everything was filtered
+}
 
 function publicSession(s, challenge) {
   return {
@@ -23,9 +122,11 @@ function publicSession(s, challenge) {
     endTime: s.endTime,
     score: s.score,
     recovered: s.recovered,
-    services: Array.isArray(s.services) && s.services.length > 0
-      ? s.services
-      : Object.keys(s.portMap || {}),
+    services: candidateServices(
+      Array.isArray(s.services) && s.services.length > 0
+        ? s.services
+        : Object.keys(s.portMap || {}),
+    ),
     portMap: s.portMap,
     metricsService: s.metricsService,
     terminalService: s.terminalService,

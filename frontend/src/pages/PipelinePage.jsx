@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { streamBuild, getProblemSession } from '../services/problemApi.js';
 
-const PHASES = ['GENERATE', 'WRITE', 'START', 'VALIDATE'];
+const PHASES = ['GENERATE', 'WRITE', 'SPIN', 'VALIDATE'];
 
 function PhaseTracker({ phase, attempt, total, status, validation, running }) {
   // The run is finished once we know its terminal state. After this point
@@ -259,12 +259,20 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
             {status === 'review_ready' && (
               <button className="primary sm" onClick={onGoReview}>Open Review →</button>
             )}
+            {running && (
+              <button
+                className="danger sm"
+                onClick={() => { if (abortRef.current) abortRef.current.abort(); }}
+              >
+                Stop
+              </button>
+            )}
             <button
               onClick={start}
               disabled={startDisabled}
               title={!draftReady ? 'Draft incomplete (description, rootCause, infra.services)' : !llmReady ? 'LLM not configured' : ''}
             >
-              {running ? 'Running…' : status === 'review_ready' ? 'Rebuild' : 'Start build'}
+              {running ? 'Running…' : status === 'review_ready' ? 'Rebuild' : (draft.buildFailedDir ? 'Resume build' : 'Start build')}
             </button>
           </div>
         </div>
@@ -277,6 +285,15 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
             validation={validation}
             running={running}
           />
+          {draft.buildFailedDir && !running && status !== 'review_ready' && (
+            <div className="alert info">
+              Previous failed build preserved — clicking <strong>Resume build</strong> will reuse
+              its generated assets as a starting point for the new run.
+              {draft.buildFailedPhase && (
+                <span style={{ marginLeft: 6 }}>Last failure: <code>{draft.buildFailedPhase}</code></span>
+              )}
+            </div>
+          )}
           {err && <div className="alert">{err}</div>}
           {latestChecklist && <IterationChecklist checklist={latestChecklist} />}
           {validation && <ValidationCard result={validation} />}
