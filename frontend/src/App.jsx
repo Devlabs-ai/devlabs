@@ -3,12 +3,11 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import LandingPage from './pages/LandingPage.jsx';
 import PlayPage from './pages/PlayPage.jsx';
 import AuthoringPage from './pages/AuthoringPage.jsx';
-import MemoriesPage from './pages/MemoriesPage.jsx';
 import AppLayout from './layouts/AppLayout.jsx';
 import { AppStateProvider } from './context/AppStateContext.jsx';
 import { getToken, logout, resolveInvite } from './services/authApi.js';
 import { fetchChallenges, fetchChallenge } from './services/challengeApi.js';
-import { startSession, endSession } from './services/sessionApi.js';
+import { startSession, endSession, restoreSession } from './services/sessionApi.js';
 import { useMetricsState } from './components/MetricsDashboard.jsx';
 
 const CANDIDATE_PARAM = 'candidate';
@@ -131,12 +130,48 @@ export default function App() {
       setActiveChallenge(res.challenge || challenge);
       setActiveTab('problem');
       setPlayState('active');
+      navigate(`/play/${res.sessionId}`, { replace: true });
       if (authMode === 'candidate') clearCandidateParam();
     } catch (e) {
       setStartError(e?.response?.data?.error || e.message);
       setPlayState('library');
     }
   };
+
+  // Restore an in-progress session when the user navigates directly to /play/:sessionId
+  useEffect(() => {
+    if (playState !== 'library' || authMode === 'resolving') return;
+    const match = location.pathname.match(/^\/play\/([a-zA-Z0-9-]+)$/);
+    if (!match) return;
+    const sessionId = match[1];
+    setPlayState('loading');
+    restoreSession(sessionId)
+      .then((res) => {
+        if (!res || res.status === 'ended') {
+          setPlayState('library');
+          navigate('/play', { replace: true });
+          return;
+        }
+        setActiveSession({
+          id: res.sessionId,
+          startTime: res.startTime || Date.now(),
+          recovered: res.session?.recovered ?? false,
+          terminalWsUrl: res.terminalWsUrl,
+          metricsWsUrl: res.metricsWsUrl,
+          portMap: res.portMap || null,
+          services: res.services || [],
+          terminalService: res.terminalService || null,
+        });
+        setActiveChallenge(res.challenge || null);
+        setActiveTab('problem');
+        setPlayState('active');
+      })
+      .catch(() => {
+        setPlayState('library');
+        navigate('/play', { replace: true });
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authMode]);
 
   useEffect(() => {
     if (
@@ -271,15 +306,17 @@ export default function App() {
         <Route path="/" element={<Navigate to="/play" replace />} />
         <Route element={<AppLayout />}>
           <Route path="play" element={<PlayPage />} />
+          <Route path="play/:sessionId" element={<PlayPage />} />
           {isInterviewer ? (
             <>
               <Route path="authoring" element={<AuthoringPage />} />
-              <Route path="memories" element={<MemoriesPage />} />
+              <Route path="authoring/:draftId" element={<AuthoringPage />} />
+              <Route path="authoring/:draftId/:tab" element={<AuthoringPage />} />
             </>
           ) : (
             <>
               <Route path="authoring" element={<Navigate to="/play" replace />} />
-              <Route path="memories" element={<Navigate to="/play" replace />} />
+              <Route path="authoring/*" element={<Navigate to="/play" replace />} />
             </>
           )}
         </Route>

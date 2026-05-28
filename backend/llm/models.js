@@ -22,16 +22,12 @@
 const { createOpenAI } = require('@ai-sdk/openai');
 const { createAnthropic } = require('@ai-sdk/anthropic');
 
-const DEFAULT_TEXT = 'openai:gpt-4o';
-const DEFAULT_VALIDATION = 'openai:gpt-4o-mini';
-const DEFAULT_EMBEDDING = 'openai:text-embedding-3-small';
-
 const DEFAULTS = {
-  design:     DEFAULT_TEXT,
-  schema:     DEFAULT_TEXT,
-  code:       DEFAULT_TEXT,
-  validation: DEFAULT_VALIDATION,
-  embedding:  DEFAULT_EMBEDDING,
+  design:     'openai:gpt-4.5',
+  schema:     'openai:gpt-4o',
+  code:       'openai:gpt-4o',
+  validation: 'openai:gpt-4o-mini',
+  embedding:  'openai:text-embedding-3-small',
 };
 
 const TEXT_AGENTS = ['design', 'schema', 'code', 'validation'];
@@ -65,7 +61,7 @@ function modelIdFor(agent) {
   if (process.env.LLM_MODEL_DEFAULT) return process.env.LLM_MODEL_DEFAULT;
   const legacy = legacyDefaultModelId();
   if (legacy) return legacy;
-  return DEFAULTS[key] || DEFAULT_TEXT;
+  return DEFAULTS[key] || DEFAULTS.design;
 }
 
 function splitId(modelId) {

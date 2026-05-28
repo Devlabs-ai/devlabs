@@ -274,13 +274,9 @@ export default function ProblemSetterPage({
     ? draft.shapeContractMissing
     : shapeContractMissingLocal(draft?.draft);
   const canApprove = canChat && shapeContractComplete;
-  const canGenerateSchema = designApproved
-    && shapePhase === 'schema'
-    && !schemaMaterialized
-    && !draftReady
-    && llmReady;
-  const canRevise = designApproved && !schemaMaterialized && !draftReady;
-  const canGoBuild = draftReady && (schemaMaterialized || isDraftBuildReadyLocal(draft?.draft));
+  const canGenerateSchema = designApproved && shapePhase === 'schema' && llmReady;
+  const canRevise = designApproved && shapePhase !== 'ready';
+  const canGoBuild = (!!draft?.draftReady || isDraftBuildReadyLocal(draft?.draft)) && schemaMaterialized;
   const schemaIncomplete = schemaMaterialized && !draftReady && !isDraftBuildReadyLocal(draft?.draft);
   const showSchema = schemaMaterialized || draftReady || shapePhase === 'ready'
     || (designApproved && (draft?.draft?.infra?.services || []).some(
@@ -538,7 +534,7 @@ export default function ProblemSetterPage({
             )}
             {canGenerateSchema && (
               <button type="button" className="sm" disabled={busy} onClick={handleGenerateSchema}>
-                {busy ? 'Generating…' : 'Generate schema'}
+                {busy ? 'Generating…' : schemaMaterialized ? 'Regenerate schema' : 'Generate schema'}
               </button>
             )}
             {canGoBuild && (
@@ -551,9 +547,6 @@ export default function ProblemSetterPage({
               >
                 Build → Pipeline
               </button>
-            )}
-            {schemaIncomplete && (
-              <span className="pill warn sm">Schema incomplete — regenerate or edit contract</span>
             )}
           </div>
         </div>

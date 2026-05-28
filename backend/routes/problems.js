@@ -272,6 +272,12 @@ router.post('/:sessionId/revise-design', async (req, res, next) => {
     d.designApproved = false;
     d.shapePhase = 'design';
     d.schemaMaterialized = false;
+    // Strip Phase 2 image_hints back to name-only so isDraftReady returns false
+    if (d.draft?.infra?.services?.length) {
+      d.draft.infra.services = d.draft.infra.services.map((s) => ({
+        name: typeof s === 'string' ? s : s.name,
+      }));
+    }
     draftStore.set(d.id, d);
     await draftStore.persist(d);
 
@@ -358,6 +364,11 @@ router.post('/:sessionId/build', async (req, res) => {
 
   const send = openSse(res);
 
+  // If the previous run failed and preserved its build dir, offer it as resume context
+  const prevFailedBuildDir = d.buildStatus === 'failed' && d.buildFailedDir ? d.buildFailedDir : null;
+  const prevFailurePhase = d.buildFailedPhase || null;
+  const prevFailureMsg = d.buildFailedMsg || null;
+
   d.buildStatus = 'building';
   d.buildAttempts = 0;
   d.buildLogs = [];
@@ -365,6 +376,7 @@ router.post('/:sessionId/build', async (req, res) => {
   d.buildLatestChecklist = null;
   d.buildCurrentPhase = null;
   d.buildCurrentAttempt = 0;
+  // Keep buildFailedDir until the new run completes (it may need it)
   draftStore.set(d.id, d);
   await draftStore.snapshotBuildState(d);
   await draftStore.persist(d).catch(() => {});
@@ -388,6 +400,13 @@ router.post('/:sessionId/build', async (req, res) => {
     if (ev.type === 'buildDir') {
       d.buildDir = ev.buildDir;
     }
+    if (ev.type === 'error' && ev.failedBuildDir) {
+      // Store the failed build dir so a future re-run can resume from it
+      d.buildFailedDir = ev.failedBuildDir;
+      d.buildFailedSessionId = ev.failedBuildSessionId;
+      d.buildFailedPhase = ev.lastAttempt?.phase || null;
+      d.buildFailedMsg = ev.lastAttempt?.message || null;
+    }
     draftStore.set(d.id, d);
     draftStore.snapshotBuildState(d).catch(() => {});
     send(ev);
@@ -399,6 +418,9 @@ router.post('/:sessionId/build', async (req, res) => {
       draftSessionId: d.id,
       onEvent,
       terminalWsBase: TERMINAL_WS_BASE,
+      resumeBuildDir: prevFailedBuildDir,
+      resumeFailurePhase: prevFailurePhase,
+      resumeFailureMsg: prevFailureMsg,
     });
 
     d.buildSessionId = result.buildSessionId;
@@ -406,6 +428,11 @@ router.post('/:sessionId/build', async (req, res) => {
     d.builtChallenge = result.builtChallenge;
     d.buildValidation = result.buildValidation;
     d.buildStatus = 'review_ready';
+    // Successful build — clear any stale failed-build context
+    d.buildFailedDir = null;
+    d.buildFailedSessionId = null;
+    d.buildFailedPhase = null;
+    d.buildFailedMsg = null;
     draftStore.set(d.id, d);
     await draftStore.persist(d).catch(() => {});
 
@@ -423,6 +450,23 @@ router.post('/:sessionId/build', async (req, res) => {
     send({ type: 'error', message: e.message, code: e.code || null, lastFailure: e.lastFailure || null });
   } finally {
     try { res.end(); } catch (_e) { /* noop */ }
+  }
+});
+
+router.post('/:sessionId/cancel-build', async (req, res, next) => {
+  try {
+    const d = draftStore.get(req.params.sessionId);
+    if (!d) return res.status(404).json({ error: 'draft session not found' });
+    if (d.buildStatus !== 'building') {
+      return res.json({ ok: true, buildStatus: d.buildStatus });
+    }
+    d.buildStatus = 'failed';
+    d.buildCurrentPhase = null;
+    draftStore.set(d.id, d);
+    await draftStore.persist(d).catch(() => {});
+    return res.json({ ok: true, buildStatus: 'failed' });
+  } catch (e) {
+    next(e);
   }
 });
 

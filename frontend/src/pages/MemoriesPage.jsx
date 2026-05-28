@@ -91,7 +91,7 @@ function LessonCard({ item, expanded, onToggle }) {
     <article className={`memories-card ${expanded ? 'expanded' : ''}`}>
       <button type="button" className="memories-card-head" onClick={onToggle}>
         <div className="memories-card-title">
-          <span className={`pill ${item.phase === 'start' ? 'warn' : 'pass'}`}>{item.phase}</span>
+          <span className={`pill ${item.phase === 'spin' ? 'warn' : 'pass'}`}>{item.phase}</span>
           {item.category && <span className="pill dim">{item.category}</span>}
           <strong>{item.title || 'Untitled build'}</strong>
         </div>
@@ -207,7 +207,7 @@ export default function MemoriesPage() {
             Phase
             <select value={phaseFilter} onChange={(e) => setPhaseFilter(e.target.value)}>
               <option value="">All</option>
-              <option value="start">start</option>
+              <option value="spin">spin</option>
               <option value="validate">validate</option>
             </select>
           </label>
@@ -225,7 +225,7 @@ export default function MemoriesPage() {
         <div className="review-empty">
           {tab === 'catalogue'
             ? 'No catalogue rows yet. Restart the backend to seed from pipeline/catalogue/seeds when the table is empty.'
-            : 'No lessons yet. Lessons are recorded when a build succeeds after failures in START or VALIDATE.'}
+            : 'No lessons yet. Lessons are recorded when a build succeeds after failures in SPIN or VALIDATE.'}
         </div>
       ) : (
         <>

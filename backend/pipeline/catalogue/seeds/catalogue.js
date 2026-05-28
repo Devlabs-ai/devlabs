@@ -16,7 +16,7 @@ const CATALOG = [
   {
     category: 'docker-images',
     details: { source: 'seed', policy: 'global-image-policy' },
-    text: 'NEVER use Bitnami Docker images (`bitnami/kafka`, `bitnami/zookeeper`, `bitnami/postgresql`, etc.) in compose files — many tags fail with "manifest not found". Do NOT invent Docker image tags or version numbers; only use refs from the catalogue or past successful builds. For Kafka use `confluentinc/cp-kafka:7.6.1` in KRaft mode; for Postgres use `postgres:16-alpine`; for Zookeeper (legacy Kafka only) use `confluentinc/cp-zookeeper:7.6.1`. Hallucinated tags cause START failures that waste build iterations.',
+    text: 'NEVER use Bitnami Docker images (`bitnami/kafka`, `bitnami/zookeeper`, `bitnami/postgresql`, etc.) in compose files — many tags fail with "manifest not found". Do NOT invent Docker image tags or version numbers; only use refs from the catalogue or past successful builds. For Kafka use `confluentinc/cp-kafka:7.6.1` in KRaft mode; for Postgres use `postgres:16-alpine`; for Zookeeper (legacy Kafka only) use `confluentinc/cp-zookeeper:7.6.1`. Hallucinated tags cause SPIN failures that waste build iterations.',
   },
 
   {
@@ -241,6 +241,23 @@ const CATALOG = [
       { id: 'max_task_sec', algorithm: 'max', field: 'maxTaskSec', requires: { roles: ['load-generator', 'spark'] } },
       { id: 'shuffle_skew_max', algorithm: 'max', field: 'shuffleSkew', requires: { roles: ['load-generator', 'spark'] } },
       { id: 'stage_progress_min', algorithm: 'min', field: 'stageProgress', requires: { roles: ['load-generator', 'spark'] } },
+    ],
+  },
+
+  {
+    category: 'hadoop-yarn',
+    details: {
+      image: 'apache/hadoop:3.3.6',
+      resourceManagerPort: 8088,
+      nameNodePort: 9870,
+      nodeManagerPort: 8042,
+    },
+    text: 'Docker image `apache/hadoop:3.3.6` for a YARN cluster alongside Spark. Typical compose layout: `hadoop-namenode` (HDFS NameNode + ResourceManager, ports 9870/8088) and `hadoop-datanode` (DataNode + NodeManager, port 8042). Set `HADOOP_HOME=/opt/hadoop`, `YARN_RESOURCEMANAGER_HOSTNAME=hadoop-namenode`, `YARN_NODEMANAGER_RESOURCE_MEMORY_MB`, `YARN_SCHEDULER_MAXIMUM_ALLOCATION_MB`. Submit Spark jobs with `spark-submit --master yarn --deploy-mode cluster`. Pitfalls: ResourceManager and NodeManager must share the same cluster-id; namenode must be formatted (`hdfs namenode -format`) on first boot; YARN and HDFS ports are separate — do not conflate them. Use compose DNS names (`hadoop-namenode:8088`) not localhost.',
+    metricFormat: 'METRIC yarnPendingContainers=<int> yarnAllocatedVcores=<float> yarnMemoryUsedMB=<float>',
+    observables: [
+      { id: 'yarn_pending_containers_max', algorithm: 'max', field: 'yarnPendingContainers', requires: { roles: ['load-generator', 'hadoop-yarn'] } },
+      { id: 'yarn_allocated_vcores_max', algorithm: 'max', field: 'yarnAllocatedVcores', requires: { roles: ['load-generator', 'hadoop-yarn'] } },
+      { id: 'yarn_memory_used_median', algorithm: 'median', field: 'yarnMemoryUsedMB', requires: { roles: ['load-generator', 'hadoop-yarn'] } },
     ],
   },
 
