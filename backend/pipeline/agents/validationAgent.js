@@ -203,6 +203,7 @@ async function validate({ buildDir, portMap, sandboxSpec, draft, validationSpec,
 
   log({ level: 'phase', tag: 'validate', message: 'Asking validation judge to evaluate evidence…' });
   const text = await llm.completeMessage({
+    agent: 'validation',
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userMessage }],
     maxTokens: 1024,

@@ -1,6 +1,6 @@
 'use strict';
 
-const llm = require('../../llm/client');
+const { streamWithEvents } = require('./agentRuntime');
 const catalogueBrief = require('../catalogue/catalogueBrief');
 const { loadDraftDefaults } = require('../catalogue/draftFromCatalogue');
 const { primaryCategoryFromList, getExplicitCatalogueCategories } = require('../catalogue/catalogueCategories');
@@ -87,11 +87,6 @@ function buildSchemaPayload(sessionDraft) {
 }
 
 async function generateSchema({ sessionDraft, onEvent }) {
-  if (!llm.isConfigured()) {
-    const e = new Error('LLM is not configured');
-    e.code = 'LLM_NOT_CONFIGURED';
-    throw e;
-  }
   if (!sessionDraft?.description?.trim()) {
     const e = new Error('approved design contract is required before generating schema');
     e.status = 400;
@@ -101,21 +96,15 @@ async function generateSchema({ sessionDraft, onEvent }) {
   const payload = buildSchemaPayload(sessionDraft);
   const userContent = JSON.stringify(payload, null, 2);
 
-  let fullText = '';
-  try {
-    fullText = await llm.streamMessage({
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userContent }],
-      maxTokens: 8192,
-      onText: (delta) => onEvent({ type: 'text', delta }),
-    });
-  } catch (e) {
-    onEvent({ type: 'error', message: e.message });
-    throw e;
-  }
+  const fullText = await streamWithEvents({
+    agent: 'schema',
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userContent }],
+    maxTokens: 8192,
+    onEvent,
+  });
 
   const raw = extractDraft(fullText);
-  onEvent({ type: 'done' });
   return { fullText, raw };
 }
 

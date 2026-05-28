@@ -1,205 +1,124 @@
 'use strict';
 
-// Provider-agnostic LLM client. The rest of the codebase only imports
-// `isConfigured`, `getModel`, `streamMessage`, `completeMessage` from here —
-// it never touches the underlying SDK. This lets you flip between
-// Anthropic and OpenAI by setting:
+// Provider-agnostic LLM facade for the rest of the codebase.
 //
-//   LLM_PROVIDER=anthropic        (default)
-//     ANTHROPIC_API_KEY=sk-ant-...
-//     ANTHROPIC_BASE_URL=         (optional proxy)
-//     ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
+// Callers import only:
+//   isConfigured, getProvider, getModel
+//   streamMessage({ system, messages, maxTokens, onText, agent })
+//   completeMessage({ system, messages, maxTokens, agent })
+//   embed(text)                                  -> Float[] | null
 //
-//   LLM_PROVIDER=openai
-//     OPENAI_API_KEY=sk-...
-//     OPENAI_BASE_URL=            (optional proxy, e.g. LiteLLM / OpenRouter)
-//     OPENAI_MODEL=gpt-4o
-//
-// Both providers expose:
-//   streamMessage({ system, messages, onText, maxTokens }) -> fullText
-//   completeMessage({ system, messages, maxTokens })       -> fullText
-//
-// messages: [{ role: 'user' | 'assistant', content: string }, ...]
+// Internally everything routes through the Vercel AI SDK + the per-agent
+// model registry in ./models.js. To pick a different model for an agent,
+// set LLM_MODEL_<AGENT> (or LLM_MODEL_DEFAULT for all of them). See
+// ./models.js for the resolution order.
 
-const Anthropic = require('@anthropic-ai/sdk');
-const OpenAI = require('openai');
+const { streamText, generateText, embed: aiEmbed } = require('ai');
+const {
+  EMBEDDING_DIM,
+  modelIdFor,
+  providerOf,
+  isKeyConfiguredFor,
+  languageModelFor,
+  embeddingModel,
+  listConfiguredModels,
+  configurationReport,
+} = require('./models');
 
-const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5-20250929';
-const DEFAULT_OPENAI_MODEL = 'gpt-4o';
-const DEFAULT_OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
-const EMBEDDING_DIM = 1536;
+const DEFAULT_TEXT_AGENT = 'design';
+const EMBED_MAX_CHARS = 8000;
 
 function getProvider() {
-  const p = (process.env.LLM_PROVIDER || 'anthropic').toLowerCase();
-  return p === 'openai' ? 'openai' : 'anthropic';
-}
-
-function isConfigured() {
-  if (getProvider() === 'openai') return !!process.env.OPENAI_API_KEY;
-  return !!process.env.ANTHROPIC_API_KEY;
+  // "Provider" is no longer a single global setting — different agents may
+  // use different providers. We return the provider of the default text
+  // agent for back-compat with callers that just want to surface a single
+  // label (Authoring config endpoint, error messages).
+  return providerOf(modelIdFor(DEFAULT_TEXT_AGENT));
 }
 
 function getModel() {
-  if (getProvider() === 'openai') return process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
-  return process.env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL;
+  const id = modelIdFor(DEFAULT_TEXT_AGENT);
+  const colon = id.indexOf(':');
+  return colon < 0 ? id : id.slice(colon + 1);
 }
 
-// --- clients (lazy) ------------------------------------------------------
-
-let _anthropic = null;
-function getAnthropic() {
-  if (_anthropic) return _anthropic;
-  if (!process.env.ANTHROPIC_API_KEY) {
-    const e = new Error('ANTHROPIC_API_KEY is not set');
-    e.code = 'LLM_NOT_CONFIGURED';
-    throw e;
-  }
-  const opts = { apiKey: process.env.ANTHROPIC_API_KEY };
-  if (process.env.ANTHROPIC_BASE_URL) opts.baseURL = process.env.ANTHROPIC_BASE_URL;
-  _anthropic = new Anthropic(opts);
-  return _anthropic;
+function isConfigured() {
+  // Every provider in active use across the registry needs its key set.
+  return configurationReport().allConfigured;
 }
 
-let _openai = null;
-function getOpenAI() {
-  if (_openai) return _openai;
-  if (!process.env.OPENAI_API_KEY) {
-    const e = new Error('OPENAI_API_KEY is not set');
-    e.code = 'LLM_NOT_CONFIGURED';
-    throw e;
-  }
-  const opts = { apiKey: process.env.OPENAI_API_KEY };
-  if (process.env.OPENAI_BASE_URL) opts.baseURL = process.env.OPENAI_BASE_URL;
-  _openai = new OpenAI(opts);
-  return _openai;
-}
-
-// --- streaming -----------------------------------------------------------
-
-async function streamWithAnthropic({ system, messages, maxTokens, onText }) {
-  const client = getAnthropic();
-  const stream = await client.messages.stream({
-    model: getModel(),
-    max_tokens: maxTokens,
+async function streamMessage({
+  system,
+  messages,
+  maxTokens = 4096,
+  onText,
+  agent = DEFAULT_TEXT_AGENT,
+}) {
+  const model = languageModelFor(agent);
+  const { textStream } = streamText({
+    model,
     system,
     messages,
+    maxOutputTokens: maxTokens,
   });
 
   let full = '';
-  stream.on('text', (delta) => {
+  for await (const delta of textStream) {
     full += delta;
     if (onText) {
-      try { onText(delta); } catch (_e) { /* don't kill the stream */ }
-    }
-  });
-
-  await stream.finalMessage();
-  return full;
-}
-
-async function streamWithOpenAI({ system, messages, maxTokens, onText }) {
-  const client = getOpenAI();
-  const merged = [];
-  if (system) merged.push({ role: 'system', content: system });
-  for (const m of messages || []) merged.push({ role: m.role, content: m.content });
-
-  const stream = await client.chat.completions.create({
-    model: getModel(),
-    max_tokens: maxTokens,
-    stream: true,
-    messages: merged,
-  });
-
-  let full = '';
-  for await (const chunk of stream) {
-    const delta = chunk.choices?.[0]?.delta?.content;
-    if (!delta) continue;
-    full += delta;
-    if (onText) {
-      try { onText(delta); } catch (_e) { /* noop */ }
+      try { onText(delta); } catch (_e) { /* never let UI callback kill the stream */ }
     }
   }
   return full;
 }
 
-async function streamMessage({ system, messages, maxTokens = 4096, onText }) {
-  if (getProvider() === 'openai') {
-    return streamWithOpenAI({ system, messages, maxTokens, onText });
-  }
-  return streamWithAnthropic({ system, messages, maxTokens, onText });
-}
-
-// --- one-shot ------------------------------------------------------------
-
-async function completeWithAnthropic({ system, messages, maxTokens }) {
-  const client = getAnthropic();
-  const resp = await client.messages.create({
-    model: getModel(),
-    max_tokens: maxTokens,
+async function completeMessage({
+  system,
+  messages,
+  maxTokens = 8192,
+  agent = DEFAULT_TEXT_AGENT,
+}) {
+  const model = languageModelFor(agent);
+  const { text } = await generateText({
+    model,
     system,
     messages,
+    maxOutputTokens: maxTokens,
   });
-  return (resp.content || [])
-    .filter((p) => p.type === 'text')
-    .map((p) => p.text)
-    .join('');
-}
-
-async function completeWithOpenAI({ system, messages, maxTokens }) {
-  const client = getOpenAI();
-  const merged = [];
-  if (system) merged.push({ role: 'system', content: system });
-  for (const m of messages || []) merged.push({ role: m.role, content: m.content });
-
-  const resp = await client.chat.completions.create({
-    model: getModel(),
-    max_tokens: maxTokens,
-    messages: merged,
-  });
-  return resp.choices?.[0]?.message?.content || '';
-}
-
-async function completeMessage({ system, messages, maxTokens = 8192 }) {
-  if (getProvider() === 'openai') {
-    return completeWithOpenAI({ system, messages, maxTokens });
-  }
-  return completeWithAnthropic({ system, messages, maxTokens });
+  return text;
 }
 
 // --- embeddings ----------------------------------------------------------
 
-// Embeddings always use OpenAI's text-embedding-3-small. Anthropic does not
-// have a first-party embeddings API, so even when LLM_PROVIDER=anthropic
-// we route embeddings through OpenAI if OPENAI_API_KEY is set. Without an
-// OpenAI key, `embed()` returns null and the caller treats memory as cold.
-function getEmbeddingModel() {
-  return process.env.OPENAI_EMBEDDING_MODEL || DEFAULT_OPENAI_EMBEDDING_MODEL;
-}
-
 function isEmbeddingConfigured() {
-  return !!process.env.OPENAI_API_KEY;
+  const provider = providerOf(modelIdFor('embedding'));
+  return isKeyConfiguredFor(provider);
 }
 
-// Hard cap on the input text we send to the embedding endpoint. The model
-// itself accepts ~8K tokens, but we don't want any single failure/exemplar
-// dragging more text into one vector than is useful.
-const EMBED_MAX_CHARS = 8000;
+function getEmbeddingModel() {
+  const id = modelIdFor('embedding');
+  const colon = id.indexOf(':');
+  return colon < 0 ? id : id.slice(colon + 1);
+}
 
 async function embed(text) {
   if (!isEmbeddingConfigured()) return null;
   const input = String(text || '').slice(0, EMBED_MAX_CHARS).trim();
   if (!input) return null;
   try {
-    const client = getOpenAI();
-    const resp = await client.embeddings.create({
-      model: getEmbeddingModel(),
-      input,
-    });
-    const vec = resp.data?.[0]?.embedding;
-    if (!Array.isArray(vec) || vec.length !== EMBEDDING_DIM) return null;
-    return vec;
+    const model = embeddingModel();
+    const { embedding } = await aiEmbed({ model, value: input });
+    if (!Array.isArray(embedding) || embedding.length !== EMBEDDING_DIM) {
+      // The pgvector column is fixed at 1536 — a different-dim model would
+      // silently corrupt nearest-neighbour search. Refuse rather than write.
+      console.warn(
+        `[llm] embed() got vector of length ${embedding?.length}, expected ${EMBEDDING_DIM} — dropping`,
+      );
+      return null;
+    }
+    return embedding;
   } catch (e) {
-    // Never let an embedding failure bubble up; memory is best-effort.
+    // Memory is best-effort; never bubble up.
     console.warn(`[llm] embed() failed: ${e.message}`);
     return null;
   }
@@ -214,8 +133,7 @@ module.exports = {
   embed,
   isEmbeddingConfigured,
   getEmbeddingModel,
+  listConfiguredModels,
+  configurationReport,
   EMBEDDING_DIM,
-  DEFAULT_ANTHROPIC_MODEL,
-  DEFAULT_OPENAI_MODEL,
-  DEFAULT_OPENAI_EMBEDDING_MODEL,
 };

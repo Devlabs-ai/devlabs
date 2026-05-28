@@ -1,6 +1,16 @@
 'use strict';
 
-const llm = require('../../llm/client');
+// Phase 1: DESIGN CONTRACT agent.
+//
+// Holds a streaming chat with the interviewer to nail down the challenge
+// shape — story, catalogue categories, service names, root cause, validation
+// intent. Emits <shape_contract> JSON when ready. Never emits a full v1
+// challenge_draft (that's Phase 2 / schemaAgent).
+//
+// LLM model is resolved from the 'design' registry key in backend/llm/models.js
+// (override with LLM_MODEL_DESIGN; default openai:gpt-4o).
+
+const { streamWithEvents } = require('./agentRuntime');
 const { listAvailableCategoryKeys } = require('../catalogue/catalogueCategories');
 const {
   SHAPE_CONTRACT_HINT,
@@ -40,39 +50,24 @@ RULES:
 - After emitting <shape_contract>, summarise and ask if the author wants changes or is ready to approve.`;
 }
 
-async function streamDescriptionTurn({ messages, onEvent }) {
-  if (!llm.isConfigured()) {
-    const provider = llm.getProvider();
-    const keyName = provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY';
-    const e = new Error(
-      `${keyName} is not configured. Set it in backend/.env to use the design agent.`,
-    );
-    e.code = 'LLM_NOT_CONFIGURED';
-    throw e;
-  }
-
-  let fullText = '';
-  try {
-    fullText = await llm.streamMessage({
-      system: buildSystemPrompt(),
-      messages,
-      maxTokens: 8192,
-      onText: (delta) => onEvent({ type: 'text', delta }),
-    });
-  } catch (e) {
-    onEvent({ type: 'error', message: e.message });
-    throw e;
-  }
+async function streamDesignTurn({ messages, onEvent }) {
+  const fullText = await streamWithEvents({
+    agent: 'design',
+    system: buildSystemPrompt(),
+    messages,
+    maxTokens: 8192,
+    onEvent,
+    emitDone: false,
+  });
 
   const extracted = extractShapeContract(fullText);
-  if (extracted) onEvent({ type: 'description', extracted });
+  if (extracted) onEvent({ type: 'design', extracted });
   onEvent({ type: 'done' });
   return { fullText, extracted };
 }
 
 module.exports = {
   buildSystemPrompt,
-  extractDescriptionPayload: extractShapeContract,
   extractShapeContract,
-  streamDescriptionTurn,
+  streamDesignTurn,
 };

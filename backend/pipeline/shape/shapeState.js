@@ -6,19 +6,23 @@ const {
   validateShapeContract,
 } = require('./shapeContract');
 
-const SHAPE_PHASES = ['description', 'schema', 'ready'];
+// Phase machine for a draft session:
+//   design  — Phase 1 (designAgent owns the chat; shape contract being shaped)
+//   schema  — Phase 2 (schemaAgent materializes the v1 challenge JSON)
+//   ready   — schema generated, draft is build-ready
+const SHAPE_PHASES = ['design', 'schema', 'ready'];
 
 function defaultShapeState() {
   return {
-    shapePhase: 'description',
-    descriptionApproved: false,
+    shapePhase: 'design',
+    designApproved: false,
     schemaMaterialized: false,
   };
 }
 
 function ensureShapeState(session) {
-  if (!session.shapePhase) session.shapePhase = 'description';
-  if (session.descriptionApproved == null) session.descriptionApproved = false;
+  if (!session.shapePhase) session.shapePhase = 'design';
+  if (session.designApproved == null) session.designApproved = false;
   if (session.schemaMaterialized == null) session.schemaMaterialized = false;
   return session;
 }
@@ -29,17 +33,17 @@ function syncShapePhase(session) {
 
   if (session.schemaMaterialized && buildReady) {
     session.shapePhase = 'ready';
-    session.descriptionApproved = true;
-  } else if (session.descriptionApproved) {
+    session.designApproved = true;
+  } else if (session.designApproved) {
     session.shapePhase = 'schema';
   } else {
-    session.shapePhase = 'description';
+    session.shapePhase = 'design';
   }
 
   // Heal sessions incorrectly marked ready before Phase 2 completed.
   if (session.shapePhase === 'ready' && !session.schemaMaterialized) {
-    session.descriptionApproved = false;
-    session.shapePhase = 'description';
+    session.designApproved = false;
+    session.shapePhase = 'design';
   }
 
   return session.shapePhase;
@@ -49,14 +53,14 @@ function isShapeContractComplete(session) {
   return validateShapeContract(session?.draft).ok;
 }
 
-function canChatDescription(session) {
+function canChatDesign(session) {
   syncShapePhase(session);
-  return session.shapePhase === 'description' && !session.descriptionApproved;
+  return session.shapePhase === 'design' && !session.designApproved;
 }
 
 function canGenerateSchema(session) {
   syncShapePhase(session);
-  return session.descriptionApproved
+  return session.designApproved
     && session.shapePhase === 'schema'
     && !session.schemaMaterialized
     && isShapeContractComplete(session);
@@ -72,7 +76,7 @@ function publicShapeFields(session) {
   const validation = validateShapeContract(session?.draft);
   return {
     shapePhase: session.shapePhase,
-    descriptionApproved: session.descriptionApproved,
+    designApproved: session.designApproved,
     schemaMaterialized: !!session.schemaMaterialized,
     draftReady: computeDraftReady(session),
     shapeContractComplete: validation.ok,
@@ -84,7 +88,7 @@ function publicShapeFields(session) {
 function applyDraft(session, draft) {
   session.draft = normalizeDraft(draft);
   if (isDraftReady(session.draft)) {
-    session.descriptionApproved = true;
+    session.designApproved = true;
     session.schemaMaterialized = true;
     session.shapePhase = 'ready';
   }
@@ -92,12 +96,12 @@ function applyDraft(session, draft) {
 }
 
 /** Merge Phase 1 design contract extraction into partial draft. */
-function applyDescriptionExtraction(session, extracted) {
+function applyDesignExtraction(session, extracted) {
   if (!extracted) return session.draft;
   session.draft = applyShapeContractToDraft(session.draft, extracted);
   if (!session.schemaMaterialized) {
-    session.shapePhase = 'description';
-    session.descriptionApproved = false;
+    session.shapePhase = 'design';
+    session.designApproved = false;
   }
   return session.draft;
 }
@@ -105,7 +109,7 @@ function applyDescriptionExtraction(session, extracted) {
 function markSchemaMaterialized(session, draft) {
   session.draft = normalizeDraft(draft);
   session.schemaMaterialized = true;
-  session.descriptionApproved = true;
+  session.designApproved = true;
   session.shapePhase = isDraftReady(session.draft) ? 'ready' : 'schema';
   return session;
 }
@@ -120,12 +124,12 @@ module.exports = {
   defaultShapeState,
   ensureShapeState,
   syncShapePhase,
-  canChatDescription,
+  canChatDesign,
   canGenerateSchema,
   computeDraftReady,
   publicShapeFields,
   applyDraft,
-  applyDescriptionExtraction,
+  applyDesignExtraction,
   markSchemaMaterialized,
   hasCatalogueCategories,
   isShapeContractComplete,

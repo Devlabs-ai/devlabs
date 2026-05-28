@@ -325,7 +325,7 @@ function storedServicesMissingImageHints(draft) {
 /** Re-apply challenge_draft from chat when a prior merge stripped image_hint values. */
 function repairSchemaFromMessages(session) {
   const { isDraftReady, normalizeDraft } = require('../draft/draftSchema');
-  if (!session?.descriptionApproved) return false;
+  if (!session?.designApproved) return false;
   if (isDraftReady(session.draft) && !storedServicesMissingImageHints(session.draft)) return false;
 
   const messages = session.messages || [];
@@ -338,7 +338,7 @@ function repairSchemaFromMessages(session) {
     if (!isDraftReady(normalized)) continue;
     session.draft = normalized;
     session.schemaMaterialized = true;
-    session.descriptionApproved = true;
+    session.designApproved = true;
     session.shapePhase = 'ready';
     return true;
   }
