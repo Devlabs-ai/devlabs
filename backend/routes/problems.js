@@ -5,8 +5,9 @@ const express = require('express');
 const { requireInterviewer } = require('../auth/middleware');
 const draftStore = require('../pipeline/stores/problemDraftStore');
 const reviewStore = require('../pipeline/stores/reviewStore');
-const problemAgent = require('../pipeline/agents/problemAgent');
-const buildAgent = require('../pipeline/agents/buildAgent');
+const designAgent = require('../pipeline/agents/designAgent');
+const schemaAgent = require('../pipeline/agents/schemaAgent');
+const buildPipeline = require('../pipeline/pipelines/buildPipeline');
 const { promote } = require('../pipeline/promoteToVerified');
 const llm = require('../llm/client');
 const shapeState = require('../pipeline/shape/shapeState');
@@ -85,11 +86,14 @@ function publicDraft(d) {
 }
 
 router.get('/config', (_req, res) => {
+  const report = llm.configurationReport();
   res.json({
-    llmConfigured: llm.isConfigured(),
+    llmConfigured: report.allConfigured,
     provider: llm.getProvider(),
-    model: llm.isConfigured() ? llm.getModel() : null,
-    maxIterations: buildAgent.MAX_ITERATIONS,
+    model: report.allConfigured ? llm.getModel() : null,
+    models: report.models,
+    providers: report.providers,
+    maxIterations: buildPipeline.MAX_ITERATIONS,
   });
 });
 
@@ -140,7 +144,7 @@ router.delete('/:sessionId', async (req, res, next) => {
   try {
     const d = draftStore.get(req.params.sessionId);
     if (d && d.buildDir) {
-      await buildAgent.teardownBuild(d.buildSessionId || d.id, d.buildDir).catch(() => {});
+      await buildPipeline.teardownBuild(d.buildSessionId || d.id, d.buildDir).catch(() => {});
     }
     await draftStore.remove(req.params.sessionId);
     await reviewStore.remove(req.params.sessionId);
@@ -180,20 +184,20 @@ router.patch('/:sessionId/meta', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// --- Phase 1: description chat (SSE) -------------------------------------
+// --- Phase 1: design chat (SSE) ------------------------------------------
 
 router.post('/:sessionId/chat', async (req, res) => {
   const d = draftStore.get(req.params.sessionId);
   if (!d) return res.status(404).json({ error: 'draft session not found' });
 
   shapeState.syncShapePhase(d);
-  if (!shapeState.canChatDescription(d)) {
+  if (!shapeState.canChatDesign(d)) {
     return res.status(409).json({
       error: d.shapePhase === 'ready'
-        ? 'description is locked — draft is ready for build'
-        : 'description is approved — use Generate schema, or Edit contract to ask more questions in Phase 1',
+        ? 'design contract is locked — draft is ready for build'
+        : 'design contract is approved — use Generate schema, or Edit contract to ask more questions in Phase 1',
       shapePhase: d.shapePhase,
-      descriptionApproved: d.descriptionApproved,
+      designApproved: d.designApproved,
     });
   }
 
@@ -209,7 +213,7 @@ router.post('/:sessionId/chat', async (req, res) => {
   let assistantText = '';
 
   try {
-    const { extracted } = await problemAgent.streamDescriptionTurn({
+    const { extracted } = await designAgent.streamDesignTurn({
       messages: d.messages.map((m) => ({ role: m.role, content: m.content })),
       onEvent: (ev) => {
         if (ev.type === 'text') assistantText += ev.delta;
@@ -218,7 +222,7 @@ router.post('/:sessionId/chat', async (req, res) => {
     });
 
     d.messages.push({ role: 'assistant', content: assistantText });
-    if (extracted) shapeState.applyDescriptionExtraction(d, extracted);
+    if (extracted) shapeState.applyDesignExtraction(d, extracted);
     draftStore.set(d.id, d);
     await draftStore.persist(d);
     send({ type: 'shape', ...shapeState.publicShapeFields(d) });
@@ -230,9 +234,9 @@ router.post('/:sessionId/chat', async (req, res) => {
   }
 });
 
-// --- Approve description → Phase 2 ---------------------------------------
+// --- Approve design contract → Phase 2 -----------------------------------
 
-router.post('/:sessionId/approve-description', async (req, res, next) => {
+router.post('/:sessionId/approve-design', async (req, res, next) => {
   try {
     const d = draftStore.get(req.params.sessionId);
     if (!d) return res.status(404).json({ error: 'draft session not found' });
@@ -245,7 +249,7 @@ router.post('/:sessionId/approve-description', async (req, res, next) => {
       });
     }
 
-    d.descriptionApproved = true;
+    d.designApproved = true;
     d.shapePhase = 'schema';
     draftStore.set(d.id, d);
     await draftStore.persist(d);
@@ -254,7 +258,7 @@ router.post('/:sessionId/approve-description', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.post('/:sessionId/revise-description', async (req, res, next) => {
+router.post('/:sessionId/revise-design', async (req, res, next) => {
   try {
     const d = draftStore.get(req.params.sessionId);
     if (!d) return res.status(404).json({ error: 'draft session not found' });
@@ -265,8 +269,8 @@ router.post('/:sessionId/revise-description', async (req, res, next) => {
       });
     }
 
-    d.descriptionApproved = false;
-    d.shapePhase = 'description';
+    d.designApproved = false;
+    d.shapePhase = 'design';
     d.schemaMaterialized = false;
     draftStore.set(d.id, d);
     await draftStore.persist(d);
@@ -282,8 +286,8 @@ router.post('/:sessionId/generate-schema', async (req, res) => {
   if (!d) return res.status(404).json({ error: 'draft session not found' });
 
   shapeState.syncShapePhase(d);
-  if (!d.descriptionApproved) {
-    return res.status(409).json({ error: 'approve the description before generating schema' });
+  if (!d.designApproved) {
+    return res.status(409).json({ error: 'approve the design contract before generating schema' });
   }
   if (!shapeState.isShapeContractComplete(d)) {
     return res.status(400).json({
@@ -296,7 +300,7 @@ router.post('/:sessionId/generate-schema', async (req, res) => {
   let assistantText = '';
 
   try {
-    const { raw } = await problemAgent.generateSchema({
+    const { raw } = await schemaAgent.generateSchema({
       sessionDraft: d.draft,
       onEvent: (ev) => {
         if (ev.type === 'text') assistantText += ev.delta;
@@ -390,7 +394,7 @@ router.post('/:sessionId/build', async (req, res) => {
   };
 
   try {
-    const result = await buildAgent.runBuildLoop({
+    const result = await buildPipeline.runBuildLoop({
       draft: normalizeDraft(d.draft),
       draftSessionId: d.id,
       onEvent,
@@ -433,7 +437,7 @@ router.post('/:sessionId/push-to-sandbox', async (req, res, next) => {
     });
 
     if (d.buildDir) {
-      await buildAgent.teardownBuild(d.buildSessionId || d.id, d.buildDir).catch(() => {});
+      await buildPipeline.teardownBuild(d.buildSessionId || d.id, d.buildDir).catch(() => {});
       d.buildDir = null;
     }
     d.buildStatus = null;

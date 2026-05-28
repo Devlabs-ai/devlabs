@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { DesignValidationChecklist } from '../components/ValidationChecklist.jsx';
 import {
   streamChat,
-  approveDescription,
-  reviseDescription,
+  approveDesign,
+  reviseDesign,
   generateSchema,
 } from '../services/problemApi.js';
 
@@ -86,9 +86,9 @@ function shapeContractMissingLocal(d) {
   return missing;
 }
 
-function PhaseBadge({ shapePhase, descriptionApproved, draftReady, schemaMaterialized }) {
+function PhaseBadge({ shapePhase, designApproved, draftReady, schemaMaterialized }) {
   const labels = {
-    description: 'Phase 1 — Design contract',
+    design: 'Phase 1 — Design contract',
     schema: schemaMaterialized && draftReady
       ? 'Ready to build'
       : schemaMaterialized
@@ -103,7 +103,7 @@ function PhaseBadge({ shapePhase, descriptionApproved, draftReady, schemaMateria
   );
 }
 
-function DescriptionPanel({ draft, shapePhase, descriptionApproved, shapeContractMissing }) {
+function DescriptionPanel({ draft, shapePhase, designApproved, shapeContractMissing }) {
   const description = draft?.description?.trim();
   const rootCause = draft?.brokenState?.rootCause?.trim();
   const meta = draft?.meta || {};
@@ -190,14 +190,14 @@ function DescriptionPanel({ draft, shapePhase, descriptionApproved, shapeContrac
         </details>
       )}
 
-      {missing.length > 0 && shapePhase === 'description' && !descriptionApproved && (
+      {missing.length > 0 && shapePhase === 'design' && !designApproved && (
         <p className="contract-footnote warn">
           Still needed before approve: <strong>{missing.join(', ')}</strong>
         </p>
       )}
-      {shapePhase === 'description' && !descriptionApproved && missing.length === 0 && (
+      {shapePhase === 'design' && !designApproved && missing.length === 0 && (
         <p className="contract-footnote">
-          Design contract complete. Keep chatting to refine, or click <strong>Approve description</strong> when ready.
+          Design contract complete. Keep chatting to refine, or click <strong>Approve design</strong> when ready.
         </p>
       )}
     </div>
@@ -260,12 +260,12 @@ export default function ProblemSetterPage({
   const scrollRef = useRef(null);
   const abortRef = useRef(null);
 
-  const shapePhase = draft?.shapePhase || 'description';
-  const descriptionApproved = !!draft?.descriptionApproved;
+  const shapePhase = draft?.shapePhase || 'design';
+  const designApproved = !!draft?.designApproved;
   const schemaMaterialized = !!draft?.schemaMaterialized;
   const draftReady = !!draft?.draftReady || isDraftBuildReadyLocal(draft?.draft);
   const llmReady = !!llmConfig?.llmConfigured;
-  const canChat = shapePhase === 'description' && !descriptionApproved;
+  const canChat = shapePhase === 'design' && !designApproved;
   const shapeContractComplete = draft?.shapeContractComplete
     ?? isShapeContractCompleteLocal(draft?.draft);
   const shapeContractMissing = (draft?.shapeContractMissing?.length
@@ -274,16 +274,16 @@ export default function ProblemSetterPage({
     ? draft.shapeContractMissing
     : shapeContractMissingLocal(draft?.draft);
   const canApprove = canChat && shapeContractComplete;
-  const canGenerateSchema = descriptionApproved
+  const canGenerateSchema = designApproved
     && shapePhase === 'schema'
     && !schemaMaterialized
     && !draftReady
     && llmReady;
-  const canRevise = descriptionApproved && !schemaMaterialized && !draftReady;
+  const canRevise = designApproved && !schemaMaterialized && !draftReady;
   const canGoBuild = draftReady && (schemaMaterialized || isDraftBuildReadyLocal(draft?.draft));
   const schemaIncomplete = schemaMaterialized && !draftReady && !isDraftBuildReadyLocal(draft?.draft);
   const showSchema = schemaMaterialized || draftReady || shapePhase === 'ready'
-    || (descriptionApproved && (draft?.draft?.infra?.services || []).some(
+    || (designApproved && (draft?.draft?.infra?.services || []).some(
       (s) => typeof s === 'object' && s.image_hint,
     ));
 
@@ -321,7 +321,7 @@ export default function ProblemSetterPage({
         if (ev.type === 'text') {
           assistantText += ev.delta;
           setStreamingText(assistantText);
-        } else if (ev.type === 'description') {
+        } else if (ev.type === 'design') {
           const ex = ev.extracted || {};
           partial = {
             ...partial,
@@ -381,7 +381,7 @@ export default function ProblemSetterPage({
     setBusy(true);
     setErr(null);
     try {
-      const { draft: updated } = await approveDescription(draft.id);
+      const { draft: updated } = await approveDesign(draft.id);
       if (onRefreshSession) await onRefreshSession();
       else onDraftChanged(updated);
     } catch (e) {
@@ -399,7 +399,7 @@ export default function ProblemSetterPage({
     setBusy(true);
     setErr(null);
     try {
-      const { draft: updated } = await reviseDescription(draft.id);
+      const { draft: updated } = await reviseDesign(draft.id);
       if (onRefreshSession) await onRefreshSession();
       else onDraftChanged(updated);
     } catch (e) {
@@ -466,7 +466,7 @@ export default function ProblemSetterPage({
             {draft.draft?.meta?.name || draft.draft?.title || 'New draft'}
             <PhaseBadge
               shapePhase={shapePhase}
-              descriptionApproved={descriptionApproved}
+              designApproved={designApproved}
               draftReady={draftReady}
               schemaMaterialized={schemaMaterialized}
             />
@@ -528,7 +528,7 @@ export default function ProblemSetterPage({
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {canApprove && (
               <button type="button" className="sm" disabled={busy} onClick={handleApprove}>
-                Approve description
+                Approve design
               </button>
             )}
             {canRevise && (
@@ -564,7 +564,7 @@ export default function ProblemSetterPage({
             <DescriptionPanel
               draft={draft.draft}
               shapePhase={shapePhase}
-              descriptionApproved={descriptionApproved}
+              designApproved={designApproved}
               shapeContractMissing={shapeContractMissing}
             />
           )}

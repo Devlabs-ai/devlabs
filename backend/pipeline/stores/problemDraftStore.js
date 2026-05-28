@@ -19,7 +19,7 @@ const { normalizeDraft, isDraftReady } = require('../draft/draftSchema');
 // id -> draft session object
 const drafts = new Map();
 
-function makeDraft({ id = uuidv4(), draft = null, shapePhase, descriptionApproved, schemaMaterialized } = {}) {
+function makeDraft({ id = uuidv4(), draft = null, shapePhase, designApproved, schemaMaterialized } = {}) {
   const shape = defaultShapeState();
   return {
     id,
@@ -28,7 +28,7 @@ function makeDraft({ id = uuidv4(), draft = null, shapePhase, descriptionApprove
     messages: [],
     draft,
     shapePhase: shapePhase || shape.shapePhase,
-    descriptionApproved: descriptionApproved ?? shape.descriptionApproved,
+    designApproved: designApproved ?? shape.designApproved,
     schemaMaterialized: schemaMaterialized ?? shape.schemaMaterialized,
     testSessionId: null,
     buildStatus: null,        // null | 'building' | 'review_ready' | 'failed'
@@ -73,7 +73,7 @@ async function persist(d) {
       JSON.stringify({
         messages: d.messages || [],
         shapePhase: d.shapePhase,
-        descriptionApproved: d.descriptionApproved,
+        designApproved: d.designApproved,
         schemaMaterialized: d.schemaMaterialized,
         buildStatus: d.buildStatus,
         buildSessionId: d.buildSessionId,
@@ -97,13 +97,19 @@ async function restoreFromDB() {
   let restored = 0;
   for (const row of rows) {
     const meta = row.build_logs || {};
+    // Back-compat: legacy drafts persisted shapePhase as 'description' and the
+    // boolean as descriptionApproved. Normalize to the new 'design' names on
+    // load; the next persist() write-back updates the row in place.
+    const legacyPhase = meta.shapePhase || 'design';
+    const shapePhase = legacyPhase === 'description' ? 'design' : legacyPhase;
+    const designApproved = !!(meta.designApproved ?? meta.descriptionApproved);
     const d = {
       id: row.id,
       createdAt: Number(row.created_at) || Date.now(),
       updatedAt: Number(row.updated_at) || Date.now(),
       messages: Array.isArray(meta.messages) ? meta.messages : [],
-      shapePhase: meta.shapePhase || 'description',
-      descriptionApproved: !!meta.descriptionApproved,
+      shapePhase,
+      designApproved,
       schemaMaterialized: !!meta.schemaMaterialized,
       draft: row.draft || null,
       testSessionId: null,
@@ -119,7 +125,9 @@ async function restoreFromDB() {
       buildCurrentPhase: meta.buildCurrentPhase || null,
       buildCurrentAttempt: meta.buildCurrentAttempt || 0,
     };
-    const persistedPhase = meta.shapePhase || 'description';
+    // Use the raw on-disk phase (pre-normalization) so the diff at the bottom
+    // re-persists drafts whose stored phase was the legacy 'description'.
+    const persistedPhase = legacyPhase;
     if (d.draft?.infra && !d.schemaMaterialized) {
       d.draft = { ...d.draft, infra: stripInfraImplementation(d.draft.infra) };
     }

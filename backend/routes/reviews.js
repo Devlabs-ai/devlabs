@@ -5,7 +5,7 @@ const express = require('express');
 const { requireInterviewer } = require('../auth/middleware');
 const reviewStore = require('../pipeline/stores/reviewStore');
 const draftStore = require('../pipeline/stores/problemDraftStore');
-const buildAgent = require('../pipeline/agents/buildAgent');
+const buildPipeline = require('../pipeline/pipelines/buildPipeline');
 const { promote } = require('../pipeline/promoteToVerified');
 const { normalizeBucket } = require('../challenges/buckets');
 
@@ -60,7 +60,7 @@ router.post('/:sessionId/push', async (req, res, next) => {
     });
 
     if (draft.buildDir) {
-      await buildAgent.teardownBuild(draft.id, draft.buildDir).catch(() => {});
+      await buildPipeline.teardownBuild(draft.id, draft.buildDir).catch(() => {});
       draft.buildDir = null;
     }
     draft.buildStatus = null;
@@ -76,7 +76,7 @@ router.delete('/:sessionId', async (req, res, next) => {
   try {
     const draft = draftStore.get(req.params.sessionId);
     if (draft && draft.buildDir) {
-      await buildAgent.teardownBuild(draft.id, draft.buildDir).catch(() => {});
+      await buildPipeline.teardownBuild(draft.id, draft.buildDir).catch(() => {});
       draft.buildDir = null;
       draft.buildStatus = null;
       draftStore.set(draft.id, draft);

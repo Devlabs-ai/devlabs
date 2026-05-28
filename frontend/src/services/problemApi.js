@@ -109,18 +109,18 @@ export function streamChat(sessionId, message, onEvent, { signal } = {}) {
   });
 }
 
-export async function approveDescription(sessionId) {
+export async function approveDesign(sessionId) {
   const { data } = await axios.post(
-    `/api/problems/${sessionId}/approve-description`,
+    `/api/problems/${sessionId}/approve-design`,
     {},
     { headers: getAuthHeader() },
   );
   return data;
 }
 
-export async function reviseDescription(sessionId) {
+export async function reviseDesign(sessionId) {
   const { data } = await axios.post(
-    `/api/problems/${sessionId}/revise-description`,
+    `/api/problems/${sessionId}/revise-design`,
     {},
     { headers: getAuthHeader() },
   );

@@ -3,7 +3,7 @@
 ## Two-phase Shape
 
 1. **Phase 1 — Design contract** (`POST /api/problems/:id/chat`): agent emits `<shape_contract>` JSON with description, meta (name, category, difficulty, catalogueCategories), arch, infra service **names**, brokenState (rootCause + validationSymptoms), metricsIntent. Legacy tags still parsed as fallback.
-2. **Approve** (`POST /api/problems/:id/approve-description`): locks the full contract; all required fields must be present.
+2. **Approve** (`POST /api/problems/:id/approve-design`): locks the full contract; all required fields must be present.
 3. **Phase 2 — Schema** (`POST /api/problems/:id/generate-schema`): queries catalogue for locked categories, materializes images/limits/codebase/data; server re-applies locked Phase 1 fields after LLM output.
 
 Drafts are stored as JSON (`schemaVersion: 1`) in `draft_sessions.draft`.
