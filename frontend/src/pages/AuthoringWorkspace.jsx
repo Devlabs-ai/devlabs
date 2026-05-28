@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 
 import AppPageHeader from '../components/AppPageHeader.jsx';
 import ProblemSetterPage from './ProblemSetterPage.jsx';
@@ -14,6 +15,7 @@ import {
   deleteProblemSession,
   getProblemConfig,
   updateDraftMeta,
+  cancelBuild,
 } from '../services/problemApi.js';
 
 const WORKFLOW = [
@@ -41,8 +43,9 @@ function formatRelativeTime(iso) {
   return new Date(iso).toLocaleDateString();
 }
 
-function WorkflowNav({ tab, onTab, activeDraft, onBucketChange, bucketBusy }) {
+function WorkflowNav({ tab, onTab, activeDraft, onBucketChange, bucketBusy, onCancelBuild, cancelBusy }) {
   const currentBucket = activeDraft?.draft?.meta?.bucket || '';
+  const stuckBuilding = activeDraft?.buildStatus === 'building';
   return (
     <nav className="authoring-workflow" aria-label="Authoring workflow">
       {WORKFLOW.map((w, i) => (
@@ -70,6 +73,17 @@ function WorkflowNav({ tab, onTab, activeDraft, onBucketChange, bucketBusy }) {
               {statusLabel(activeDraft.buildStatus)}
             </span>
           )}
+          {stuckBuilding && (
+            <button
+              type="button"
+              className="ghost sm danger"
+              onClick={onCancelBuild}
+              disabled={cancelBusy}
+              title="Build stream was lost (e.g. page refresh). Click to reset status so you can re-run."
+            >
+              {cancelBusy ? 'Cancelling…' : 'Cancel build'}
+            </button>
+          )}
           <label className="authoring-bucket-picker" title="Role bucket this challenge ships to">
             <span className="authoring-bucket-picker-label">Bucket</span>
             <select
@@ -89,10 +103,14 @@ function WorkflowNav({ tab, onTab, activeDraft, onBucketChange, bucketBusy }) {
   );
 }
 
+const VALID_TABS = ['setter', 'pipeline', 'review'];
+
 export default function AuthoringWorkspace({ onPromoted }) {
-  const [tab, setTab] = useState('setter');
+  const { draftId: urlDraftId, tab: urlTab } = useParams();
+  const navigate = useNavigate();
+
   const [drafts, setDrafts] = useState([]);
-  const [activeDraftId, setActiveDraftId] = useState(null);
+  const [activeDraftId, setActiveDraftId] = useState(urlDraftId || null);
   const [activeDraft, setActiveDraft] = useState(null);
   const [error, setError] = useState(null);
   const [llmConfig, setLlmConfig] = useState(null);
@@ -100,6 +118,19 @@ export default function AuthoringWorkspace({ onPromoted }) {
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [bucketBusy, setBucketBusy] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
+
+  const tab = (urlTab && VALID_TABS.includes(urlTab)) ? urlTab : 'setter';
+
+  const navTo = useCallback((id, t) => {
+    const targetTab = t || tab;
+    if (id) navigate(`/authoring/${id}/${targetTab}`, { replace: false });
+    else navigate('/authoring', { replace: false });
+  }, [navigate, tab]);
+
+  const setTab = useCallback((t) => {
+    if (activeDraftId) navigate(`/authoring/${activeDraftId}/${t}`, { replace: true });
+  }, [navigate, activeDraftId]);
 
   const reload = useCallback(async () => {
     try {
@@ -108,12 +139,16 @@ export default function AuthoringWorkspace({ onPromoted }) {
       if (activeDraftId) {
         const fresh = await getProblemSession(activeDraftId).catch(() => null);
         if (fresh) setActiveDraft(fresh);
-        else { setActiveDraftId(null); setActiveDraft(null); }
+        else {
+          setActiveDraftId(null);
+          setActiveDraft(null);
+          navigate('/authoring', { replace: true });
+        }
       }
     } catch (e) {
       setError(e?.response?.data?.error || e.message);
     }
-  }, [activeDraftId]);
+  }, [activeDraftId, navigate]);
 
   useEffect(() => {
     (async () => {
@@ -123,12 +158,21 @@ export default function AuthoringWorkspace({ onPromoted }) {
 
   useEffect(() => { reload(); }, [reload, refreshKey]);
 
+  // On initial mount, if URL has a draftId but we don't have the draft yet, load it
+  useEffect(() => {
+    if (!urlDraftId || activeDraft?.id === urlDraftId) return;
+    getProblemSession(urlDraftId)
+      .then((d) => { setActiveDraftId(urlDraftId); setActiveDraft(d); })
+      .catch(() => navigate('/authoring', { replace: true }));
+  }, [urlDraftId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSelectDraft = async (id) => {
     setActiveDraftId(id);
     setError(null);
     try {
       const d = await getProblemSession(id);
       setActiveDraft(d);
+      navTo(id, 'setter');
     } catch (e) {
       setError(e?.response?.data?.error || e.message);
     }
@@ -140,8 +184,8 @@ export default function AuthoringWorkspace({ onPromoted }) {
       setActiveDraftId(sessionId);
       setActiveDraft(draft);
       setRefreshKey((k) => k + 1);
-      setTab('setter');
       setImportOpen(false);
+      navigate(`/authoring/${sessionId}/setter`, { replace: false });
     } catch (e) {
       setError(e?.response?.data?.error || e.message);
     }
@@ -154,9 +198,9 @@ export default function AuthoringWorkspace({ onPromoted }) {
       setActiveDraftId(sessionId);
       setActiveDraft(draft);
       setRefreshKey((k) => k + 1);
-      setTab('setter');
       setImportOpen(false);
       setImportText('');
+      navigate(`/authoring/${sessionId}/setter`, { replace: false });
     } catch (e) {
       setError(e?.response?.data?.error || e.message);
     }
@@ -165,7 +209,11 @@ export default function AuthoringWorkspace({ onPromoted }) {
   const handleDeleteDraft = async (id) => {
     try {
       await deleteProblemSession(id);
-      if (activeDraftId === id) { setActiveDraftId(null); setActiveDraft(null); }
+      if (activeDraftId === id) {
+        setActiveDraftId(null);
+        setActiveDraft(null);
+        navigate('/authoring', { replace: true });
+      }
       setRefreshKey((k) => k + 1);
     } catch (e) {
       setError(e?.response?.data?.error || e.message);
@@ -191,6 +239,20 @@ export default function AuthoringWorkspace({ onPromoted }) {
     }
   };
 
+  const handleCancelBuild = async () => {
+    if (!activeDraftId) return;
+    setCancelBusy(true);
+    try {
+      await cancelBuild(activeDraftId);
+      const fresh = await getProblemSession(activeDraftId);
+      handleDraftChanged(fresh);
+    } catch (e) {
+      setError(e?.response?.data?.error || e.message);
+    } finally {
+      setCancelBusy(false);
+    }
+  };
+
   const llmKey = llmConfig?.provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY';
 
   return (
@@ -208,6 +270,8 @@ export default function AuthoringWorkspace({ onPromoted }) {
               activeDraft={activeDraft}
               onBucketChange={handleBucketChange}
               bucketBusy={bucketBusy}
+              onCancelBuild={handleCancelBuild}
+              cancelBusy={cancelBusy}
             />
             <div className="authoring-studio-status">
               {llmConfig?.llmConfigured ? (

@@ -35,6 +35,15 @@ export async function deleteProblemSession(sessionId) {
   return data;
 }
 
+export async function cancelBuild(sessionId) {
+  const { data } = await axios.post(
+    `/api/problems/${sessionId}/cancel-build`,
+    {},
+    { headers: getAuthHeader() },
+  );
+  return data;
+}
+
 export async function updateDraftMeta(sessionId, patch) {
   const { data } = await axios.patch(
     `/api/problems/${sessionId}/meta`,

@@ -1,0 +1,205 @@
+{
+  "id": "stale-product-cache",
+  "title": "Stale Product Cache",
+  "description": "## Stale Product Cache\n\nYou're on-call for a **product catalog service** built in Python. The service uses **Redis** as a read-through cache in front of **Postgres**.\n\nUsers are reporting that after updating a product's details (e.g., price or name), the **old values continue to appear** when they read the product back. The stale data eventually disappears but only after a very long time.\n\nA load generator is continuously simulating a mix of read and write traffic against the catalog service, making the problem clearly visible.\n\n### Your Task\n- Investigate the product catalog service's read and write paths.\n- Identify why stale data persists in reads after a product is updated.\n- Apply a fix so that reads always reflect the most recent write.\n\n### Hints\n- Look at how the service handles caching on the **write path**.\n- Consider what should happen to the cached entry when a product is updated.",
+  "difficulty": "Easy",
+  "category": "redis",
+  "tags": [
+    "cache-invalidation",
+    "stale-reads",
+    "cache-aside"
+  ],
+  "finalized": true,
+  "sandboxType": "compose",
+  "problemStatement": {
+    "overview": "The product catalog service uses a cache-aside pattern with Redis in front of Postgres. After a product is updated, stale cached values continue to be served to readers because the write path never invalidates the Redis key.",
+    "brokenState": "The product-catalog-service's write/update handler updates the product row in Postgres but does NOT invalidate or update the corresponding Redis cache entry. The cache has a very long TTL (3600 seconds), so subsequent reads continue to serve the stale cached value until it naturally expires.",
+    "yourTask": "Investigate the product catalog service's read and write paths. Identify why stale data persists in reads after a product is updated. Apply a fix so that reads always reflect the most recent write.",
+    "hints": [
+      "Look at how the service handles caching on the write path.",
+      "Consider what should happen to the cached entry when a product is updated.",
+      "The fix is a one-liner: delete (or update) the Redis key inside the PUT handler."
+    ]
+  },
+  "validationSpec": {
+    "steps": [
+      {
+        "type": "http",
+        "service": "product-catalog-service",
+        "port": 5000,
+        "path": "/health",
+        "check": {
+          "statusOk": true
+        }
+      },
+      {
+        "type": "exec",
+        "service": "postgres",
+        "cmd": [
+          "psql",
+          "-U",
+          "catalog",
+          "-d",
+          "catalog",
+          "-c",
+          "SELECT count(*) FROM products"
+        ],
+        "check": {
+          "contains": "10"
+        }
+      },
+      {
+        "type": "exec",
+        "service": "product-catalog-service",
+        "cmd": [
+          "sh",
+          "-c",
+          "wget -qO- http://localhost:5000/products/2 > /tmp/before_update.json && cat /tmp/before_update.json && wget -qO- --post-data='{\"name\":\"VALIDATION_SENTINEL_NAME\",\"price\":\"1234.56\"}' --header='Content-Type: application/json' http://localhost:5000/products/2 && sleep 0.1 && wget -qO- http://localhost:5000/products/2 > /tmp/after_update.json && cat /tmp/after_update.json && grep -c 'VALIDATION_SENTINEL_NAME' /tmp/after_update.json || echo 'STALE_CONFIRMED: read returned old cached value after write'"
+        ],
+        "check": {
+          "contains": "STALE_CONFIRMED"
+        }
+      },
+      {
+        "type": "exec",
+        "service": "redis",
+        "cmd": [
+          "sh",
+          "-c",
+          "redis-cli EXISTS product:2"
+        ],
+        "check": {
+          "contains": "1"
+        }
+      },
+      {
+        "type": "exec",
+        "service": "product-catalog-service",
+        "cmd": [
+          "sh",
+          "-c",
+          "wget -qO- --post-data='{\"name\":\"StaleTestProduct\",\"price\":\"777.77\"}' --header='Content-Type: application/json' http://localhost:5000/products/3 && sleep 0.1 && RESULT=$(wget -qO- http://localhost:5000/products/3) && echo \"$RESULT\" && echo \"$RESULT\" | grep -q 'StaleTestProduct' && echo 'NOT_STALE' || echo 'STALE_BUG_CONFIRMED'"
+        ],
+        "check": {
+          "contains": "STALE_BUG_CONFIRMED"
+        }
+      }
+    ],
+    "metricsService": "load-generator",
+    "metricsPort": null,
+    "terminalService": "product-catalog-service",
+    "metricLogFormat": "METRIC latency=<float> errors=<int> dbCpu=<float>"
+  },
+  "bucket": "software-engineer",
+  "arch": "The load-generator sends a mix of read (GET) and write (PUT) requests to the product-catalog-service. The product-catalog-service implements a cache-aside pattern: on reads it checks Redis first, falling back to Postgres and populating the cache on a miss. On writes it updates Postgres. All three backing services (product-catalog-service, Redis, Postgres) are networked together.",
+  "metrics": {
+    "enabled": false,
+    "observed": null,
+    "format": "METRIC latency=<float> errors=<int> dbCpu=<float>",
+    "display": {
+      "primary": "latency",
+      "guidance": "No metrics panel for this challenge. The staleness is observable directly through the load generator's output or by manually querying the read endpoint after a write.",
+      "secondary": [
+        "errors"
+      ]
+    },
+    "observe": [
+      {
+        "id": "spike_to_steady_ratio",
+        "field": "latency",
+        "requires": {
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "spike_ratio"
+      },
+      {
+        "id": "db_cpu_spike_median",
+        "field": "dbCpu",
+        "segment": "spike",
+        "requires": {
+          "infra": [
+            "postgres"
+          ],
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "median"
+      },
+      {
+        "id": "latency_steady_median_ms",
+        "field": "latency",
+        "segment": "steady",
+        "requires": {
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "median"
+      },
+      {
+        "id": "latency_spike_median_ms",
+        "field": "latency",
+        "segment": "spike",
+        "requires": {
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "median"
+      },
+      {
+        "id": "spike_period_seconds",
+        "field": "latency",
+        "requires": {
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "dominant_period"
+      },
+      {
+        "id": "errors_max_per_minute",
+        "field": "errors",
+        "requires": {
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "max_rate_per_minute"
+      }
+    ],
+    "service": "load-generator",
+    "recovery": {
+      "latency_below_ms": 100,
+      "consecutive_samples": 10
+    },
+    "interval_seconds": 1,
+    "observeResolvedFrom": {
+      "category": "redis",
+      "categories": [
+        "global",
+        "python",
+        "redis",
+        "postgres",
+        "load-generator"
+      ],
+      "roles": [
+        "api",
+        "redis",
+        "postgres",
+        "load-generator"
+      ],
+      "serviceNames": [
+        "product-catalog-service",
+        "redis",
+        "postgres",
+        "load-generator"
+      ],
+      "catalogCount": 6,
+      "explicitCount": 6
+    }
+  }
+}

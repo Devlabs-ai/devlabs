@@ -8,6 +8,8 @@ const CATEGORY_ALIASES = {
   kafka: 'apache-kafka',
   spark: 'apache-spark',
   airflow: 'apache-airflow',
+  yarn: 'hadoop-yarn',
+  hadoop: 'hadoop-yarn',
 };
 
 function normalizeCategory(category) {

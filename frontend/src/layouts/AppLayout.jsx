@@ -40,12 +40,6 @@ export default function AppLayout() {
             >
               Authoring
             </NavLink>
-            <NavLink
-              to="/memories"
-              className={({ isActive }) => `topnav-pill${isActive ? ' active' : ''}`}
-            >
-              Memories
-            </NavLink>
           </nav>
         )}
 
