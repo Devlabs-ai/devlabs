@@ -153,6 +153,13 @@ a:hover { text-decoration: underline; }
   box-sizing: border-box;
 }
 
+.topbar-inner--split {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .topbar .brand-link {
   justify-self: start;
 }
@@ -3042,6 +3049,27 @@ a:hover { text-decoration: underline; }
 }
 .topnav-pill.active::after {
   opacity: 1;
+}
+
+.topnav-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border-strong);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.topnav-action {
+  color: var(--text-muted);
+}
+
+.topnav-signout {
+  color: var(--danger) !important;
+  opacity: 0.8;
+}
+.topnav-signout:hover {
+  opacity: 1;
+  background: rgba(244, 63, 94, 0.08);
 }
 
 .authoring {
