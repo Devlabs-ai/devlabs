@@ -741,115 +741,148 @@ a:hover { text-decoration: underline; }
 
 /* ---------- Bucket filter / sections (Play library) ---------- */
 
-.bucket-filter-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 4px 0 28px;
-}
-.bucket-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.3px;
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease, transform 0.06s ease;
-}
-.bucket-chip:hover {
-  color: var(--text);
-  border-color: var(--border-strong);
-  background: var(--surface-3);
-  filter: none;
-  transform: none;
-}
-.bucket-chip.active {
-  color: #00170d;
-  background: linear-gradient(180deg, var(--brand-bright), var(--brand));
-  border-color: transparent;
-}
-.bucket-chip .count {
-  background: rgba(0, 0, 0, 0.18);
-  color: inherit;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-.bucket-chip:not(.active) .count {
-  background: rgba(255, 255, 255, 0.06);
-}
+/* ---------- Library toolbar (collection tabs + filters) ---------- */
 
-/* Per-bucket accent colors. Defined on the section so descendant cards inherit
-   the CSS variable for their hover stripe and CTA color. */
-.bucket-section {
-  --bucket-accent: var(--brand);
-  --bucket-accent-soft: rgba(16, 185, 129, 0.14);
-  margin-bottom: 36px;
-}
-.bucket-section[data-bucket="software-engineer"] {
-  --bucket-accent: #60a5fa;
-  --bucket-accent-soft: rgba(96, 165, 250, 0.16);
-}
-.bucket-section[data-bucket="data-engineer"] {
-  --bucket-accent: #c084fc;
-  --bucket-accent-soft: rgba(192, 132, 252, 0.16);
-}
-.bucket-section[data-bucket="platform-engineer"] {
-  --bucket-accent: #fb923c;
-  --bucket-accent-soft: rgba(251, 146, 60, 0.16);
-}
-.bucket-section[data-bucket="devops"] {
-  --bucket-accent: #34d399;
-  --bucket-accent-soft: rgba(52, 211, 153, 0.16);
-}
-.bucket-section[data-bucket="__unbucketed__"] {
-  --bucket-accent: #94a3b8;
-  --bucket-accent-soft: rgba(148, 163, 184, 0.14);
-}
-.bucket-section:last-child {
-  margin-bottom: 0;
-}
-.bucket-section-header {
+.library-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin: 0 0 16px;
-  padding-bottom: 12px;
+  flex-wrap: wrap;
+  margin: 4px 0 24px;
+  padding-bottom: 16px;
   border-bottom: 1px solid var(--border);
 }
-.bucket-section-title {
+
+/* Collection tabs */
+.library-collections {
+  display: flex;
+  gap: 0;
+}
+
+.lib-tab {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 7px;
+  padding: 7px 16px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.14s;
 }
-.bucket-section-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--bucket-accent);
-  box-shadow: 0 0 0 5px var(--bucket-accent-soft);
+
+.lib-tab::after {
+  content: '';
+  position: absolute;
+  bottom: -17px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--brand);
+  border-radius: 2px 2px 0 0;
+  opacity: 0;
+  transition: opacity 0.14s;
 }
-.bucket-section-header h2 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+
+.lib-tab:hover {
   color: var(--text);
+  filter: none;
 }
-.bucket-section-count {
+
+.lib-tab.active {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.lib-tab.active::after {
+  opacity: 1;
+}
+
+.lib-tab-count {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
   color: var(--text-dim);
-  font-size: 11.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-tab.active .lib-tab-count {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--brand-bright);
+}
+
+/* Filters */
+.library-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.filter-group {
+  display: flex;
+  gap: 4px;
+}
+
+.filter-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border-strong);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+.filter-chip {
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.13s, border-color 0.13s, color 0.13s;
+}
+
+.filter-chip:hover {
+  background: var(--surface-3);
+  color: var(--text);
+  filter: none;
+}
+
+.filter-chip.active {
+  border-color: transparent;
+  color: #fff;
+  background: var(--surface-3);
+}
+
+/* Difficulty-specific active colours */
+.filter-chip.difficulty-easy.active    { background: #166534; border-color: #16a34a; color: #86efac; }
+.filter-chip.difficulty-medium.active  { background: #78350f; border-color: #d97706; color: #fcd34d; }
+.filter-chip.difficulty-hard.active    { background: #7f1d1d; border-color: #dc2626; color: #fca5a5; }
+
+.filter-clear {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.13s, border-color 0.13s;
+}
+
+.filter-clear:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  filter: none;
 }
 
 /* ---------- Review bucket picker ---------- */
