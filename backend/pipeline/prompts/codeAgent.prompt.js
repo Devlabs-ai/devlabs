@@ -32,6 +32,7 @@ XML tags with this schema:
       { "type": "http", "service": "orders-service", "port": 8080, "path": "/orders/1", "check": { "statusOk": true } },
       { "type": "exec", "service": "postgres", "cmd": ["psql","-U","postgres","-d","shop","-c","SELECT count(*) FROM orders"], "check": { "contains": "500000" } }
     ],
+    "readyServices": ["postgres", "redis"],
     "metricsService": "load-generator",
     "metricsPort": null,
     "terminalService": "postgres",
@@ -79,7 +80,40 @@ HARD RULES:
    exactly \`./services/<service-name>\` (matching the on-disk layout the
    writer uses). NEVER \`./<service-name>\` or any other path — the runner
    will reject the build before docker even pulls images.
-9. Docker images, resource limits, and service names come from \`draft.infra.services\`
+9. SERVICE ROLE LABELS — every service in docker-compose MUST have a
+   \`devlabs.role\` label. Use exactly one of these values:
+   - \`infra\`     — infrastructure that must be running for the challenge to work
+                    (databases, brokers, caches, UIs). These are the services listed
+                    in validationSpec.readyServices.
+   - \`worker\`    — application service that may crash or restart as part of the
+                    broken state. SPIN does not gate on these.
+   - \`one-shot\`  — runs once (producer, seeder, migrator), exits 0 cleanly, then stops.
+                    SPIN does not gate on these either.
+   Example:
+     kafka:
+       image: confluentinc/cp-kafka:7.6.1
+       labels:
+         devlabs.role: infra
+     order-worker:
+       build: ...
+       labels:
+         devlabs.role: worker
+     order-producer:
+       build: ...
+       labels:
+         devlabs.role: one-shot
+   validationSpec.readyServices must list exactly the services labelled \`infra\`.
+10. RESTART POLICY in docker-compose — follow these rules exactly:
+   a. One-shot / init services (producers, seeders, migrators that run once and exit):
+      set \`restart: "no"\`. Do NOT use \`await new Promise(() => {})\` or any other
+      hack to keep the process alive — let it exit cleanly with code 0.
+   b. Long-running services (workers, APIs, consumers) that may crash due to the
+      broken state: use \`restart: always\` or \`restart: on-failure\`. The build
+      runner understands that a crash-looping service is an intentional broken state
+      and will not fail SPIN because of it.
+   c. Infrastructure services (databases, brokers, caches): use \`restart: unless-stopped\`
+      or no restart policy at all.
+12. Docker images, resource limits, and service names come from \`draft.infra.services\`
    (materialized during Shape schema generation). Use those \`image_hint\` values
    exactly in compose — do not substitute or re-query catalogue during build.
 
@@ -95,10 +129,20 @@ Use every service name and \`image_hint\` from the draft. Align validationSpec.s
 with \`draft.brokenState.validationSymptoms\` — steps must prove the broken symptoms.
 
 ============================= LEARNED LESSONS =============================
-On retry (when spinFailureMsg or validateFailureMsg is set), the payload may
-include \`lessonsBlock.relatedLessons\` — past builds where the same phase failed
-then succeeded. Prefer \`details.workingCompose\` when present. Avoid repeating
-mistakes listed in failureSummary.
+The payload may include \`lessonsBlock.relatedLessons\` — lessons retrieved from
+past builds for this category. Each lesson has a \`type\` field:
+
+  "fix"          — this phase previously failed then succeeded.
+                   The lesson describes what error occurred and exactly what
+                   change resolved it. If \`details.workingCompose\` is present,
+                   use it as a strong reference for the relevant service config.
+
+  "anti-pattern" — this build exhausted all retries and never passed.
+                   The lesson describes what was tried and failed repeatedly.
+                   AVOID the patterns described — do not repeat them.
+
+Lessons may be present even on the first iteration (warm-start from past
+builds with similar categories). Always read them before generating assets.
 
 ============================ RETRY / DEBUG MODE ============================
 When \`challengeAssets\`, \`spinFailureMsg\`, and/or \`validateFailureMsg\` are

@@ -224,12 +224,34 @@ async function resolvePortMap(buildDir, composeYaml, ownerId, { pool = 'session'
 //      containers mid-boot and reports them as running for a few hundred ms
 //      before they crash (e.g. Confluent Kafka exiting because
 //      KAFKA_PROCESS_ROLES is unset).
-async function waitForServices(buildDir, portMap, maxWaitMs = 60000) {
+//
+// State semantics handled here:
+//   "running"    — healthy, counts toward stable
+//   "restarting" — crash-looping (expected for broken-state challenges); counts toward stable
+//   "exited" (0) — one-shot init container finished cleanly; counts toward stable
+//   "exited" (!0) + stuck 2+ polls — bad startup, throw immediately
+//   "dead"       — permanent Docker failure, throw immediately
+//
+// readyServices (optional): when provided, SPIN only gates on those named services.
+// All other services (one-shots, crash-looping workers) are ignored entirely.
+// When absent, all services must reach a settled state.
+async function waitForServices(buildDir, portMap, maxWaitMs = 60000, readyServices = null) {
   const POLL_INTERVAL_MS = 3000;
-  const STABLE_POLLS_REQUIRED = 3; // ~9s of consecutive "all running"
+  const STABLE_POLLS_REQUIRED = 3; // ~9s of consecutive stable state
   const start = Date.now();
   let stableCount = 0;
   let lastStatus = '';
+  // Track consecutive polls each service spends in "exited" state so we can
+  // distinguish a one-shot init container (exits 0, stable) from a service that
+  // crashes on startup (exits non-zero, stuck for 2+ polls → throw).
+  const exitedPolls = {};
+
+  // Parse exit code from Status string "Exited (1) 5 seconds ago", falling back
+  // to the ExitCode field present in newer Compose versions.
+  function exitCode(svc) {
+    const m = (svc.Status || '').match(/Exited \((\d+)\)/i);
+    return m ? parseInt(m[1], 10) : (svc.ExitCode != null ? svc.ExitCode : -1);
+  }
 
   while (Date.now() - start < maxWaitMs) {
     let services = [];
@@ -265,18 +287,67 @@ async function waitForServices(buildDir, portMap, maxWaitMs = 60000) {
         .map((s) => `${s.Service || s.Name}=${s.State}${s.Status ? ` (${s.Status})` : ''}`)
         .join('; ');
 
-      // Hard fail: any exited / dead container means the boot is broken.
-      // Throwing here lets the build agent capture compose logs immediately
-      // instead of waiting out the 90s timeout.
-      const dead = services.find((s) => /^(exited|dead)$/i.test(s.State || ''));
+      // Determine which services we actually gate on.
+      // readyServices = only infra services that must be running (excludes one-shots
+      // and intentionally crash-looping workers).
+      // Fallback: gate on all services using the settled-state heuristics.
+      const gated = (readyServices && readyServices.length > 0)
+        ? services.filter((s) => readyServices.includes(s.Service || s.Name))
+        : services;
+
+      // "dead" = Docker considers the container unrecoverable — fail immediately.
+      // Check gated services only; we don't care if a non-gated worker is dead.
+      const dead = gated.find((s) => /^dead$/i.test(s.State || ''));
       if (dead) {
         throw new Error(
-          `service "${dead.Service || dead.Name}" ${dead.State}: ${dead.Status || 'unknown reason'}`,
+          `service "${dead.Service || dead.Name}" dead: ${dead.Status || 'unknown reason'}`,
         );
       }
 
-      const allRunning = services.every((s) => (s.State || '').toLowerCase() === 'running');
-      if (allRunning) {
+      // Track gated services stuck in "exited" with a non-zero exit code.
+      // Two consecutive polls in that state = hard startup failure; throw immediately.
+      let hardFail = null;
+      for (const svc of gated) {
+        const name = svc.Service || svc.Name;
+        const state = (svc.State || '').toLowerCase();
+        if (state === 'exited' && exitCode(svc) !== 0) {
+          exitedPolls[name] = (exitedPolls[name] || 0) + 1;
+          if (exitedPolls[name] >= 2) { hardFail = svc; break; }
+        } else {
+          exitedPolls[name] = 0;
+        }
+      }
+      if (hardFail) {
+        throw new Error(
+          `service "${hardFail.Service || hardFail.Name}" exited with error: ${hardFail.Status || 'unknown reason'}`,
+        );
+      }
+
+      let allReady;
+      if (readyServices && readyServices.length > 0) {
+        // Primary path: all named ready services must be "running".
+        // We log a warning if any listed service wasn't found in ps output yet.
+        const found = gated.map((s) => s.Service || s.Name);
+        const missing = readyServices.filter((n) => !found.includes(n));
+        if (missing.length > 0) {
+          console.log(`[compose] waitForServices waiting for: ${missing.join(', ')}`);
+        }
+        allReady = missing.length === 0
+          && gated.every((s) => (s.State || '').toLowerCase() === 'running');
+      } else {
+        // Fallback path: every service must reach a settled state —
+        //   running    — healthy
+        //   restarting — crash-looping broken service (intentional for challenge scenarios)
+        //   exited (0) — one-shot init container finished cleanly
+        allReady = gated.every((s) => {
+          const state = (s.State || '').toLowerCase();
+          if (state === 'running' || state === 'restarting') return true;
+          if (state === 'exited') return exitCode(s) === 0;
+          return false; // created / starting / paused — still coming up
+        });
+      }
+
+      if (allReady) {
         stableCount += 1;
         console.log(`[compose] waitForServices stable ${stableCount}/${STABLE_POLLS_REQUIRED}: ${lastStatus}`);
         if (stableCount >= STABLE_POLLS_REQUIRED) {

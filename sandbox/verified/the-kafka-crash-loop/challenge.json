@@ -1,0 +1,223 @@
+{
+  "id": "the-kafka-crash-loop",
+  "title": "The Kafka Crash Loop",
+  "description": "## The Kafka Crash Loop\n\nYou've joined a team that runs a simple order-processing pipeline.\n\n### Architecture\n- An **order-api** service exposes a REST endpoint that accepts new orders and produces them to a Kafka topic called `orders`.\n- A **order-worker** (Python) consumes messages from the `orders` topic, processes each order, and writes the result to a **postgres** database.\n- **Kafka** (with Zookeeper) is the message backbone. A **kafka-ui** service is available for topic/consumer-group inspection.\n- A **load-generator** previously pushed a batch of order messages into the topic.\n\n### The Problem\nThe ops team has flagged that the `order-worker` container is stuck in a crash loop — it starts, runs briefly, crashes, restarts, and repeats endlessly. No new orders are being written to the database despite messages clearly sitting in the `orders` topic.\n\nYour task:\n1. Investigate why the worker keeps crashing.\n2. Determine why restarting it doesn't help — it always crashes on the same message.\n3. Fix the underlying issues so the worker can process all valid orders (and gracefully handle any invalid ones) and offsets advance correctly.\n\n### Tools Available\n- `kafka-ui` is available in your browser for inspecting topics, consumer groups, offsets, and individual messages.\n- You have full shell access to all containers.\n- You can edit the worker source code and restart the service.",
+  "difficulty": "Medium",
+  "category": "apache-kafka",
+  "tags": [
+    "poison-pill",
+    "crash-loop",
+    "consumer-offsets",
+    "error-handling",
+    "python"
+  ],
+  "finalized": true,
+  "sandboxType": "compose",
+  "problemStatement": {
+    "overview": "The `order-worker` container is stuck in a crash loop. It starts, processes a few messages, crashes, restarts, and repeats endlessly. No new orders are being written to the postgres database despite messages clearly sitting in the Kafka `orders` topic.",
+    "symptoms": [
+      "The `order-worker` container repeatedly crashes and restarts.",
+      "The postgres `orders` table has far fewer rows than the number of valid messages in the topic.",
+      "The Kafka consumer group offset for `order-worker-group` is stuck and never advances.",
+      "The same Python traceback appears in the worker logs on every restart."
+    ],
+    "yourTask": "Investigate the worker's source code and configuration, identify why it crashes on the same message every time and why offsets never advance, then fix both issues so all valid orders are processed and the consumer group lag drains to zero.",
+    "hints": [
+      "Examine the worker logs carefully — note the exact error type and which field is missing.",
+      "Check how the Kafka consumer is configured with respect to offset commits.",
+      "Look at the individual messages in the `orders` topic using kafka-ui — inspect payloads around the offset where the consumer is stuck.",
+      "Consider what happens when a consumer crashes before committing an offset."
+    ]
+  },
+  "validationSpec": {
+    "steps": [
+      {
+        "type": "exec",
+        "service": "order-worker",
+        "cmd": [
+          "sh",
+          "-c",
+          "exit 0"
+        ],
+        "check": {
+          "contains": ""
+        }
+      },
+      {
+        "type": "exec",
+        "service": "postgres",
+        "cmd": [
+          "psql",
+          "-U",
+          "orders",
+          "-d",
+          "orders",
+          "-c",
+          "SELECT COUNT(*) FROM orders;"
+        ],
+        "check": {
+          "contains": "3"
+        }
+      },
+      {
+        "type": "http",
+        "service": "order-api",
+        "port": 5000,
+        "path": "/health",
+        "check": {
+          "statusOk": true
+        }
+      }
+    ],
+    "readyServices": [
+      "kafka",
+      "zookeeper",
+      "kafka-ui",
+      "postgres",
+      "order-api"
+    ],
+    "metricsService": "load-generator",
+    "metricsPort": null,
+    "terminalService": "postgres",
+    "metricLogFormat": "METRIC lag=<float> errors=<int> dbCpu=<float>"
+  },
+  "bucket": "software-engineer",
+  "arch": "load-generator (pre-seeds messages) → Kafka (orders topic, managed by Zookeeper) ← order-worker (Python consumer) → postgres. order-api produces to the same Kafka topic. kafka-ui connects to Kafka for visual inspection.",
+  "metrics": {
+    "enabled": true,
+    "observed": null,
+    "service": "load-generator",
+    "format": "METRIC lag=<float> errors=<int> dbCpu=<float>",
+    "interval_seconds": 1,
+    "display": {
+      "primary": "lag",
+      "secondary": [
+        "errors"
+      ],
+      "guidance": "Watch consumer lag — it should be stuck at a non-zero value and never decrease while the worker is crash-looping. After the fix, lag should drain to zero as the worker processes all remaining messages. Errors should drop to zero once the poison-pill is handled gracefully."
+    },
+    "recovery": {
+      "latency_below_ms": 100,
+      "consecutive_samples": 10
+    },
+    "observe": [
+      {
+        "id": "consumer_lag_max",
+        "field": "lag",
+        "requires": {
+          "infra": [
+            "kafka"
+          ],
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "max"
+      },
+      {
+        "id": "rebalance_events_total",
+        "field": "rebalance",
+        "requires": {
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "sum"
+      },
+      {
+        "id": "errors_max_per_minute",
+        "field": "errors",
+        "requires": {
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "max_rate_per_minute"
+      },
+      {
+        "id": "db_cpu_spike_median",
+        "field": "dbCpu",
+        "segment": "spike",
+        "requires": {
+          "infra": [
+            "postgres"
+          ],
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "median"
+      },
+      {
+        "id": "latency_steady_median_ms",
+        "field": "latency",
+        "segment": "steady",
+        "requires": {
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "median"
+      },
+      {
+        "id": "latency_spike_median_ms",
+        "field": "latency",
+        "segment": "spike",
+        "requires": {
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "median"
+      },
+      {
+        "id": "spike_to_steady_ratio",
+        "field": "latency",
+        "requires": {
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "spike_ratio"
+      },
+      {
+        "id": "spike_period_seconds",
+        "field": "latency",
+        "requires": {
+          "roles": [
+            "load-generator"
+          ]
+        },
+        "algorithm": "dominant_period"
+      }
+    ],
+    "observeResolvedFrom": {
+      "category": "apache-kafka",
+      "categories": [
+        "global",
+        "apache-kafka",
+        "python",
+        "postgres",
+        "load-generator"
+      ],
+      "roles": [
+        "api",
+        "app",
+        "kafka",
+        "postgres",
+        "load-generator"
+      ],
+      "serviceNames": [
+        "order-api",
+        "order-worker",
+        "kafka",
+        "zookeeper",
+        "kafka-ui",
+        "postgres",
+        "load-generator"
+      ],
+      "catalogCount": 8,
+      "explicitCount": 8
+    }
+  }
+}

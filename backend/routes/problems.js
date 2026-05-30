@@ -315,7 +315,11 @@ router.post('/:sessionId/generate-schema', async (req, res) => {
     });
 
     if (!raw) {
-      send({ type: 'error', message: 'agent did not emit valid <challenge_draft> JSON' });
+      const tail = assistantText ? assistantText.slice(-300) : '(empty)';
+      send({
+        type: 'error',
+        message: `agent did not emit valid <challenge_draft> JSON — response tail: ${tail}`,
+      });
       return;
     }
 

@@ -26,7 +26,18 @@ RULES:
    needed for build checks — keep the same meaning. Each symptom must remain a concrete, reproducible probe
    (action + wrong result) that confirms the bug is present. Do NOT add a "fixed:" entry or any symptom
    describing the healthy/fixed state.
-8. Emit strictly valid JSON inside <challenge_draft> tags only.
+8. Emit a readyServices list inside codebase as a top-level field on the draft AND inside validationSpec.
+   readyServices = the subset of infra.services that are long-running infrastructure and MUST be in
+   "running" state for the challenge to be playable. Exclude:
+   - one-shot services (producers, seeders, migrators that exit after running once)
+   - worker/consumer services that are intentionally crash-looping as the broken state
+   Only include services the candidate needs to be UP to investigate and fix the problem
+   (e.g. databases, brokers, caches, UIs, API servers that are NOT the broken service).
+   Example for a Kafka crash-loop challenge:
+     "readyServices": ["kafka", "zookeeper", "kafka-ui"]
+   Example for a Postgres slow-query challenge:
+     "readyServices": ["postgres", "api"]
+9. Emit strictly valid JSON inside <challenge_draft> tags only.
 
 ${V1_SCHEMA_PROMPT}`;
 

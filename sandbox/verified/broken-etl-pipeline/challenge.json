@@ -1,0 +1,121 @@
+{
+  "id": "broken-etl-pipeline",
+  "title": "Broken ETL Pipeline",
+  "description": "## Broken ETL Pipeline\n\nYou are an on-call data engineer at a logistics company. A critical ETL pipeline built in Apache Airflow is responsible for extracting raw order data from a Postgres table (`raw_orders`), transforming it (calculating totals, formatting timestamps), and loading the results into a `processed_orders` table that downstream dashboards depend on.\n\nThe team reports that the `processed_orders` table has not received any new data in days. The dashboards are showing stale information and stakeholders are escalating.\n\nThe Airflow instance is running with a single DAG (`etl_orders_pipeline`) that has three tasks chained together: `extract` → `transform` → `load`. Your job is to investigate why the pipeline is not producing data and fix all issues so that the DAG runs successfully end-to-end and the `processed_orders` table is populated with correctly transformed data.\n\n### Environment\n- An Airflow instance (webserver + scheduler) with the DAG pre-deployed\n- A Postgres database containing the `raw_orders` source table (pre-populated with sample data) and the `processed_orders` destination table\n\n### What you need to do\n1. Investigate why the DAG is not running and fix it so that it gets scheduled\n2. Ensure all three tasks (`extract` → `transform` → `load`) complete successfully\n3. Verify that `processed_orders` is populated with the correct transformed data",
+  "difficulty": "Medium",
+  "category": "apache-airflow",
+  "tags": [
+    "etl",
+    "scheduling",
+    "postgres",
+    "schema-mismatch",
+    "debugging"
+  ],
+  "finalized": true,
+  "sandboxType": "compose",
+  "problemStatement": {
+    "overview": "## Broken ETL Pipeline\n\nYou are an on-call data engineer at a logistics company. A critical ETL pipeline built in Apache Airflow is responsible for extracting raw order data from a Postgres table (`raw_orders`), transforming it (calculating totals, formatting timestamps), and loading the results into a `processed_orders` table that downstream dashboards depend on.\n\nThe team reports that the `processed_orders` table has not received any new data in days. The dashboards are showing stale information and stakeholders are escalating.\n\nThe Airflow instance is running with a single DAG (`etl_orders_pipeline`) that has three tasks chained together: `extract` → `transform` → `load`. Your job is to investigate why the pipeline is not producing data and fix all issues so that the DAG runs successfully end-to-end and the `processed_orders` table is populated with correctly transformed data.",
+    "environment": "- An Airflow instance (webserver + scheduler) with the DAG pre-deployed\n- A Postgres database containing the `raw_orders` source table (pre-populated with sample data) and the `processed_orders` destination table",
+    "tasks": "1. Investigate why the DAG is not running and fix it so that it gets scheduled\n2. Ensure all three tasks (`extract` → `transform` → `load`) complete successfully\n3. Verify that `processed_orders` is populated with the correct transformed data"
+  },
+  "validationSpec": {
+    "steps": [
+      {
+        "type": "exec",
+        "service": "postgres",
+        "cmd": [
+          "psql",
+          "-U",
+          "postgres",
+          "-d",
+          "etl_db",
+          "-c",
+          "SELECT COUNT(*) FROM processed_orders;"
+        ],
+        "check": {
+          "contains": "0"
+        }
+      },
+      {
+        "type": "exec",
+        "service": "postgres",
+        "cmd": [
+          "psql",
+          "-U",
+          "postgres",
+          "-d",
+          "etl_db",
+          "-c",
+          "SELECT column_name FROM information_schema.columns WHERE table_name='processed_orders' AND column_name='processed_at';"
+        ],
+        "check": {
+          "contains": "processed_at"
+        }
+      },
+      {
+        "type": "exec",
+        "service": "postgres",
+        "cmd": [
+          "psql",
+          "-U",
+          "postgres",
+          "-d",
+          "etl_db",
+          "-c",
+          "SELECT COUNT(*) FROM raw_orders;"
+        ],
+        "check": {
+          "contains": "50"
+        }
+      }
+    ],
+    "readyServices": [
+      "postgres",
+      "airflow"
+    ],
+    "metricsService": "load-generator",
+    "metricsPort": null,
+    "terminalService": "postgres",
+    "metricLogFormat": "METRIC latency=<float> errors=<int> dbCpu=<float>"
+  },
+  "bucket": "data-engineer",
+  "arch": "The Airflow webserver and scheduler run as a single service using SequentialExecutor (or LocalExecutor) with a Postgres backend serving as both the Airflow metadata database and the application data store. The DAG file is mounted into the Airflow container. The Postgres service hosts two databases: one for Airflow metadata and one for the ETL application data containing `raw_orders` and `processed_orders` tables.",
+  "metrics": {
+    "enabled": false,
+    "observed": null,
+    "service": "load-generator",
+    "format": "METRIC latency=<float> errors=<int> dbCpu=<float>",
+    "interval_seconds": 1,
+    "display": {
+      "primary": "latency",
+      "secondary": [
+        "errors"
+      ],
+      "guidance": "Watch for clear broken vs healthy behavior in the metrics panel."
+    },
+    "recovery": {
+      "latency_below_ms": 100,
+      "consecutive_samples": 10
+    },
+    "observe": [],
+    "observeResolvedFrom": {
+      "category": "apache-airflow",
+      "categories": [
+        "global",
+        "apache-airflow",
+        "postgres",
+        "python"
+      ],
+      "roles": [
+        "app",
+        "postgres"
+      ],
+      "serviceNames": [
+        "airflow",
+        "postgres"
+      ],
+      "catalogCount": 0,
+      "explicitCount": 0
+    }
+  }
+}

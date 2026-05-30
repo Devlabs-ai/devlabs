@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
-import AppPageHeader from '../components/AppPageHeader.jsx';
 import ProblemSetterPage from './ProblemSetterPage.jsx';
 import PipelinePage from './PipelinePage.jsx';
 import ReviewPage from './ReviewPage.jsx';
@@ -257,38 +256,30 @@ export default function AuthoringWorkspace({ onPromoted }) {
 
   return (
     <div className="authoring-studio">
-      <AppPageHeader
-        className="authoring-page-header"
-        eyebrow="Authoring"
-        title="Challenge Studio"
-        lead="Shape incidents with the agent, run the build pipeline, and promote verified labs."
-        aside={(
-          <>
-            <WorkflowNav
-              tab={tab}
-              onTab={setTab}
-              activeDraft={activeDraft}
-              onBucketChange={handleBucketChange}
-              bucketBusy={bucketBusy}
-              onCancelBuild={handleCancelBuild}
-              cancelBusy={cancelBusy}
-            />
-            <div className="authoring-studio-status">
-              {llmConfig?.llmConfigured ? (
-                <span className="authoring-llm-pill ok">
-                  <span className="dot" />
-                  Agent ready
-                </span>
-              ) : (
-                <span className="authoring-llm-pill warn" title={`Set ${llmKey} in backend/.env`}>
-                  <span className="dot" />
-                  Agent offline
-                </span>
-              )}
-            </div>
-          </>
-        )}
-      />
+      <div className="authoring-strip">
+        <WorkflowNav
+          tab={tab}
+          onTab={setTab}
+          activeDraft={activeDraft}
+          onBucketChange={handleBucketChange}
+          bucketBusy={bucketBusy}
+          onCancelBuild={handleCancelBuild}
+          cancelBusy={cancelBusy}
+        />
+        <div className="authoring-studio-status">
+          {llmConfig?.llmConfigured ? (
+            <span className="authoring-llm-pill ok">
+              <span className="dot" />
+              Agent ready
+            </span>
+          ) : (
+            <span className="authoring-llm-pill warn" title={`Set ${llmKey} in backend/.env`}>
+              <span className="dot" />
+              Agent offline
+            </span>
+          )}
+        </div>
+      </div>
 
       {!llmConfig?.llmConfigured && (
         <div className="authoring-banner alert">

@@ -5,6 +5,7 @@ import ChallengeLibrary from '../components/ChallengeLibrary.jsx';
 import ProblemStatement from '../components/ProblemStatement.jsx';
 import TerminalWorkspace from '../components/TerminalWorkspace.jsx';
 import CodeEditor from '../components/CodeEditor.jsx';
+import BrowserTab from '../components/BrowserTab.jsx';
 import { BUCKETS, UNBUCKETED } from '../constants/buckets.js';
 
 const ALL_FILTER = '__all__';
@@ -186,6 +187,13 @@ export default function PlayPage() {
                 >
                   <span className="icon">&#9632;</span> Editor
                 </button>
+                <button
+                  type="button"
+                  className={`panel-tab ${rightTab === 'browser' ? 'active' : ''}`}
+                  onClick={() => setRightTab('browser')}
+                >
+                  <span className="icon">⬡</span> Browser
+                </button>
               </div>
               <span className="meta">
                 {(activeSession.services || []).length}{' '}
@@ -210,6 +218,9 @@ export default function PlayPage() {
                   services={activeSession.services}
                   defaultContainer={activeSession.terminalService}
                 />
+              </div>
+              <div style={{ display: rightTab === 'browser' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                <BrowserTab />
               </div>
             </div>
           </div>
