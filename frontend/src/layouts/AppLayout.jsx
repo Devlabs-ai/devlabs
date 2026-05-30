@@ -1,7 +1,79 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import SessionController from '../components/SessionController.jsx';
 import { useAppState } from '../context/AppStateContext.jsx';
+
+function UserDrawer({ open, onClose, currentUser, onLogout }) {
+  const drawerRef = useRef(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPointer = (e) => {
+      if (drawerRef.current && !drawerRef.current.contains(e.target)) onClose();
+    };
+    document.addEventListener('pointerdown', onPointer);
+    return () => document.removeEventListener('pointerdown', onPointer);
+  }, [open, onClose]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  const isAdmin = currentUser?.role === 'admin';
+  const initials = currentUser?.name
+    ? currentUser.name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
+    : currentUser?.email?.[0]?.toUpperCase() || '?';
+
+  return (
+    <>
+      {open && <div className="drawer-backdrop" aria-hidden onClick={onClose} />}
+      <div className={`user-drawer${open ? ' open' : ''}`} ref={drawerRef} role="dialog" aria-label="User menu">
+        <div className="user-drawer-profile">
+          <div className="user-drawer-avatar">{initials}</div>
+          <div className="user-drawer-info">
+            <span className="user-drawer-name">{currentUser?.name || 'User'}</span>
+            <span className="user-drawer-email">{currentUser?.email}</span>
+            <span className={`user-drawer-role-badge role-${currentUser?.role}`}>
+              {currentUser?.role}
+            </span>
+          </div>
+        </div>
+
+        <div className="user-drawer-divider" />
+
+        <nav className="user-drawer-nav">
+          <button type="button" className="user-drawer-item">
+            <span className="user-drawer-item-icon">⊙</span>
+            Profile
+          </button>
+
+          {isAdmin && (
+            <button type="button" className="user-drawer-item">
+              <span className="user-drawer-item-icon">◈</span>
+              Billing
+            </button>
+          )}
+        </nav>
+
+        <div className="user-drawer-divider" />
+
+        <button
+          type="button"
+          className="user-drawer-item user-drawer-logout"
+          onClick={() => { onClose(); onLogout(); }}
+        >
+          <span className="user-drawer-item-icon">→</span>
+          Sign out
+        </button>
+      </div>
+    </>
+  );
+}
 
 export default function AppLayout() {
   const {
@@ -15,6 +87,7 @@ export default function AppLayout() {
     onLogout,
   } = useAppState();
 
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const showNav = authMode === 'interviewer' && playState !== 'active';
 
   return (
@@ -53,21 +126,17 @@ export default function AppLayout() {
               />
             )}
             {authMode === 'interviewer' && (
-              <div className="topbar-user">
-                {currentUser && (
-                  <div className="topbar-user-info">
-                    <span className="topbar-user-email" title={currentUser.email}>
-                      {currentUser.email}
-                    </span>
-                    <span className={`topbar-role-badge topbar-role-${currentUser.role}`}>
-                      {currentUser.role}
-                    </span>
-                  </div>
-                )}
-                <button type="button" className="ghost" onClick={onLogout}>
-                  Sign out
-                </button>
-              </div>
+              <button
+                type="button"
+                className="hamburger-btn"
+                aria-label="Open user menu"
+                aria-expanded={drawerOpen}
+                onClick={() => setDrawerOpen((o) => !o)}
+              >
+                <span className={`hamburger-icon${drawerOpen ? ' open' : ''}`}>
+                  <span /><span /><span />
+                </span>
+              </button>
             )}
             {authMode === 'candidate' && (
               <span className="badge brand"><span className="dot" /> {candidateInvite?.name}</span>
@@ -75,6 +144,13 @@ export default function AppLayout() {
           </div>
         </div>
       </div>
+
+      <UserDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        currentUser={currentUser}
+        onLogout={onLogout}
+      />
 
       <div className="app-body">
         <Outlet />
