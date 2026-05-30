@@ -33,7 +33,7 @@
   --shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45);
 
-  --app-page-gutter: clamp(28px, 4vw, 56px);
+  --app-page-gutter: clamp(14px, 2vw, 28px);
 }
 
 * {
