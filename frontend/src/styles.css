@@ -131,11 +131,11 @@ a:hover { text-decoration: underline; }
   overflow-x: hidden;
   background: var(--bg);
   background-image: var(--bg-grad);
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .topbar {
-  padding: 18px var(--app-page-gutter);
+  padding: 12px var(--app-page-gutter);
   background: linear-gradient(180deg, rgba(17, 23, 43, 0.98), rgba(17, 23, 43, 0.72));
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(10px);
@@ -249,7 +249,7 @@ a:hover { text-decoration: underline; }
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 40px var(--app-page-gutter) 56px;
+  padding: 28px var(--app-page-gutter) 36px;
   box-sizing: border-box;
 }
 
@@ -287,8 +287,8 @@ a:hover { text-decoration: underline; }
 }
 
 .app-page-header {
-  margin-bottom: 36px;
-  padding-bottom: 28px;
+  margin-bottom: 22px;
+  padding-bottom: 18px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -313,8 +313,8 @@ a:hover { text-decoration: underline; }
 }
 
 .app-page-eyebrow {
-  margin: 0 0 12px;
-  font-size: 12px;
+  margin: 0 0 8px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -327,16 +327,16 @@ a:hover { text-decoration: underline; }
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px 20px;
-  margin-bottom: 10px;
-  min-height: 2.5rem;
+  gap: 10px 16px;
+  margin-bottom: 8px;
+  min-height: 2rem;
 }
 
 .app-page-title,
 .app-page-header h1 {
   margin: 0;
   font-family: var(--sans);
-  font-size: clamp(1.875rem, 3.5vw, 2.5rem);
+  font-size: clamp(1.375rem, 2.5vw, 1.75rem);
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.12;
@@ -358,9 +358,9 @@ a:hover { text-decoration: underline; }
   margin: 0;
   max-width: 72ch;
   font-family: var(--sans);
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 400;
-  line-height: 1.7;
+  line-height: 1.65;
   color: var(--text-muted);
 }
 
@@ -392,10 +392,10 @@ a:hover { text-decoration: underline; }
   background: transparent;
   color: var(--text-muted);
   border: 1px solid transparent;
-  padding: 9px 18px;
+  padding: 7px 14px;
   border-radius: 7px;
   font-weight: 500;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .app-segmented-tab:hover {
@@ -599,7 +599,7 @@ a:hover { text-decoration: underline; }
   background: linear-gradient(180deg, var(--surface-2), var(--surface));
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 22px 22px 20px;
+  padding: 16px 18px 14px;
   cursor: pointer;
   position: relative;
   overflow: hidden;
@@ -622,8 +622,8 @@ a:hover { text-decoration: underline; }
 }
 .card:hover::after { opacity: 1; }
 .card h3 {
-  margin: 0 0 8px;
-  font-size: 18px;
+  margin: 0 0 6px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.3;
@@ -677,11 +677,11 @@ a:hover { text-decoration: underline; }
   color: var(--text-dim);
 }
 .challenge-card-description {
-  margin: 0 0 16px;
+  margin: 0 0 12px;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.55;
-  min-height: 44px;
+  min-height: 36px;
   flex: 1;
 }
 .challenge-card-footer {
@@ -743,8 +743,8 @@ a:hover { text-decoration: underline; }
 .bucket-chip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 14px;
+  gap: 6px;
+  padding: 5px 12px;
   border-radius: 999px;
   background: var(--surface-2);
   color: var(--text-muted);
@@ -1980,30 +1980,30 @@ a:hover { text-decoration: underline; }
 .loading-card strong { color: var(--text); }
 
 .app .alert {
-  font-size: 15px;
-  padding: 12px 14px;
+  font-size: 13px;
+  padding: 10px 12px;
 }
 
 .app button {
-  font-size: 14px;
-  padding: 9px 16px;
+  font-size: 13px;
+  padding: 7px 14px;
 }
 
 .app-page-centered .score-card {
-  max-width: 560px;
-  padding: 36px 40px;
+  max-width: 520px;
+  padding: 28px 32px;
 }
 
 .app-page-centered .score-card h2 {
-  font-size: 15px;
+  font-size: 13px;
 }
 
 .app-page-centered .score-display {
-  font-size: 72px;
+  font-size: 60px;
 }
 
 .app-page-centered .score-card .summary-row {
-  font-size: 15px;
+  font-size: 13px;
 }
 
 /* Screen-reader only */
@@ -2024,7 +2024,7 @@ a:hover { text-decoration: underline; }
 /* ---------------------------------------------------------------------- */
 
 .app-page.authoring-page {
-  padding: 28px var(--app-page-gutter) 24px;
+  padding: 10px var(--app-page-gutter) 24px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2045,6 +2045,24 @@ a:hover { text-decoration: underline; }
   padding-bottom: 20px;
 }
 
+/* Slim toolbar strip that replaces the old AppPageHeader on the authoring page */
+.authoring-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+/* Always show working-on + bucket info inside the strip regardless of viewport width */
+.authoring-strip .authoring-active-draft {
+  display: inline-flex;
+}
+
 .authoring-page-header .app-page-header-aside {
   min-width: 0;
 }
@@ -2058,7 +2076,7 @@ a:hover { text-decoration: underline; }
 }
 
 .authoring-workflow-connector {
-  width: 28px;
+  width: 18px;
   height: 1px;
   background: linear-gradient(90deg, var(--border-strong), transparent);
   flex-shrink: 0;
@@ -2067,8 +2085,8 @@ a:hover { text-decoration: underline; }
 .authoring-step {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px 10px 10px;
+  gap: 8px;
+  padding: 6px 12px 6px 8px;
   background: rgba(0, 0, 0, 0.2);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -2094,8 +2112,8 @@ a:hover { text-decoration: underline; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   font-size: 13px;
   font-weight: 700;
@@ -2121,13 +2139,13 @@ a:hover { text-decoration: underline; }
 }
 
 .authoring-step-label {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
 .authoring-step-desc {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-dim);
 }
 
@@ -2154,7 +2172,7 @@ a:hover { text-decoration: underline; }
 }
 
 .authoring-active-draft strong {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2165,10 +2183,10 @@ a:hover { text-decoration: underline; }
 .authoring-llm-pill {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
+  gap: 6px;
+  padding: 5px 10px;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   border: 1px solid var(--border);
   background: var(--surface-2);
@@ -2223,14 +2241,14 @@ a:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 16px;
+  gap: 10px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
 }
 
 .authoring-rail-title {
   margin: 0;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text);
 }
@@ -2288,7 +2306,7 @@ a:hover { text-decoration: underline; }
   width: 100%;
   text-align: left;
   display: block;
-  padding: 12px 16px;
+  padding: 10px 14px;
   background: transparent;
   border: none;
   border-bottom: 1px solid var(--border);
@@ -2318,11 +2336,11 @@ a:hover { text-decoration: underline; }
 .authoring-draft-item-title {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  font-size: 14px;
+  gap: 8px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1.4;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
   word-break: break-word;
 }
 
@@ -2406,8 +2424,8 @@ a:hover { text-decoration: underline; }
 }
 
 .authoring-empty-copy h2 {
-  margin: 0 0 8px;
-  font-size: 22px;
+  margin: 0 0 6px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--text);
   letter-spacing: -0.02em;
@@ -2416,7 +2434,7 @@ a:hover { text-decoration: underline; }
 .authoring-empty-copy p {
   margin: 0 auto;
   max-width: 420px;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -2482,13 +2500,13 @@ a:hover { text-decoration: underline; }
 }
 
 .authoring-stage .chat-intro {
-  font-size: 15px;
-  line-height: 1.65;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .authoring-stage .chat-bubble {
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .authoring-stage .draft-preview .label {
@@ -2496,7 +2514,7 @@ a:hover { text-decoration: underline; }
 }
 
 .authoring-stage .draft-preview .value {
-  font-size: 15px;
+  font-size: 13px;
 }
 
 .authoring-stage .phase-pill {
@@ -2509,11 +2527,11 @@ a:hover { text-decoration: underline; }
 }
 
 .authoring-stage .review-row .title {
-  font-size: 15px;
+  font-size: 13px;
 }
 
 .authoring-stage .review-detail header h3 {
-  font-size: 20px;
+  font-size: 16px;
 }
 
 @media (min-width: 1281px) {
@@ -2717,10 +2735,10 @@ a:hover { text-decoration: underline; }
   background: transparent;
   color: var(--text-muted);
   border: 1px solid transparent;
-  padding: 10px 20px;
+  padding: 7px 14px;
   border-radius: var(--radius);
   font-weight: 500;
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0.2px;
 }
 .topnav-pill:hover {
@@ -3342,10 +3360,10 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
   border: 0;
   border-bottom: 1px solid var(--border);
   text-align: left;
-  padding: 14px 16px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   border-radius: 0;
   font-weight: 500;
 }
@@ -3380,11 +3398,11 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
 }
 
 .review-empty {
-  padding: 40px 24px;
+  padding: 28px 20px;
   color: var(--text-dim);
   text-align: center;
   line-height: 1.65;
-  font-size: 15px;
+  font-size: 13px;
 }
 
 .review-detail-col {
@@ -3398,10 +3416,10 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
 }
 
 .review-detail {
-  padding: 20px 22px 24px;
+  padding: 14px 18px 18px;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 16px;
 }
 
 .review-detail header {
@@ -3414,9 +3432,9 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
 }
 
 .review-detail header h3 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   color: var(--text);
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -3424,7 +3442,7 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
 .review-detail header p {
   margin: 0;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.55;
   max-width: 720px;
 }
@@ -3510,9 +3528,9 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 16px 22px;
-  padding: 20px 22px;
-  margin-bottom: 24px;
+  gap: 12px 18px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
 }
 .memories-filter {
   display: flex; flex-direction: column; gap: 6px;
@@ -3522,7 +3540,7 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
 .memories-filter select {
   min-width: 200px; background: var(--surface-2); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 10px 12px; font-size: 15px; text-transform: none; letter-spacing: 0;
+  padding: 7px 10px; font-size: 13px; text-transform: none; letter-spacing: 0;
 }
 .memories-list { display: flex; flex-direction: column; gap: 14px; }
 .memories-card {
@@ -3538,29 +3556,29 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
 }
 .memories-card-head {
   width: 100%; display: flex; align-items: center; justify-content: space-between;
-  gap: 14px; padding: 16px 20px; background: transparent; border: none;
+  gap: 12px; padding: 12px 16px; background: transparent; border: none;
   color: var(--text); text-align: left; cursor: pointer;
-  font-size: 15px;
+  font-size: 13px;
 }
 .memories-card-head:hover { background: rgba(255,255,255,0.03); }
 .memories-card-title {
   display: flex; flex-wrap: wrap; align-items: center; gap: 10px; flex: 1; min-width: 0;
 }
-.memories-card-title strong { font-size: 17px; font-weight: 600; letter-spacing: -0.02em; }
+.memories-card-title strong { font-size: 14px; font-weight: 600; letter-spacing: -0.02em; }
 .memories-card-body {
-  padding: 0 20px 20px; border-top: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 14px;
+  padding: 0 16px 16px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 10px;
 }
 .memories-card-body section h4 {
   margin: 12px 0 8px; font-size: 12px; text-transform: uppercase;
   letter-spacing: 0.6px; color: var(--text-dim);
 }
 .memories-card-body ul {
-  margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.65; color: var(--text-muted);
+  margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--text-muted);
 }
 .memories-card-body ul.donts { color: var(--danger); }
 .memories-prose {
-  margin: 0; font-size: 15px; line-height: 1.65; color: var(--text-muted);
+  margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-muted);
   white-space: pre-wrap; word-break: break-word;
 }
 .memories-json, .memories-code {
@@ -3576,7 +3594,7 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
 .memories-pagination-btns { display: flex; gap: 8px; }
 .memories-page .review-empty,
 .memories-page .loading-card {
-  font-size: 15px;
+  font-size: 13px;
 }
 
 .pill.warn { background: rgba(255, 180, 60, 0.15); color: #e6b84d; }
@@ -3887,8 +3905,8 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
   }
 
   .app-page {
-    padding-top: 28px;
-    padding-bottom: 40px;
+    padding-top: 20px;
+    padding-bottom: 28px;
   }
 
   .app-page-header--wide {
@@ -3954,7 +3972,7 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
   }
 
   .app-page-lead {
-    font-size: 15px;
+    font-size: 13px;
   }
 
   .app-page-header-row {
@@ -4009,109 +4027,21 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
 /* Memories — smaller type on tablet and phone */
 @media (max-width: 900px) {
   .memories-page {
-    font-size: 15px;
+    font-size: 13px;
   }
 
   .memories-page .app-page-header {
-    margin-bottom: 24px;
-    padding-bottom: 20px;
-  }
-
-  .memories-page .app-page-title,
-  .memories-page .app-page-header h1 {
-    font-size: clamp(1.5rem, 4.5vw, 1.875rem);
-  }
-
-  .memories-page .app-page-lead {
-    font-size: 15px;
-    line-height: 1.6;
-  }
-
-  .memories-page .app-page-meta {
-    font-size: 12px;
-    padding: 5px 10px;
-  }
-
-  .memories-toolbar {
-    padding: 14px 16px;
     margin-bottom: 18px;
-    gap: 12px 16px;
-  }
-
-  .memories-filter {
-    font-size: 11px;
-  }
-
-  .memories-filter input,
-  .memories-filter select {
-    font-size: 14px;
-    padding: 8px 10px;
-  }
-
-  .memories-page .app-segmented-tab {
-    font-size: 13px;
-    padding: 8px 14px;
-  }
-
-  .memories-card-head {
-    padding: 12px 16px;
-    font-size: 14px;
-  }
-
-  .memories-card-title strong {
-    font-size: 15px;
-  }
-
-  .memories-card-body {
-    padding: 0 16px 16px;
-    gap: 12px;
-  }
-
-  .memories-card-body ul,
-  .memories-prose {
-    font-size: 14px;
-    line-height: 1.6;
-  }
-
-  .memories-card-body section h4 {
-    font-size: 11px;
-    margin-top: 10px;
-  }
-
-  .memories-pagination {
-    font-size: 13px;
-  }
-
-  .memories-page .review-empty,
-  .memories-page .loading-card {
-    font-size: 14px;
-  }
-}
-
-@media (max-width: 640px) {
-  .memories-page {
-    font-size: 14px;
-    padding-top: 24px;
-    padding-bottom: 32px;
-  }
-
-  .memories-page .app-page-header {
-    margin-bottom: 20px;
-    padding-bottom: 16px;
-  }
-
-  .memories-page .app-page-eyebrow {
-    font-size: 11px;
-    margin-bottom: 8px;
+    padding-bottom: 14px;
   }
 
   .memories-page .app-page-title,
   .memories-page .app-page-header h1 {
-    font-size: 1.375rem;
+    font-size: clamp(1.25rem, 3.5vw, 1.5rem);
   }
 
   .memories-page .app-page-lead {
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1.55;
   }
 
@@ -4121,23 +4051,111 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
   }
 
   .memories-toolbar {
-    padding: 12px 14px;
-    margin-bottom: 14px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    gap: 10px 14px;
+  }
+
+  .memories-filter {
+    font-size: 11px;
   }
 
   .memories-filter input,
   .memories-filter select {
-    font-size: 13px;
+    font-size: 12px;
+    padding: 6px 9px;
   }
 
   .memories-page .app-segmented-tab {
     font-size: 12px;
-    padding: 7px 12px;
+    padding: 6px 12px;
   }
 
   .memories-card-head {
     padding: 10px 14px;
+    font-size: 12px;
+  }
+
+  .memories-card-title strong {
+    font-size: 13px;
+  }
+
+  .memories-card-body {
+    padding: 0 14px 14px;
     gap: 10px;
+  }
+
+  .memories-card-body ul,
+  .memories-prose {
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  .memories-card-body section h4 {
+    font-size: 10px;
+    margin-top: 8px;
+  }
+
+  .memories-pagination {
+    font-size: 12px;
+  }
+
+  .memories-page .review-empty,
+  .memories-page .loading-card {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 640px) {
+  .memories-page {
+    font-size: 13px;
+    padding-top: 18px;
+    padding-bottom: 24px;
+  }
+
+  .memories-page .app-page-header {
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+  }
+
+  .memories-page .app-page-eyebrow {
+    font-size: 10px;
+    margin-bottom: 6px;
+  }
+
+  .memories-page .app-page-title,
+  .memories-page .app-page-header h1 {
+    font-size: 1.25rem;
+  }
+
+  .memories-page .app-page-lead {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .memories-page .app-page-meta {
+    font-size: 10px;
+    padding: 3px 7px;
+  }
+
+  .memories-toolbar {
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+
+  .memories-filter input,
+  .memories-filter select {
+    font-size: 12px;
+  }
+
+  .memories-page .app-segmented-tab {
+    font-size: 11px;
+    padding: 6px 10px;
+  }
+
+  .memories-card-head {
+    padding: 8px 12px;
+    gap: 8px;
   }
 
   .memories-card-title {
@@ -4145,7 +4163,7 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
   }
 
   .memories-card-title strong {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .memories-card-title .pill {
@@ -4155,7 +4173,7 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
 
   .memories-card-body ul,
   .memories-prose {
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .memories-json,
@@ -4165,14 +4183,161 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
   }
 
   .memories-pagination {
-    font-size: 12px;
+    font-size: 11px;
     flex-direction: column;
     align-items: flex-start;
   }
 
   .memories-page .review-empty,
   .memories-page .loading-card {
-    font-size: 13px;
+    font-size: 12px;
   }
+}
+
+/* ---------- Browser Tab ---------- */
+
+.browser-tab {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.browser-nav-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  transition: color 0.12s, background 0.12s;
+}
+.browser-nav-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(255,255,255,0.07);
+}
+.browser-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.browser-url-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.browser-url-input {
+  width: 100%;
+  background: rgba(10, 14, 26, 0.75);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 4px 14px;
+  font-size: 12.5px;
+  font-family: var(--mono);
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.browser-url-input:focus {
+  outline: none;
+  border-color: var(--brand-bright);
+  background: rgba(10, 14, 26, 0.9);
+}
+
+.browser-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,0.15);
+  border-top-color: var(--brand-bright);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.browser-frame-wrapper {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.browser-loading-bar {
+  position: absolute;
+  top: 0; left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--brand), var(--brand-bright));
+  animation: browser-load-bar 1.4s ease-in-out infinite;
+  z-index: 2;
+}
+
+@keyframes browser-load-bar {
+  0%   { left: 0; width: 0%; }
+  30%  { left: 0; width: 60%; }
+  70%  { left: 30%; width: 70%; }
+  100% { left: 100%; width: 0%; }
+}
+
+.browser-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #fff;
+}
+
+.browser-prompt,
+.browser-tab-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--text-muted);
+  padding: 24px;
+}
+
+.browser-prompt-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 360px;
+}
+
+.browser-prompt-icon {
+  font-size: 36px;
+  opacity: 0.35;
+  line-height: 1;
+}
+
+kbd {
+  display: inline-block;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
+  font-family: var(--mono);
 }
 

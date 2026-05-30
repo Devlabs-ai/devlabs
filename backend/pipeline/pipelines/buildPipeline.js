@@ -270,6 +270,25 @@ async function runBuildLoop({
   const spinFailureHistory = [];
   const validateFailureHistory = [];
 
+  // Warm-start: query lessons using draft context before iteration 1.
+  // This gives the code agent category-level patterns from past builds even
+  // on the very first attempt — no failure message required.
+  let warmLessons = { relatedLessons: [] };
+  try {
+    warmLessons = await lessonStore.findByDraftContext(normalized);
+    if (warmLessons.relatedLessons.length) {
+      const best = warmLessons.relatedLessons[0];
+      emitLog(onEvent, {
+        level: 'info',
+        tag: 'lessons',
+        message: `Warm-start: injecting ${warmLessons.relatedLessons.length} lesson(s) before iteration 1`,
+        detail: `Top match similarity ${best.similarity != null ? best.similarity.toFixed(2) : 'n/a'} (${best.type || 'fix'})`,
+      });
+    }
+  } catch (e) {
+    console.warn(`[lessons] findByDraftContext failed: ${e.message}`);
+  }
+
   for (let attempt = 1; attempt <= MAX_ITERATIONS; attempt++) {
     onEvent({ type: 'phase', phase: 'GENERATE', attempt, total: MAX_ITERATIONS });
     const retryHint = spinFailureMsg
@@ -288,20 +307,34 @@ async function runBuildLoop({
     try {
       let lessonsBlock = { relatedLessons: [] };
       if (spinFailureMsg || validateFailureMsg) {
+        // Iteration 2+: retry-specific lessons (failure-message similarity)
         lessonsBlock = await lessonStore.findForRetry({
           draft: normalized,
           spinFailureMsg,
           validateFailureMsg,
         });
+        // Merge in warm-start lessons not already present
+        if (warmLessons.relatedLessons.length) {
+          const existingIds = new Set(lessonsBlock.relatedLessons.map((l) => l.text));
+          const extras = warmLessons.relatedLessons.filter((l) => !existingIds.has(l.text));
+          if (extras.length) {
+            lessonsBlock = {
+              relatedLessons: [...lessonsBlock.relatedLessons, ...extras],
+            };
+          }
+        }
         if (lessonsBlock.relatedLessons.length) {
           const best = lessonsBlock.relatedLessons[0];
           emitLog(onEvent, {
             level: 'info',
             tag: 'lessons',
-            message: `Injecting ${lessonsBlock.relatedLessons.length} learned lesson(s)`,
-            detail: `Top match similarity ${best.similarity != null ? best.similarity.toFixed(2) : 'n/a'}`,
+            message: `Injecting ${lessonsBlock.relatedLessons.length} lesson(s) (retry)`,
+            detail: `Top match similarity ${best.similarity != null ? best.similarity.toFixed(2) : 'n/a'} (${best.type || 'fix'})`,
           });
         }
+      } else if (attempt === 1 && warmLessons.relatedLessons.length) {
+        // Iteration 1: use warm-start lessons only
+        lessonsBlock = warmLessons;
       }
 
       const prevForGenerate = lastAttempt
@@ -421,11 +454,17 @@ async function runBuildLoop({
     const buildCategory = normalized.meta?.category || normalized.category || null;
     let portMap;
     try {
-      ({ portMap } = await spinAgent.spin({ buildDir, buildSessionId, onEvent }));
+      ({ portMap } = await spinAgent.spin({
+        buildDir,
+        buildSessionId,
+        onEvent,
+        readyServices: assets.validationSpec?.readyServices || null,
+      }));
 
       spinFailureMsg = null;
       if (spinFailureHistory.length > 0) {
         const lessonId = await lessonStore.record({
+          type: 'fix',
           phase: 'spin',
           draftSessionId,
           buildSessionId,
@@ -439,7 +478,7 @@ async function runBuildLoop({
           emitLog(onEvent, {
             level: 'info',
             tag: 'lessons',
-            message: `Recorded SPIN lesson #${lessonId}`,
+            message: `Recorded SPIN fix-lesson #${lessonId}`,
             detail: `${spinFailureHistory.length} prior failure(s) before this success`,
           });
         }
@@ -551,6 +590,7 @@ async function runBuildLoop({
       validateFailureMsg = null;
       if (validateFailureHistory.length > 0) {
         const lessonId = await lessonStore.record({
+          type: 'fix',
           phase: 'validate',
           draftSessionId,
           buildSessionId,
@@ -565,7 +605,7 @@ async function runBuildLoop({
           emitLog(onEvent, {
             level: 'info',
             tag: 'lessons',
-            message: `Recorded VALIDATE lesson #${lessonId}`,
+            message: `Recorded VALIDATE fix-lesson #${lessonId}`,
             detail: `${validateFailureHistory.length} prior failure(s) before this success`,
           });
         }
@@ -625,7 +665,39 @@ async function runBuildLoop({
     if (snap) validateFailureHistory.push(snap);
   }
 
-  // exhausted retries
+  // exhausted retries — record anti-pattern lessons from both failure histories
+  const lessonTitle = normalized.meta?.name || normalized.title || lastAssets?.title;
+  if (spinFailureHistory.length > 0) {
+    lessonStore.record({
+      type: 'anti-pattern',
+      phase: 'spin',
+      draftSessionId,
+      buildSessionId,
+      category: buildCategory,
+      title: lessonTitle,
+      draft: normalized,
+      failures: [...spinFailureHistory],
+      assets: lastAssets,
+    }).then((id) => {
+      if (id) console.log(`[lessons] Recorded SPIN anti-pattern #${id} (${spinFailureHistory.length} failure(s))`);
+    }).catch((e) => console.warn(`[lessons] anti-pattern record failed: ${e.message}`));
+  }
+  if (validateFailureHistory.length > 0) {
+    lessonStore.record({
+      type: 'anti-pattern',
+      phase: 'validate',
+      draftSessionId,
+      buildSessionId,
+      category: buildCategory,
+      title: lessonTitle,
+      draft: normalized,
+      failures: [...validateFailureHistory],
+      assets: lastAssets,
+    }).then((id) => {
+      if (id) console.log(`[lessons] Recorded VALIDATE anti-pattern #${id} (${validateFailureHistory.length} failure(s))`);
+    }).catch((e) => console.warn(`[lessons] anti-pattern record failed: ${e.message}`));
+  }
+
   const failedBuildDir = process.env.KEEP_FAILED_BUILDS === 'true' ? buildDir : null;
   if (failedBuildDir) {
     console.warn(`[build] KEEP_FAILED_BUILDS=true — preserving failed build at: ${buildDir}`);

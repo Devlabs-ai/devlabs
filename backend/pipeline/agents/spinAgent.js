@@ -57,14 +57,18 @@ class SpinError extends Error {
 /**
  * Run the SPIN phase for one build iteration.
  *
- * @param {object} opts
- * @param {string}   opts.buildDir       — absolute path to the build artefact directory
- * @param {string}   opts.buildSessionId — UUID used for port-pool keying
- * @param {function} opts.onEvent        — SSE-style event emitter (same as buildPipeline)
- * @returns {{ portMap: object }}        — resolved host-port environment map
- * @throws {SpinError}                   — structured failure; pipeline stashes as spinFailureMsg
+ * @param {object}   opts
+ * @param {string}   opts.buildDir        — absolute path to the build artefact directory
+ * @param {string}   opts.buildSessionId  — UUID used for port-pool keying
+ * @param {function} opts.onEvent         — SSE-style event emitter (same as buildPipeline)
+ * @param {string[]} [opts.readyServices] — names of infra services that must reach "running"
+ *                                          state before SPIN is considered done. When provided,
+ *                                          one-shot and crash-looping worker services are
+ *                                          ignored entirely by the readiness gate.
+ * @returns {{ portMap: object }}         — resolved host-port environment map
+ * @throws {SpinError}                    — structured failure; pipeline stashes as spinFailureMsg
  */
-async function spin({ buildDir, buildSessionId, onEvent }) {
+async function spin({ buildDir, buildSessionId, onEvent, readyServices = null }) {
   let portMap;
 
   try {
@@ -79,10 +83,17 @@ async function spin({ buildDir, buildSessionId, onEvent }) {
       detail: portMap,
     });
 
+    if (readyServices && readyServices.length > 0) {
+      emitLog(onEvent, {
+        level: 'info',
+        tag: 'spin',
+        message: `Gating on ${readyServices.length} ready service(s): ${readyServices.join(', ')}`,
+      });
+    }
     emitLog(onEvent, { level: 'info', tag: 'spin', message: 'Running docker compose up…' });
     await composeManager.up(buildDir, portMap);
 
-    await composeManager.waitForServices(buildDir, portMap, 90_000);
+    await composeManager.waitForServices(buildDir, portMap, 90_000, readyServices);
     emitLog(onEvent, { level: 'ok', tag: 'spin', message: 'All services reported running' });
 
     return { portMap };

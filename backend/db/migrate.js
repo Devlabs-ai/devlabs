@@ -110,6 +110,11 @@ const STATEMENTS = [
      created_at      BIGINT NOT NULL,
      updated_at      BIGINT NOT NULL
    )`,
+  // Add lesson type: 'fix' (phase failed then succeeded within a run) or
+  // 'anti-pattern' (build exhausted all iterations without ever passing).
+  `ALTER TABLE lessons ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'fix'
+     CHECK (type IN ('fix', 'anti-pattern'))`,
+  `CREATE INDEX IF NOT EXISTS idx_lessons_type ON lessons (phase, type)`,
 ];
 
 async function runMigrations() {

@@ -49,30 +49,34 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy-ec2:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    env:
-      APP_DIR: ${{ secrets.EC2_APP_DIR != '' && secrets.EC2_APP_DIR || '/home/ec2-user/Devlabs' }}
-      DEPLOY_BRANCH: main
-    steps:
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script_stop: true
-          script: |
-            set -euo pipefail
-            cd "${{ env.APP_DIR }}"
-            export DEPLOY_BRANCH="${{ env.DEPLOY_BRANCH }}"
-            git fetch origin
-            git checkout "$DEPLOY_BRANCH"
-            git pull origin "$DEPLOY_BRANCH"
-            if [[ ! -f scripts/prod-deploy.sh ]]; then
-              echo "ERROR: scripts/prod-deploy.sh missing on ${DEPLOY_BRANCH}. Merge CD workflow to main and push." >&2
-              exit 1
-            fi
-            chmod +x scripts/prod-deploy.sh scripts/prod-restart.sh
-            ./scripts/prod-deploy.sh
+  # deploy-ec2 is disabled — Elastic IP decommissioned to avoid billing.
+  # Re-enable by uncommenting when a new EC2 instance + Elastic IP is provisioned
+  # and EC2_HOST / EC2_USER / EC2_SSH_KEY secrets are updated.
+  #
+  # deploy-ec2:
+  #   needs: build-and-push
+  #   runs-on: ubuntu-latest
+  #   env:
+  #     APP_DIR: ${{ secrets.EC2_APP_DIR != '' && secrets.EC2_APP_DIR || '/home/ec2-user/Devlabs' }}
+  #     DEPLOY_BRANCH: main
+  #   steps:
+  #     - name: Deploy over SSH
+  #       uses: appleboy/ssh-action@v1.2.0
+  #       with:
+  #         host: ${{ secrets.EC2_HOST }}
+  #         username: ${{ secrets.EC2_USER }}
+  #         key: ${{ secrets.EC2_SSH_KEY }}
+  #         script_stop: true
+  #         script: |
+  #           set -euo pipefail
+  #           cd "${{ env.APP_DIR }}"
+  #           export DEPLOY_BRANCH="${{ env.DEPLOY_BRANCH }}"
+  #           git fetch origin
+  #           git checkout "$DEPLOY_BRANCH"
+  #           git pull origin "$DEPLOY_BRANCH"
+  #           if [[ ! -f scripts/prod-deploy.sh ]]; then
+  #             echo "ERROR: scripts/prod-deploy.sh missing on ${DEPLOY_BRANCH}. Merge CD workflow to main and push." >&2
+  #             exit 1
+  #           fi
+  #           chmod +x scripts/prod-deploy.sh scripts/prod-restart.sh
+  #           ./scripts/prod-deploy.sh

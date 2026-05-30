@@ -7,15 +7,28 @@ const { primaryCategoryFromList, getExplicitCatalogueCategories } = require('../
 const { SYSTEM_PROMPT } = require('../prompts/schemaAgent.prompt');
 
 function extractDraft(text) {
+  // Primary: well-formed closing tag
   const re = /<challenge_draft>([\s\S]*?)<\/challenge_draft>/g;
   let last = null;
   let m;
   while ((m = re.exec(text)) !== null) last = m[1];
-  if (!last) return null;
+  if (last) {
+    try {
+      return JSON.parse(last.trim());
+    } catch (e) {
+      console.warn('[schemaAgent] draft JSON parse failed:', e.message);
+    }
+  }
+
+  // Fallback: response was truncated before </challenge_draft> — grab everything
+  // after the opening tag and attempt to parse the (potentially incomplete) JSON.
+  const openIdx = text.lastIndexOf('<challenge_draft>');
+  if (openIdx === -1) return null;
+  const fragment = text.slice(openIdx + '<challenge_draft>'.length).trim();
   try {
-    return JSON.parse(last.trim());
-  } catch (e) {
-    console.warn('[schemaAgent] draft JSON parse failed:', e.message);
+    return JSON.parse(fragment);
+  } catch (_e) {
+    console.warn('[schemaAgent] truncated draft parse also failed — response likely cut off mid-JSON');
     return null;
   }
 }
@@ -71,7 +84,7 @@ async function generateSchema({ sessionDraft, onEvent }) {
     agent: 'schema',
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userContent }],
-    maxTokens: 8192,
+    maxTokens: 16384,
     onEvent,
   });
 
