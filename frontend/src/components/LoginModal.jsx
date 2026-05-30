@@ -69,13 +69,14 @@ export default function LoginModal({ open, onClose, onLoggedIn, initialError = n
     }
   };
 
-  const handleVerifyOtp = async (e) => {
+  const handleVerifyOtp = async (e, overrideCode) => {
     e?.preventDefault();
-    if (!code.trim()) return setError('Enter the 6-digit code.');
+    const codeToSubmit = (overrideCode ?? code).trim();
+    if (!codeToSubmit) return setError('Enter the code.');
     setError(null);
     setBusy(true);
     try {
-      const data = await verifyOtp(email.trim(), code.trim());
+      const data = await verifyOtp(email.trim(), codeToSubmit);
       onLoggedIn && onLoggedIn(data.user);
     } catch (err) {
       setError(err?.response?.data?.error || err.message);
@@ -97,7 +98,7 @@ export default function LoginModal({ open, onClose, onLoggedIn, initialError = n
     const v = e.target.value.replace(/\D/g, '').slice(0, CODE_LENGTH);
     setCode(v);
     if (v.length === CODE_LENGTH) {
-      setTimeout(() => handleVerifyOtp(), 80);
+      setTimeout(() => handleVerifyOtp(null, v), 80);
     }
   };
 
