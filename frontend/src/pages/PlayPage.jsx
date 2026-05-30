@@ -28,6 +28,20 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
   const [collection, setCollection] = useState('public');
   const [difficulty, setDifficulty] = useState(null);
   const [domain, setDomain]         = useState(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterRef = React.useRef(null);
+
+  // Close popover on outside click
+  React.useEffect(() => {
+    if (!filterOpen) return undefined;
+    const handler = (e) => {
+      if (filterRef.current && !filterRef.current.contains(e.target)) setFilterOpen(false);
+    };
+    document.addEventListener('pointerdown', handler);
+    return () => document.removeEventListener('pointerdown', handler);
+  }, [filterOpen]);
+
+  const activeFilterCount = (difficulty ? 1 : 0) + (domain ? 1 : 0);
 
   const collectionCounts = useMemo(() => ({
     my:     challenges.filter((c) => c.authored_by && c.authored_by === currentUser?.id).length,
@@ -90,45 +104,65 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
           ))}
         </div>
 
-        <div className="library-filters">
-          {/* Difficulty */}
-          <div className="filter-group">
-            {DIFFICULTIES.map((d) => (
-              <button
-                key={d}
-                type="button"
-                className={`filter-chip difficulty-${d.toLowerCase()} ${difficulty === d ? 'active' : ''}`}
-                onClick={() => setDifficulty((prev) => (prev === d ? null : d))}
-              >
-                {d}
-              </button>
-            ))}
-          </div>
+        <div className="filter-popover-wrap" ref={filterRef}>
+          <button
+            type="button"
+            className={`filter-funnel-btn ${filterOpen ? 'open' : ''} ${activeFilterCount > 0 ? 'has-filters' : ''}`}
+            onClick={() => setFilterOpen((o) => !o)}
+            aria-label="Filters"
+          >
+            <svg className="funnel-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M1.5 3h13L9.5 8.5V13l-3-1.5V8.5L1.5 3Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+            </svg>
+            {activeFilterCount > 0 && (
+              <span className="filter-funnel-badge">{activeFilterCount}</span>
+            )}
+          </button>
 
-          <span className="filter-sep" />
+          {filterOpen && (
+            <div className="filter-popover">
+              <div className="filter-popover-section">
+                <span className="filter-popover-label">Difficulty</span>
+                <div className="filter-group">
+                  {DIFFICULTIES.map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={`filter-chip difficulty-${d.toLowerCase()} ${difficulty === d ? 'active' : ''}`}
+                      onClick={() => setDifficulty((prev) => (prev === d ? null : d))}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          {/* Domain */}
-          <div className="filter-group">
-            {DOMAINS.map((dom) => (
-              <button
-                key={dom.id}
-                type="button"
-                className={`filter-chip ${domain === dom.id ? 'active' : ''}`}
-                onClick={() => setDomain((prev) => (prev === dom.id ? null : dom.id))}
-              >
-                {dom.label}
-              </button>
-            ))}
-          </div>
+              <div className="filter-popover-section">
+                <span className="filter-popover-label">Domain</span>
+                <div className="filter-group filter-group--wrap">
+                  {DOMAINS.map((dom) => (
+                    <button
+                      key={dom.id}
+                      type="button"
+                      className={`filter-chip ${domain === dom.id ? 'active' : ''}`}
+                      onClick={() => setDomain((prev) => (prev === dom.id ? null : dom.id))}
+                    >
+                      {dom.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          {(difficulty || domain) && (
-            <button
-              type="button"
-              className="filter-clear"
-              onClick={() => { setDifficulty(null); setDomain(null); }}
-            >
-              Clear
-            </button>
+              {activeFilterCount > 0 && (
+                <button
+                  type="button"
+                  className="filter-clear"
+                  onClick={() => { setDifficulty(null); setDomain(null); }}
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>

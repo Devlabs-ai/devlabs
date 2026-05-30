@@ -818,17 +818,104 @@ a:hover { text-decoration: underline; }
   color: var(--brand-bright);
 }
 
-/* Filters */
-.library-filters {
+/* Funnel button + popover */
+.filter-popover-wrap {
+  position: relative;
+}
+
+.filter-funnel-btn {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.13s, border-color 0.13s, color 0.13s;
 }
 
+.filter-funnel-btn:hover,
+.filter-funnel-btn.open {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--text);
+  filter: none;
+}
+
+.filter-funnel-btn.has-filters {
+  border-color: var(--brand);
+  color: var(--brand-bright);
+}
+
+.funnel-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.filter-funnel-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #00170d;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.filter-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: 240px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: popover-rise 0.15s ease;
+}
+
+@keyframes popover-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.filter-popover-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filter-popover-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* Filters */
 .filter-group {
   display: flex;
   gap: 4px;
+}
+
+.filter-group--wrap {
+  flex-wrap: wrap;
 }
 
 .filter-sep {
