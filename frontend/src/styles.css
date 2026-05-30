@@ -3004,21 +3004,31 @@ a:hover { text-decoration: underline; }
 
 .topnav {
   display: flex;
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 4px;
-  gap: 3px;
+  align-items: center;
+  gap: 2px;
 }
 .topnav-pill {
   background: transparent;
+  border: none;
   color: var(--text-muted);
-  border: 1px solid transparent;
-  padding: 7px 14px;
-  border-radius: var(--radius);
+  padding: 6px 12px;
   font-weight: 500;
-  font-size: 13px;
-  letter-spacing: 0.2px;
+  font-size: 14px;
+  letter-spacing: 0.1px;
+  border-radius: var(--radius-sm);
+  position: relative;
+}
+.topnav-pill::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 12px;
+  right: 12px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--brand);
+  opacity: 0;
+  transition: opacity 0.15s;
 }
 .topnav-pill:hover {
   background: rgba(255, 255, 255, 0.05);
@@ -3026,10 +3036,12 @@ a:hover { text-decoration: underline; }
   filter: none;
 }
 .topnav-pill.active {
-  background: linear-gradient(180deg, rgba(16, 185, 129, 0.2), rgba(16, 185, 129, 0.08));
-  color: var(--brand-bright);
-  border-color: rgba(16, 185, 129, 0.35);
-  box-shadow: 0 0 20px rgba(16, 185, 129, 0.12);
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+}
+.topnav-pill.active::after {
+  opacity: 1;
 }
 
 .authoring {
@@ -4160,15 +4172,13 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
   .topnav {
     display: flex;
     width: 100%;
-    padding: 3px;
+    justify-content: center;
     gap: 2px;
   }
 
   .topnav-pill {
     flex: 1 1 0;
     justify-content: center;
-    padding: 9px 10px;
-    font-size: 13px;
     text-align: center;
     min-width: 0;
   }
