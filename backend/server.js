@@ -14,6 +14,7 @@ const draftStore = require('./pipeline/stores/problemDraftStore');
 const { loadChallengesFromDB, seedChallengesFromDisk } = require('./challenges/loader');
 const { VERIFIED_ROOT } = require('./sandbox/paths');
 
+const { ensurePublicLibrary } = require('./auth/companyStore');
 const authRoutes = require('./routes/auth');
 const challengeRoutes = require('./routes/challenges');
 const sessionRoutes = require('./routes/session');
@@ -94,6 +95,9 @@ async function start() {
 
   console.log(`[boot] seeding challenges from ${VERIFIED_ROOT}`);
   await seedChallengesFromDisk(VERIFIED_ROOT);
+
+  console.log('[boot] ensuring public library exists...');
+  await ensurePublicLibrary().catch((e) => console.warn('[boot] ensurePublicLibrary failed:', e.message));
 
   console.log('[boot] loading challenges from db...');
   await loadChallengesFromDB();

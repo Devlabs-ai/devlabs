@@ -10,6 +10,7 @@ const path = require('path');
 const loader = require('../challenges/loader');
 const { normalizeBucket } = require('../challenges/buckets');
 const { VERIFIED_ROOT } = require('../sandbox/paths');
+const pool = require('../db/pool');
 
 function slugify(s) {
   return String(s || 'challenge')
@@ -32,7 +33,7 @@ function copyDirSync(src, dest) {
 // Copy a built challenge into the verified dir, finalise its challenge.json,
 // and refresh the in-process challenges cache. Returns { slug, verifiedDir,
 // challenge }.
-async function promote({ buildDir, builtChallenge, fallbackTitle, bucket }) {
+async function promote({ buildDir, builtChallenge, fallbackTitle, bucket, authoredBy = null }) {
   if (!buildDir || !fs.existsSync(buildDir)) {
     const e = new Error('build directory missing on disk; rebuild before promoting');
     e.status = 400;
@@ -92,6 +93,14 @@ async function promote({ buildDir, builtChallenge, fallbackTitle, bucket }) {
 
   await loader.seedChallengesFromDisk(VERIFIED_ROOT);
   await loader.loadChallengesFromDB();
+
+  // Persist authored_by on the challenges row if we have a user
+  if (authoredBy) {
+    await pool.query(
+      `UPDATE challenges SET authored_by = $1 WHERE id = $2`,
+      [authoredBy, slug],
+    ).catch((e) => console.warn('[promote] could not set authored_by:', e.message));
+  }
 
   return { slug, verifiedDir: dest, challenge: merged };
 }

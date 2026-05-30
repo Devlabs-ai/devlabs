@@ -482,6 +482,7 @@ router.post('/:sessionId/push-to-sandbox', async (req, res, next) => {
       buildDir: d.buildDir,
       builtChallenge: d.builtChallenge,
       fallbackTitle: d.draft?.meta?.name || d.draft?.title || d.id,
+      authoredBy: req.user?.sub || null,
     });
 
     if (d.buildDir) {

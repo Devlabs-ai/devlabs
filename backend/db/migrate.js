@@ -115,6 +115,53 @@ const STATEMENTS = [
   `ALTER TABLE lessons ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'fix'
      CHECK (type IN ('fix', 'anti-pattern'))`,
   `CREATE INDEX IF NOT EXISTS idx_lessons_type ON lessons (phase, type)`,
+
+  // -------------------------------------------------------------------------
+  // Multi-tenant user / auth schema
+  // -------------------------------------------------------------------------
+
+  // Companies — one row per subscribing organisation
+  `CREATE TABLE IF NOT EXISTS companies (
+     id                  TEXT PRIMARY KEY,
+     name                TEXT NOT NULL,
+     domain              TEXT NOT NULL UNIQUE,
+     plan                TEXT NOT NULL DEFAULT 'starter'
+                           CHECK (plan IN ('starter', 'pro', 'enterprise')),
+     subscription_end    BIGINT,
+     is_active           BOOLEAN NOT NULL DEFAULT true,
+     created_at          BIGINT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_companies_domain ON companies (domain)`,
+
+  // Users — belong to a company; role scopes their capabilities
+  `CREATE TABLE IF NOT EXISTS users (
+     id            TEXT PRIMARY KEY,
+     email         TEXT NOT NULL UNIQUE,
+     company_id    TEXT NOT NULL REFERENCES companies(id),
+     role          TEXT NOT NULL DEFAULT 'interviewer'
+                     CHECK (role IN ('interviewer', 'admin')),
+     name          TEXT,
+     created_at    BIGINT NOT NULL,
+     last_login_at BIGINT
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_users_email      ON users (email)`,
+  `CREATE INDEX IF NOT EXISTS idx_users_company_id ON users (company_id)`,
+
+  // Libraries — one private library per company + one global public library
+  // (company_id IS NULL = public)
+  `CREATE TABLE IF NOT EXISTS libraries (
+     id          TEXT PRIMARY KEY,
+     company_id  TEXT REFERENCES companies(id),
+     name        TEXT NOT NULL,
+     created_at  BIGINT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_libraries_company ON libraries (company_id)`,
+
+  // Extend challenges with authorship and library membership
+  `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS authored_by  TEXT REFERENCES users(id)`,
+  `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS library_id   TEXT REFERENCES libraries(id)`,
+  `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS visibility   TEXT NOT NULL DEFAULT 'private'
+     CHECK (visibility IN ('private', 'public'))`,
 ];
 
 async function runMigrations() {
