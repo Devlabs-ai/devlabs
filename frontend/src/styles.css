@@ -1370,54 +1370,32 @@ a:hover { text-decoration: underline; }
   font-size: 12px;
 }
 
-/* ---------- Hamburger button ---------- */
+/* ---------- Avatar button ---------- */
 
-.hamburger-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
+.avatar-btn {
+  width: 34px;
+  height: 34px;
   padding: 0;
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--brand-dim), var(--brand));
+  border: 2px solid transparent;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
   flex-shrink: 0;
-  transition: background 0.15s, border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s, filter 0.15s;
+  box-shadow: 0 0 0 2px transparent;
 }
 
-.hamburger-btn:hover {
-  background: var(--surface-2);
-  border-color: var(--border-accent);
-  filter: none;
+.avatar-btn:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.35);
 }
 
-.hamburger-icon {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 16px;
-}
-
-.hamburger-icon span {
-  display: block;
-  height: 1.5px;
-  background: currentColor;
-  border-radius: 2px;
-  transition: transform 0.22s ease, opacity 0.22s ease, width 0.22s ease;
-  transform-origin: center;
-}
-
-.hamburger-icon.open span:nth-child(1) {
-  transform: translateY(5.5px) rotate(45deg);
-}
-.hamburger-icon.open span:nth-child(2) {
-  opacity: 0;
-  transform: scaleX(0);
-}
-.hamburger-icon.open span:nth-child(3) {
-  transform: translateY(-5.5px) rotate(-45deg);
+.avatar-btn[aria-expanded="true"] {
+  box-shadow: 0 0 0 2px var(--brand);
+  filter: brightness(1.1);
 }
 
 /* ---------- User drawer (slides in from right) ---------- */

@@ -128,14 +128,14 @@ export default function AppLayout() {
             {authMode === 'interviewer' && (
               <button
                 type="button"
-                className="hamburger-btn"
+                className="avatar-btn"
                 aria-label="Open user menu"
                 aria-expanded={drawerOpen}
                 onClick={() => setDrawerOpen((o) => !o)}
               >
-                <span className={`hamburger-icon${drawerOpen ? ' open' : ''}`}>
-                  <span /><span /><span />
-                </span>
+                {currentUser?.name
+                  ? currentUser.name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
+                  : currentUser?.email?.[0]?.toUpperCase() || '?'}
               </button>
             )}
             {authMode === 'candidate' && (
