@@ -60,7 +60,7 @@ export default function LoginModal({ open, onClose, onLoggedIn, initialError = n
     try {
       await requestOtp(email.trim());
       setStep('code');
-      setInfo(`A 6-digit code was sent to ${email.trim()}`);
+              setInfo(`A ${CODE_LENGTH}-digit code was sent to ${email.trim()}`);
       setCountdown(30);
     } catch (err) {
       setError(err?.response?.data?.error || err.message);
@@ -134,7 +134,7 @@ export default function LoginModal({ open, onClose, onLoggedIn, initialError = n
             <p className="login-card-sub">
               {step === 'email'
                 ? 'Enter your company email — we\'ll send you a one-time code.'
-                : `We sent a 6-digit code to ${email}. Enter it below.`}
+                : `We sent a ${CODE_LENGTH}-digit code to ${email}. Enter it below.`}
             </p>
           </header>
 
