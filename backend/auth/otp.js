@@ -13,22 +13,27 @@ const bcrypt = require('bcryptjs');
 const redis = require('../cache/redis');
 
 const OTP_TTL_S = 10 * 60;   // 10 minutes
-const OTP_LENGTH = 6;
 const MAX_ATTEMPTS = 5;
 const BCRYPT_ROUNDS = 10;
+
+// DEV_OTP: when set, every request-otp returns this fixed code and bcrypt is
+// skipped so testing is instant. Never set this in production.
+const DEV_OTP = process.env.DEV_OTP || null;
 
 function redisKey(email) {
   return `otp:${email.toLowerCase().trim()}`;
 }
 
 function generateCode() {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return DEV_OTP || String(Math.floor(100000 + Math.random() * 900000));
 }
 
 // Generate and store a new OTP. Returns the plaintext code (caller sends it).
 async function createOtp(email) {
   const code = generateCode();
-  const hash = await bcrypt.hash(code, BCRYPT_ROUNDS);
+  const hash = DEV_OTP
+    ? `dev:${code}`                           // skip bcrypt in dev
+    : await bcrypt.hash(code, BCRYPT_ROUNDS);
   const value = JSON.stringify({ hash, attempts: 0 });
   const key = redisKey(email);
 
@@ -56,7 +61,9 @@ async function verifyOtp(email, code) {
     return { ok: false, reason: 'Invalid OTP state' };
   }
 
-  const match = await bcrypt.compare(String(code), entry.hash);
+  const match = entry.hash.startsWith('dev:')
+    ? entry.hash === `dev:${String(code)}`
+    : await bcrypt.compare(String(code), entry.hash);
   if (match) {
     await rc.del(key);
     return { ok: true };

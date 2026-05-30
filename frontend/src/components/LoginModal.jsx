@@ -91,11 +91,12 @@ export default function LoginModal({ open, onClose, onLoggedIn, initialError = n
     handleRequestOtp();
   };
 
+  const CODE_LENGTH = parseInt(import.meta.env.VITE_OTP_LENGTH || '6', 10);
+
   const handleCodeChange = (e) => {
-    const v = e.target.value.replace(/\D/g, '').slice(0, 6);
+    const v = e.target.value.replace(/\D/g, '').slice(0, CODE_LENGTH);
     setCode(v);
-    // Auto-submit when all 6 digits are entered
-    if (v.length === 6) {
+    if (v.length === CODE_LENGTH) {
       setTimeout(() => handleVerifyOtp(), 80);
     }
   };
@@ -179,7 +180,7 @@ export default function LoginModal({ open, onClose, onLoggedIn, initialError = n
                   value={code}
                   onChange={handleCodeChange}
                   placeholder="000000"
-                  maxLength={6}
+                  maxLength={CODE_LENGTH}
                   autoComplete="one-time-code"
                   className="otp-code-input"
                 />
@@ -188,7 +189,7 @@ export default function LoginModal({ open, onClose, onLoggedIn, initialError = n
               {error && <div className="alert login-alert">{error}</div>}
 
               <div className="login-actions">
-                <button className="login-submit" disabled={busy || code.length < 6} type="submit">
+                <button className="login-submit" disabled={busy || code.length < CODE_LENGTH} type="submit">
                   {busy ? 'Verifying…' : 'Verify & sign in'}
                 </button>
               </div>
