@@ -40,7 +40,7 @@ export default function AppLayout() {
             {showNav && (
               <nav className="topnav">
                 <NavLink to="/play"      className={({ isActive }) => `topnav-pill${isActive ? ' active' : ''}`}>Play</NavLink>
-                <NavLink to="/authoring" className={({ isActive }) => `topnav-pill${isActive ? ' active' : ''}`}>Authoring</NavLink>
+                <NavLink to="/authoring" className={({ isActive }) => `topnav-pill${isActive ? ' active' : ''}`}>Author</NavLink>
 
                 <span className="topnav-sep" />
 
