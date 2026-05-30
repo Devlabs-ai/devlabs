@@ -1,31 +1,67 @@
-import React, { useEffect, useState } from 'react';
-import { login } from '../services/authApi.js';
+import React, { useEffect, useRef, useState } from 'react';
+import { requestOtp, verifyOtp } from '../services/authApi.js';
+
+// Two-step OTP login:
+//   step 'email'  — user enters their company email address
+//   step 'code'   — user enters the 6-digit code sent to that email
 
 export default function LoginModal({ open, onClose, onLoggedIn, initialError = null }) {
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin123');
+  const [step, setStep] = useState('email');
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
   const [error, setError] = useState(initialError);
+  const [info, setInfo] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [countdown, setCountdown] = useState(0);
 
+  const codeRef = useRef(null);
+  const emailRef = useRef(null);
+
+  // Reset to initial state whenever the modal opens/closes
   useEffect(() => {
-    if (open) setError(initialError);
+    if (open) {
+      setStep('email');
+      setCode('');
+      setError(initialError);
+      setInfo(null);
+      setCountdown(0);
+    }
   }, [open, initialError]);
 
+  // Focus the relevant input when the step changes
+  useEffect(() => {
+    if (!open) return;
+    if (step === 'code') setTimeout(() => codeRef.current?.focus(), 60);
+    else setTimeout(() => emailRef.current?.focus(), 60);
+  }, [open, step]);
+
+  // Countdown timer for resend throttle
+  useEffect(() => {
+    if (countdown <= 0) return undefined;
+    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [countdown]);
+
+  // Keyboard close
   useEffect(() => {
     if (!open) return undefined;
-    const onKey = (e) => {
-      if (e.key === 'Escape' && !busy) onClose();
-    };
+    const onKey = (e) => { if (e.key === 'Escape' && !busy) onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, busy, onClose]);
 
-  const doLogin = async () => {
+  const handleRequestOtp = async (e) => {
+    e?.preventDefault();
+    if (!email.trim()) return setError('Enter your company email address.');
+    if (!email.includes('@')) return setError('Enter a valid email address.');
     setError(null);
+    setInfo(null);
     setBusy(true);
     try {
-      await login(username, password);
-      onLoggedIn && onLoggedIn();
+      await requestOtp(email.trim());
+      setStep('code');
+      setInfo(`A 6-digit code was sent to ${email.trim()}`);
+      setCountdown(30);
     } catch (err) {
       setError(err?.response?.data?.error || err.message);
     } finally {
@@ -33,9 +69,35 @@ export default function LoginModal({ open, onClose, onLoggedIn, initialError = n
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    await doLogin();
+  const handleVerifyOtp = async (e) => {
+    e?.preventDefault();
+    if (!code.trim()) return setError('Enter the 6-digit code.');
+    setError(null);
+    setBusy(true);
+    try {
+      const data = await verifyOtp(email.trim(), code.trim());
+      onLoggedIn && onLoggedIn(data.user);
+    } catch (err) {
+      setError(err?.response?.data?.error || err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleResend = () => {
+    if (countdown > 0 || busy) return;
+    setCode('');
+    setError(null);
+    handleRequestOtp();
+  };
+
+  const handleCodeChange = (e) => {
+    const v = e.target.value.replace(/\D/g, '').slice(0, 6);
+    setCode(v);
+    // Auto-submit when all 6 digits are entered
+    if (v.length === 6) {
+      setTimeout(() => handleVerifyOtp(), 80);
+    }
   };
 
   if (!open) return null;
@@ -65,49 +127,93 @@ export default function LoginModal({ open, onClose, onLoggedIn, initialError = n
 
         <div className="login-card login-modal-card">
           <header className="login-card-head">
-            <h1 id="login-modal-title">Welcome back</h1>
+            <h1 id="login-modal-title">
+              {step === 'email' ? 'Sign in to Devlabs' : 'Check your email'}
+            </h1>
             <p className="login-card-sub">
-              Sign in as an interviewer to author challenges and run sessions.
+              {step === 'email'
+                ? 'Enter your company email — we\'ll send you a one-time code.'
+                : `We sent a 6-digit code to ${email}. Enter it below.`}
             </p>
           </header>
 
-          <form className="login-form" onSubmit={handleSubmit}>
-            <div className="login-fields">
-              <label className="login-field">
-                <span className="login-field-label">Username</span>
+          {step === 'email' ? (
+            <form className="login-form" onSubmit={handleRequestOtp}>
+              <div className="login-fields">
+                <label className="login-field">
+                  <span className="login-field-label">Work email</span>
+                  <input
+                    ref={emailRef}
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@yourcompany.com"
+                    autoComplete="email"
+                    autoFocus
+                  />
+                </label>
+              </div>
+
+              {error && <div className="alert login-alert">{error}</div>}
+
+              <div className="login-actions">
+                <button className="login-submit" disabled={busy} type="submit">
+                  {busy ? 'Sending code…' : 'Send code'}
+                </button>
+              </div>
+
+              <footer className="login-card-foot otp-foot">
+                <span>Candidates join via invite link — no sign-in needed</span>
+              </footer>
+            </form>
+          ) : (
+            <form className="login-form" onSubmit={handleVerifyOtp}>
+              {info && <div className="otp-info">{info}</div>}
+
+              <div className="otp-code-field">
                 <input
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  autoComplete="username"
-                  autoFocus
+                  ref={codeRef}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={code}
+                  onChange={handleCodeChange}
+                  placeholder="000000"
+                  maxLength={6}
+                  autoComplete="one-time-code"
+                  className="otp-code-input"
                 />
-              </label>
-              <label className="login-field">
-                <span className="login-field-label">Password</span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                />
-              </label>
-            </div>
+              </div>
 
-            {error && <div className="alert login-alert">{error}</div>}
+              {error && <div className="alert login-alert">{error}</div>}
 
-            <div className="login-actions">
-              <button className="login-submit" disabled={busy} type="submit">
-                {busy ? 'Signing in…' : 'Sign in'}
-              </button>
-            </div>
-          </form>
+              <div className="login-actions">
+                <button className="login-submit" disabled={busy || code.length < 6} type="submit">
+                  {busy ? 'Verifying…' : 'Verify & sign in'}
+                </button>
+              </div>
 
-          <footer className="login-card-foot">
-            <span className="login-demo-pill">Demo</span>
-            <span className="login-demo-creds">admin / admin123</span>
-            <span className="login-foot-sep">·</span>
-            <span>Specialists handbook &amp; build lessons</span>
-          </footer>
+              <div className="otp-resend-row">
+                <button
+                  type="button"
+                  className="ghost otp-resend-btn"
+                  disabled={busy || countdown > 0}
+                  onClick={handleResend}
+                >
+                  {countdown > 0 ? `Resend in ${countdown}s` : 'Resend code'}
+                </button>
+                <span className="otp-resend-sep">·</span>
+                <button
+                  type="button"
+                  className="ghost otp-back-btn"
+                  disabled={busy}
+                  onClick={() => { setStep('email'); setCode(''); setError(null); setInfo(null); }}
+                >
+                  Change email
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
     </div>

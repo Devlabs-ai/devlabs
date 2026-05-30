@@ -5,7 +5,7 @@ import PlayPage from './pages/PlayPage.jsx';
 import AuthoringPage from './pages/AuthoringPage.jsx';
 import AppLayout from './layouts/AppLayout.jsx';
 import { AppStateProvider } from './context/AppStateContext.jsx';
-import { getToken, logout, resolveInvite } from './services/authApi.js';
+import { getToken, getCurrentUser, logout, resolveInvite } from './services/authApi.js';
 import { fetchChallenges, fetchChallenge } from './services/challengeApi.js';
 import { startSession, endSession, restoreSession } from './services/sessionApi.js';
 import { useMetricsState } from './components/MetricsDashboard.jsx';
@@ -49,6 +49,7 @@ export default function App() {
   const location = useLocation();
 
   const [authMode, setAuthMode] = useState('resolving');
+  const [currentUser, setCurrentUser] = useState(null);
   const [candidateInvite, setCandidateInvite] = useState(null);
   const [candidateError, setCandidateError] = useState(null);
   const [challenges, setChallenges] = useState([]);
@@ -81,6 +82,7 @@ export default function App() {
       return;
     }
     if (getToken()) {
+      setCurrentUser(getCurrentUser());
       setAuthMode('interviewer');
     } else {
       setAuthMode('unauthenticated');
@@ -213,11 +215,13 @@ export default function App() {
 
   const handleLogout = () => {
     logout();
+    setCurrentUser(null);
     setAuthMode('unauthenticated');
     navigate('/');
   };
 
-  const handleLoggedIn = () => {
+  const handleLoggedIn = (user) => {
+    setCurrentUser(user || getCurrentUser());
     setAuthMode('interviewer');
     navigate('/play', { replace: true });
   };
@@ -237,6 +241,7 @@ export default function App() {
 
   const appState = useMemo(() => ({
     authMode,
+    currentUser,
     candidateInvite,
     playState,
     challenges,
@@ -258,6 +263,7 @@ export default function App() {
     onPromoted: refreshChallenges,
   }), [
     authMode,
+    currentUser,
     candidateInvite,
     playState,
     challenges,
