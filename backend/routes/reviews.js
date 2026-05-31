@@ -57,15 +57,13 @@ router.post('/:sessionId/push', async (req, res, next) => {
       builtChallenge: draft.builtChallenge,
       fallbackTitle: review.title || draft.id,
       bucket,
+      authoredBy: req.user?.sub || null,
     });
 
     if (draft.buildDir) {
       await buildPipeline.teardownBuild(draft.id, draft.buildDir).catch(() => {});
-      draft.buildDir = null;
     }
-    draft.buildStatus = null;
-    draftStore.set(draft.id, draft);
-    await draftStore.persist(draft).catch(() => {});
+    await draftStore.remove(draft.id);
     await reviewStore.remove(req.params.sessionId);
 
     res.json({ ok: true, slug: result.slug, verifiedDir: result.verifiedDir, challenge: result.challenge });

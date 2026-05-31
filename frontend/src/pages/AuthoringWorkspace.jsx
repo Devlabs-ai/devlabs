@@ -1,11 +1,10 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
+import AppPageHeader from '../components/AppPageHeader.jsx';
 import ProblemSetterPage from './ProblemSetterPage.jsx';
 import PipelinePage from './PipelinePage.jsx';
 import ReviewPage from './ReviewPage.jsx';
-import { BUCKETS } from '../constants/buckets.js';
-
 import {
   listProblemSessions,
   createProblemSession,
@@ -13,15 +12,23 @@ import {
   getProblemSession,
   deleteProblemSession,
   getProblemConfig,
-  updateDraftMeta,
   cancelBuild,
 } from '../services/problemApi.js';
 
-const WORKFLOW = [
-  { id: 'setter', step: 1, label: 'Shape', desc: 'Agent & draft' },
-  { id: 'pipeline', step: 2, label: 'Build', desc: 'Pipeline run' },
-  { id: 'review', step: 3, label: 'Ship', desc: 'Review queue' },
+const PHASES = [
+  { id: 'setter', label: 'Shape', lead: 'Chat with the agent and refine the challenge design.' },
+  { id: 'pipeline', label: 'Build', lead: 'Generate assets, spin up the sandbox, and validate.' },
+  { id: 'review', label: 'Ship', lead: 'Review the build and push to your library.' },
 ];
+
+const DRAFT_FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'in_progress', label: 'In progress' },
+  { id: 'ready', label: 'Ready to ship' },
+  { id: 'failed', label: 'Failed' },
+];
+
+const VALID_TABS = ['setter', 'pipeline', 'review'];
 
 function statusLabel(status) {
   if (!status || status === 'draft') return 'Draft';
@@ -29,6 +36,10 @@ function statusLabel(status) {
   if (status === 'review_ready') return 'Ready';
   if (status === 'failed') return 'Failed';
   return status;
+}
+
+function draftTitle(d) {
+  return d?.draft?.meta?.name || d?.draft?.title || 'Untitled draft';
 }
 
 function formatRelativeTime(iso) {
@@ -42,67 +53,127 @@ function formatRelativeTime(iso) {
   return new Date(iso).toLocaleDateString();
 }
 
-function WorkflowNav({ tab, onTab, activeDraft, onBucketChange, bucketBusy, onCancelBuild, cancelBusy }) {
-  const currentBucket = activeDraft?.draft?.meta?.bucket || '';
-  const stuckBuilding = activeDraft?.buildStatus === 'building';
-  return (
-    <nav className="authoring-workflow" aria-label="Authoring workflow">
-      {WORKFLOW.map((w, i) => (
-        <React.Fragment key={w.id}>
-          {i > 0 && <span className="authoring-workflow-connector" aria-hidden />}
-          <button
-            type="button"
-            className={`authoring-step ${tab === w.id ? 'active' : ''}`}
-            onClick={() => onTab(w.id)}
-          >
-            <span className="authoring-step-num">{w.step}</span>
-            <span className="authoring-step-copy">
-              <span className="authoring-step-label">{w.label}</span>
-              <span className="authoring-step-desc">{w.desc}</span>
-            </span>
-          </button>
-        </React.Fragment>
-      ))}
-      {activeDraft && (
-        <div className="authoring-active-draft" title={activeDraft.draft?.meta?.name || activeDraft.draft?.title || 'Untitled'}>
-          <span className="authoring-active-draft-label">Working on</span>
-          <strong>{activeDraft.draft?.meta?.name || activeDraft.draft?.title || 'Untitled draft'}</strong>
-          {activeDraft.buildStatus && (
-            <span className={`pill ${activeDraft.buildStatus}`}>
-              {statusLabel(activeDraft.buildStatus)}
-            </span>
-          )}
-          {stuckBuilding && (
-            <button
-              type="button"
-              className="ghost sm danger"
-              onClick={onCancelBuild}
-              disabled={cancelBusy}
-              title="Build stream was lost (e.g. page refresh). Click to reset status so you can re-run."
-            >
-              {cancelBusy ? 'Cancelling…' : 'Cancel build'}
-            </button>
-          )}
-          <label className="authoring-bucket-picker" title="Role bucket this challenge ships to">
-            <span className="authoring-bucket-picker-label">Bucket</span>
-            <select
-              value={currentBucket}
-              onChange={(e) => onBucketChange(e.target.value || null)}
-              disabled={bucketBusy}
-            >
-              <option value="">Unassigned</option>
-              {BUCKETS.map((b) => (
-                <option key={b.id} value={b.id}>{b.label}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-      )}
-    </nav>
-  );
+function matchesDraftFilter(d, filterId) {
+  const status = d.buildStatus || 'draft';
+  if (filterId === 'all') return true;
+  if (filterId === 'in_progress') return status === 'draft' || status === 'building';
+  if (filterId === 'ready') return status === 'review_ready';
+  if (filterId === 'failed') return status === 'failed';
+  return true;
 }
 
-const VALID_TABS = ['setter', 'pipeline', 'review'];
+function DraftLibrary({
+  drafts,
+  filter,
+  onFilter,
+  search,
+  onSearch,
+  onSelect,
+  onNew,
+  onImportOpen,
+  importOpen,
+  importText,
+  onImportText,
+  onImport,
+  onImportClose,
+}) {
+  const counts = useMemo(() => ({
+    all: drafts.length,
+    in_progress: drafts.filter((d) => matchesDraftFilter(d, 'in_progress')).length,
+    ready: drafts.filter((d) => matchesDraftFilter(d, 'ready')).length,
+    failed: drafts.filter((d) => matchesDraftFilter(d, 'failed')).length,
+  }), [drafts]);
+
+  const filtered = useMemo(() => {
+    let list = drafts.filter((d) => matchesDraftFilter(d, filter));
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter((d) => draftTitle(d).toLowerCase().includes(q));
+    }
+    return list;
+  }, [drafts, filter, search]);
+
+  return (
+    <>
+      <div className="library-toolbar author-toolbar">
+        <div className="library-collections" role="tablist">
+          {DRAFT_FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              role="tab"
+              aria-selected={filter === f.id}
+              className={`lib-tab ${filter === f.id ? 'active' : ''}`}
+              onClick={() => onFilter(f.id)}
+            >
+              {f.label}
+              <span className="lib-tab-count">{counts[f.id]}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="author-toolbar-actions">
+          <input
+            type="search"
+            className="author-search"
+            placeholder="Search drafts…"
+            value={search}
+            onChange={(e) => onSearch(e.target.value)}
+          />
+          <button type="button" className="sm" onClick={onNew}>New draft</button>
+          <button type="button" className="ghost sm" onClick={onImportOpen}>Import</button>
+        </div>
+      </div>
+
+      {importOpen && (
+        <div className="author-import-panel">
+          <textarea
+            placeholder='{ "schemaVersion": 1, "meta": { ... }, "description": "...", ... }'
+            value={importText}
+            onChange={(e) => onImportText(e.target.value)}
+            rows={4}
+          />
+          <div className="author-import-panel-actions">
+            <button type="button" className="ghost sm" onClick={onImportClose}>Cancel</button>
+            <button type="button" className="sm" disabled={!importText.trim()} onClick={onImport}>Import</button>
+          </div>
+        </div>
+      )}
+
+      {filtered.length === 0 ? (
+        <div className="author-empty">
+          <p>{search.trim() ? 'No drafts match your search.' : 'No drafts in this view yet.'}</p>
+          <button type="button" onClick={onNew}>Create a draft</button>
+        </div>
+      ) : (
+        <div className="author-draft-grid">
+          {filtered.map((d) => {
+            const status = d.buildStatus || 'draft';
+            return (
+              <button
+                key={d.id}
+                type="button"
+                className="card author-draft-card"
+                onClick={() => onSelect(d.id)}
+              >
+                <div className="author-draft-card-top">
+                  <span className={`pill ${status}`}>{statusLabel(status)}</span>
+                  <span className="author-draft-card-time">{formatRelativeTime(d.updatedAt)}</span>
+                </div>
+                <h3>{draftTitle(d)}</h3>
+                <p className="author-draft-card-desc">
+                  {(d.draft?.description || d.draft?.meta?.description || 'No description yet').slice(0, 120)}
+                  {(d.draft?.description || '').length > 120 ? '…' : ''}
+                </p>
+                <span className="author-draft-card-cta">Open →</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
 
 export default function AuthoringWorkspace({ onPromoted }) {
   const { draftId: urlDraftId, tab: urlTab } = useParams();
@@ -116,16 +187,15 @@ export default function AuthoringWorkspace({ onPromoted }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
-  const [bucketBusy, setBucketBusy] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [draftFilter, setDraftFilter] = useState('all');
+  const [draftSearch, setDraftSearch] = useState('');
 
   const tab = (urlTab && VALID_TABS.includes(urlTab)) ? urlTab : 'setter';
-
-  const navTo = useCallback((id, t) => {
-    const targetTab = t || tab;
-    if (id) navigate(`/authoring/${id}/${targetTab}`, { replace: false });
-    else navigate('/authoring', { replace: false });
-  }, [navigate, tab]);
+  const inWorkspace = Boolean(urlDraftId);
+  const draftLoading = Boolean(urlDraftId && !activeDraft);
+  const activePhase = PHASES.find((p) => p.id === tab) || PHASES[0];
+  const stuckBuilding = activeDraft?.buildStatus === 'building';
 
   const setTab = useCallback((t) => {
     if (activeDraftId) navigate(`/authoring/${activeDraftId}/${t}`, { replace: true });
@@ -157,21 +227,25 @@ export default function AuthoringWorkspace({ onPromoted }) {
 
   useEffect(() => { reload(); }, [reload, refreshKey]);
 
-  // On initial mount, if URL has a draftId but we don't have the draft yet, load it
   useEffect(() => {
-    if (!urlDraftId || activeDraft?.id === urlDraftId) return;
+    if (!urlDraftId) {
+      setActiveDraftId(null);
+      setActiveDraft(null);
+      return;
+    }
+    if (activeDraft?.id === urlDraftId) return;
     getProblemSession(urlDraftId)
       .then((d) => { setActiveDraftId(urlDraftId); setActiveDraft(d); })
       .catch(() => navigate('/authoring', { replace: true }));
   }, [urlDraftId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSelectDraft = async (id) => {
-    setActiveDraftId(id);
     setError(null);
     try {
       const d = await getProblemSession(id);
+      setActiveDraftId(id);
       setActiveDraft(d);
-      navTo(id, 'setter');
+      navigate(`/authoring/${id}/setter`, { replace: false });
     } catch (e) {
       setError(e?.response?.data?.error || e.message);
     }
@@ -224,20 +298,6 @@ export default function AuthoringWorkspace({ onPromoted }) {
     setDrafts((prev) => prev.map((d) => (d.id === next.id ? next : d)));
   };
 
-  const handleBucketChange = async (bucket) => {
-    if (!activeDraftId) return;
-    setBucketBusy(true);
-    setError(null);
-    try {
-      const updated = await updateDraftMeta(activeDraftId, { bucket });
-      handleDraftChanged(updated);
-    } catch (e) {
-      setError(e?.response?.data?.error || e.message);
-    } finally {
-      setBucketBusy(false);
-    }
-  };
-
   const handleCancelBuild = async () => {
     if (!activeDraftId) return;
     setCancelBusy(true);
@@ -255,31 +315,33 @@ export default function AuthoringWorkspace({ onPromoted }) {
   const llmKey = llmConfig?.provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY';
 
   return (
-    <div className="authoring-studio">
-      <div className="authoring-strip">
-        <WorkflowNav
-          tab={tab}
-          onTab={setTab}
-          activeDraft={activeDraft}
-          onBucketChange={handleBucketChange}
-          bucketBusy={bucketBusy}
-          onCancelBuild={handleCancelBuild}
-          cancelBusy={cancelBusy}
-        />
-        <div className="authoring-studio-status">
-          {llmConfig?.llmConfigured ? (
-            <span className="authoring-llm-pill ok">
-              <span className="dot" />
-              Agent ready
-            </span>
-          ) : (
-            <span className="authoring-llm-pill warn" title={`Set ${llmKey} in backend/.env`}>
-              <span className="dot" />
-              Agent offline
-            </span>
-          )}
-        </div>
-      </div>
+    <div className={`authoring-studio ${inWorkspace ? 'authoring-studio--workspace' : 'authoring-studio--library'}`}>
+      <AppPageHeader
+        eyebrow="Author"
+        title={inWorkspace && activeDraft ? draftTitle(activeDraft) : inWorkspace ? 'Loading…' : 'Your drafts'}
+        lead={inWorkspace ? activePhase.lead : 'Create, build, and ship interview challenges with the agent.'}
+        aside={(
+          <div className="author-header-aside">
+            {inWorkspace && activeDraft?.buildStatus && (
+              <span className={`pill ${activeDraft.buildStatus}`}>
+                {statusLabel(activeDraft.buildStatus)}
+              </span>
+            )}
+            {llmConfig?.llmConfigured ? (
+              <span className="authoring-llm-pill ok" title="LLM agent is configured">
+                <span className="dot" />
+                Agent ready
+              </span>
+            ) : (
+              <span className="authoring-llm-pill warn" title={`Set ${llmKey} in backend/.env`}>
+                <span className="dot" />
+                Agent offline
+              </span>
+            )}
+          </div>
+        )}
+        className="author-page-header"
+      />
 
       {!llmConfig?.llmConfigured && (
         <div className="authoring-banner alert">
@@ -291,113 +353,108 @@ export default function AuthoringWorkspace({ onPromoted }) {
 
       {error && <div className="authoring-banner alert">{error}</div>}
 
-      <div className="authoring-studio-body">
-        <aside className="authoring-rail">
-          <div className="authoring-rail-head">
-            <h3 className="authoring-rail-title">
-              Drafts
-              <span className="authoring-rail-count">{drafts.length}</span>
-            </h3>
-            <div className="authoring-rail-actions">
-              <button type="button" className="sm" onClick={handleNewDraft}>New</button>
-              <button type="button" className="ghost sm" onClick={() => setImportOpen((v) => !v)}>
-                Import
-              </button>
-            </div>
-          </div>
+      {!inWorkspace ? (
+        <DraftLibrary
+          drafts={drafts}
+          filter={draftFilter}
+          onFilter={setDraftFilter}
+          search={draftSearch}
+          onSearch={setDraftSearch}
+          onSelect={handleSelectDraft}
+          onNew={handleNewDraft}
+          onImportOpen={() => setImportOpen(true)}
+          importOpen={importOpen}
+          importText={importText}
+          onImportText={setImportText}
+          onImport={() => handleImportDraft(importText)}
+          onImportClose={() => { setImportOpen(false); setImportText(''); }}
+        />
+      ) : draftLoading ? (
+        <div className="author-empty">
+          <span className="spinner" />
+          <p>Loading draft…</p>
+        </div>
+      ) : (
+        <>
+          <div className="library-toolbar author-toolbar">
+            <button
+              type="button"
+              className="ghost sm author-back-btn"
+              onClick={() => navigate('/authoring')}
+            >
+              ← All drafts
+            </button>
 
-          {importOpen && (
-            <div className="authoring-import">
-              <textarea
-                placeholder='{ "schemaVersion": 1, "meta": { ... }, "description": "...", ... }'
-                value={importText}
-                onChange={(e) => setImportText(e.target.value)}
-                rows={4}
-              />
-              <div className="authoring-import-actions">
-                <button type="button" className="ghost sm" onClick={() => setImportOpen(false)}>
-                  Cancel
+            <div className="library-collections" role="tablist">
+              {PHASES.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === p.id}
+                  className={`lib-tab ${tab === p.id ? 'active' : ''}`}
+                  onClick={() => setTab(p.id)}
+                >
+                  {p.label}
                 </button>
+              ))}
+            </div>
+
+            <div className="author-toolbar-actions">
+              {stuckBuilding && (
                 <button
                   type="button"
-                  className="sm"
-                  disabled={!importText.trim()}
-                  onClick={() => handleImportDraft(importText)}
+                  className="ghost sm danger"
+                  onClick={handleCancelBuild}
+                  disabled={cancelBusy}
                 >
-                  Import
+                  {cancelBusy ? 'Cancelling…' : 'Cancel build'}
                 </button>
-              </div>
+              )}
             </div>
-          )}
-
-          <div className="authoring-draft-list">
-            {drafts.length === 0 ? (
-              <p className="authoring-draft-empty">No drafts yet.</p>
-            ) : (
-              drafts.map((d) => {
-                const status = d.buildStatus || 'draft';
-                return (
-                  <button
-                    key={d.id}
-                    type="button"
-                    className={`authoring-draft-item ${activeDraftId === d.id ? 'active' : ''}`}
-                    onClick={() => handleSelectDraft(d.id)}
-                  >
-                    <span className="authoring-draft-item-title">
-                      <span
-                        className={`authoring-draft-dot ${status}`}
-                        title={statusLabel(status)}
-                        aria-label={statusLabel(status)}
-                      />
-                      {d.draft?.title || 'Untitled draft'}
-                    </span>
-                    <span className="authoring-draft-item-meta dim">
-                      {formatRelativeTime(d.updatedAt)}
-                    </span>
-                  </button>
-                );
-              })
-            )}
           </div>
-        </aside>
 
-        <main className="authoring-stage">
-          <div className="authoring-stage-inner">
-            {tab === 'setter' && (
-              <ProblemSetterPage
-                draft={activeDraft}
-                llmConfig={llmConfig}
-                onDraftChanged={handleDraftChanged}
-                onImportDraft={handleImportDraft}
-                onDeleteDraft={handleDeleteDraft}
-                onGoPipeline={() => setTab('pipeline')}
-                onRefreshSession={async () => {
-                  if (!activeDraftId) return;
-                  const fresh = await getProblemSession(activeDraftId);
-                  setActiveDraft(fresh);
-                }}
-              />
-            )}
-            {tab === 'pipeline' && (
-              <PipelinePage
-                draft={activeDraft}
-                llmConfig={llmConfig}
-                onDraftChanged={handleDraftChanged}
-                onGoReview={() => { setTab('review'); setRefreshKey((k) => k + 1); }}
-              />
-            )}
-            {tab === 'review' && (
-              <ReviewPage
-                onPromoted={(slug) => {
-                  setRefreshKey((k) => k + 1);
-                  if (onPromoted) onPromoted(slug);
-                }}
-                refreshKey={refreshKey}
-              />
-            )}
-          </div>
-        </main>
-      </div>
+          <main className="authoring-stage authoring-stage--solo">
+            <div className="authoring-stage-inner">
+              {tab === 'setter' && (
+                <ProblemSetterPage
+                  draft={activeDraft}
+                  llmConfig={llmConfig}
+                  onDraftChanged={handleDraftChanged}
+                  onImportDraft={handleImportDraft}
+                  onDeleteDraft={handleDeleteDraft}
+                  onGoPipeline={() => setTab('pipeline')}
+                  onRefreshSession={async () => {
+                    if (!activeDraftId) return;
+                    const fresh = await getProblemSession(activeDraftId);
+                    setActiveDraft(fresh);
+                  }}
+                />
+              )}
+              {tab === 'pipeline' && (
+                <PipelinePage
+                  draft={activeDraft}
+                  llmConfig={llmConfig}
+                  onDraftChanged={handleDraftChanged}
+                  onGoReview={() => { setTab('review'); setRefreshKey((k) => k + 1); }}
+                />
+              )}
+              {tab === 'review' && (
+                <ReviewPage
+                  onPromoted={(slug) => {
+                    setActiveDraftId(null);
+                    setActiveDraft(null);
+                    setRefreshKey((k) => k + 1);
+                    navigate('/authoring', { replace: true });
+                    if (onPromoted) onPromoted(slug);
+                  }}
+                  refreshKey={refreshKey}
+                />
+              )}
+            </div>
+          </main>
+        </>
+      )}
     </div>
   );
 }

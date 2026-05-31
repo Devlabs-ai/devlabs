@@ -19,12 +19,13 @@ const { normalizeDraft, isDraftReady } = require('../draft/draftSchema');
 // id -> draft session object
 const drafts = new Map();
 
-function makeDraft({ id = uuidv4(), draft = null, shapePhase, designApproved, schemaMaterialized } = {}) {
+function makeDraft({ id = uuidv4(), draft = null, shapePhase, designApproved, schemaMaterialized, authoredBy = null } = {}) {
   const shape = defaultShapeState();
   return {
     id,
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    authoredBy,
     messages: [],
     draft,
     shapePhase: shapePhase || shape.shapePhase,
@@ -53,19 +54,22 @@ function set(id, d) {
   return d;
 }
 
-function list() {
-  return Array.from(drafts.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+function list(authoredBy = null) {
+  const all = Array.from(drafts.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!authoredBy) return all;
+  return all.filter((d) => d.authoredBy === authoredBy);
 }
 
 async function persist(d) {
   await pool.query(
-    `INSERT INTO draft_sessions (id, draft, build_dir, build_logs, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6)
+    `INSERT INTO draft_sessions (id, draft, build_dir, build_logs, created_at, updated_at, authored_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
      ON CONFLICT (id) DO UPDATE SET
        draft = EXCLUDED.draft,
        build_dir = EXCLUDED.build_dir,
        build_logs = EXCLUDED.build_logs,
-       updated_at = EXCLUDED.updated_at`,
+       updated_at = EXCLUDED.updated_at,
+       authored_by = COALESCE(draft_sessions.authored_by, EXCLUDED.authored_by)`,
     [
       d.id,
       d.draft ? JSON.stringify(d.draft) : null,
@@ -88,6 +92,7 @@ async function persist(d) {
       }),
       d.createdAt,
       d.updatedAt,
+      d.authoredBy || null,
     ],
   );
 }
@@ -107,6 +112,7 @@ async function restoreFromDB() {
       id: row.id,
       createdAt: Number(row.created_at) || Date.now(),
       updatedAt: Number(row.updated_at) || Date.now(),
+      authoredBy: row.authored_by || null,
       messages: Array.isArray(meta.messages) ? meta.messages : [],
       shapePhase,
       designApproved,

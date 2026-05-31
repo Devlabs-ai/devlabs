@@ -162,6 +162,25 @@ const STATEMENTS = [
   `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS library_id   TEXT REFERENCES libraries(id)`,
   `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS visibility   TEXT NOT NULL DEFAULT 'private'
      CHECK (visibility IN ('private', 'public'))`,
+
+  // Authorship on authoring draft sessions
+  `ALTER TABLE draft_sessions ADD COLUMN IF NOT EXISTS authored_by TEXT REFERENCES users(id)`,
+  `CREATE INDEX IF NOT EXISTS idx_draft_sessions_authored_by ON draft_sessions (authored_by)`,
+
+  // Backfill existing rows to the dev admin user when present
+  `UPDATE challenges SET authored_by = (SELECT id FROM users WHERE email = 'admin@devlabs.app' LIMIT 1)
+     WHERE authored_by IS NULL
+       AND EXISTS (SELECT 1 FROM users WHERE email = 'admin@devlabs.app')`,
+  `UPDATE draft_sessions SET authored_by = (SELECT id FROM users WHERE email = 'admin@devlabs.app' LIMIT 1)
+     WHERE authored_by IS NULL
+       AND EXISTS (SELECT 1 FROM users WHERE email = 'admin@devlabs.app')`,
+
+  // Remove draft sessions already shipped to Play (built challenge promoted, not in review queue)
+  `DELETE FROM draft_sessions ds
+     WHERE ds.build_dir IS NULL
+       AND NOT EXISTS (SELECT 1 FROM reviews r WHERE r.session_id = ds.id)
+       AND (ds.build_logs->>'builtChallenge') IS NOT NULL
+       AND COALESCE(ds.build_logs->>'buildStatus', '') NOT IN ('building', 'review_ready', 'failed')`,
 ];
 
 async function runMigrations() {

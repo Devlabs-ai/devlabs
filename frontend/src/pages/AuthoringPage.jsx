@@ -6,7 +6,7 @@ export default function AuthoringPage() {
   const { onPromoted } = useAppState();
 
   return (
-    <div className="app-page app-page-fill authoring-page">
+    <div className="app-page authoring-page">
       <AuthoringWorkspace onPromoted={onPromoted} />
     </div>
   );

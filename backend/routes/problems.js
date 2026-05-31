@@ -66,6 +66,7 @@ function publicDraft(d) {
   shapeState.syncShapePhase(d);
   return {
     id: d.id,
+    authoredBy: d.authoredBy || null,
     createdAt: d.createdAt,
     updatedAt: d.updatedAt,
     messages: d.messages,
@@ -85,6 +86,18 @@ function publicDraft(d) {
   };
 }
 
+function authorId(req) {
+  return req.user?.sub || null;
+}
+
+function assertDraftAccess(d, req) {
+  const uid = authorId(req);
+  if (!d) return false;
+  if (!d.authoredBy) return true;
+  if (!uid) return false;
+  return d.authoredBy === uid;
+}
+
 router.get('/config', (_req, res) => {
   const report = llm.configurationReport();
   res.json({
@@ -97,13 +110,14 @@ router.get('/config', (_req, res) => {
   });
 });
 
-router.get('/', (_req, res) => {
-  res.json({ drafts: draftStore.list().map(publicDraft) });
+router.get('/', (req, res) => {
+  const uid = authorId(req);
+  res.json({ drafts: draftStore.list(uid).map(publicDraft) });
 });
 
-router.post('/session', async (_req, res, next) => {
+router.post('/session', async (req, res, next) => {
   try {
-    const d = draftStore.makeDraft();
+    const d = draftStore.makeDraft({ authoredBy: authorId(req) });
     draftStore.set(d.id, d);
     await draftStore.persist(d);
     res.status(201).json({ sessionId: d.id, draft: publicDraft(d) });
@@ -116,7 +130,7 @@ router.post('/import-draft', async (req, res, next) => {
     if (!draft || typeof draft !== 'object') {
       return res.status(400).json({ error: 'body must contain { draft: { ... } }' });
     }
-    const d = draftStore.makeDraft({ draft: null });
+    const d = draftStore.makeDraft({ draft: null, authoredBy: authorId(req) });
     shapeState.applyDraft(d, draft);
     d.messages.push({
       role: 'assistant',
@@ -132,6 +146,9 @@ router.get('/:sessionId', async (req, res, next) => {
   try {
     const d = draftStore.get(req.params.sessionId);
     if (!d) return res.status(404).json({ error: 'draft session not found' });
+    if (!assertDraftAccess(d, req)) {
+      return res.status(403).json({ error: 'you do not have access to this draft' });
+    }
     if (healMaterializedDraft(d)) {
       draftStore.set(d.id, d);
       await draftStore.persist(d);
@@ -143,6 +160,9 @@ router.get('/:sessionId', async (req, res, next) => {
 router.delete('/:sessionId', async (req, res, next) => {
   try {
     const d = draftStore.get(req.params.sessionId);
+    if (d && !assertDraftAccess(d, req)) {
+      return res.status(403).json({ error: 'you do not have access to this draft' });
+    }
     if (d && d.buildDir) {
       await buildPipeline.teardownBuild(d.buildSessionId || d.id, d.buildDir).catch(() => {});
     }
@@ -487,11 +507,8 @@ router.post('/:sessionId/push-to-sandbox', async (req, res, next) => {
 
     if (d.buildDir) {
       await buildPipeline.teardownBuild(d.buildSessionId || d.id, d.buildDir).catch(() => {});
-      d.buildDir = null;
     }
-    d.buildStatus = null;
-    draftStore.set(d.id, d);
-    await draftStore.persist(d).catch(() => {});
+    await draftStore.remove(d.id);
     await reviewStore.remove(d.id);
 
     res.json({

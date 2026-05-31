@@ -82,7 +82,6 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
       <AppPageHeader
         eyebrow="Play"
         title="Challenge Library"
-        meta={`${filtered.length} ${filtered.length === 1 ? 'challenge' : 'challenges'}`}
         lead="Pick a curated lab and spin up a live Docker sandbox for your next interview."
       />
 

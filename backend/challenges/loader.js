@@ -24,6 +24,9 @@ function publicFields(row) {
 function fullFields(row) {
   return {
     ...publicFields(row),
+    authored_by: row.authored_by || null,
+    visibility: row.visibility || 'private',
+    library_id: row.library_id || null,
     verifiedDir: row.verified_dir || null,
     problemStatement: row.problem_statement || null,
     validationSpec: row.validation_spec || null,
@@ -124,6 +127,8 @@ function listPublicChallenges() {
     bucket: c.bucket || null,
     finalized: c.finalized,
     sandboxType: c.sandboxType,
+    authored_by: c.authored_by || null,
+    visibility: c.visibility || 'private',
   }));
 }
 
