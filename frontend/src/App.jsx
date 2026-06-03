@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import LandingPage from './pages/LandingPage.jsx';
+import PricingPage from './pages/PricingPage.jsx';
+import AboutPage from './pages/AboutPage.jsx';
 import PlayPage from './pages/PlayPage.jsx';
 import AuthoringPage from './pages/AuthoringPage.jsx';
 import ReviewRoutePage from './pages/ReviewRoutePage.jsx';
@@ -271,6 +273,24 @@ export default function App() {
           path="/"
           element={
             <LandingPage
+              candidateError={candidateError}
+              onLoggedIn={handleLoggedIn}
+            />
+          }
+        />
+        <Route
+          path="/about"
+          element={
+            <AboutPage
+              candidateError={candidateError}
+              onLoggedIn={handleLoggedIn}
+            />
+          }
+        />
+        <Route
+          path="/pricing"
+          element={
+            <PricingPage
               candidateError={candidateError}
               onLoggedIn={handleLoggedIn}
             />

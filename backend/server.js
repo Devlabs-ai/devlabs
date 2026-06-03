@@ -15,6 +15,7 @@ const { loadChallengesFromDB, seedChallengesFromDisk } = require('./challenges/l
 const { VERIFIED_ROOT } = require('./sandbox/paths');
 
 const { ensurePublicLibrary } = require('./auth/companyStore');
+const contactRoutes = require('./routes/contact');
 const authRoutes = require('./routes/auth');
 const challengeRoutes = require('./routes/challenges');
 const sessionRoutes = require('./routes/session');
@@ -38,6 +39,7 @@ app.use((req, _res, next) => {
 
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
+app.use('/api/contact', contactRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/challenges', challengeRoutes);
 app.use('/api/session', sessionRoutes);

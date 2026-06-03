@@ -55,4 +55,57 @@ async function sendOtp(email, code) {
   });
 }
 
-module.exports = { sendOtp };
+async function sendSalesLead({ companyName, email, domain, teamSize, plan, message }) {
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@devlabs.app';
+  const to = process.env.SALES_INBOX || process.env.SMTP_USER || 'sales@devlabs.app';
+
+  const planLabel = {
+    starter: 'Starter',
+    pro: 'Pro',
+    enterprise: 'Enterprise',
+    unsure: 'Not sure yet',
+  }[plan] || plan;
+
+  const text = [
+    'New Devlabs sales inquiry',
+    '',
+    `Company: ${companyName}`,
+    `Email: ${email}`,
+    `Domain: ${domain}`,
+    `Team size: ${teamSize}`,
+    `Plan interest: ${planLabel}`,
+    '',
+    message ? `Message:\n${message}` : 'Message: (none)',
+  ].join('\n');
+
+  const html = `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto">
+      <h2 style="color:#111">New Devlabs sales inquiry</h2>
+      <table style="font-size:14px;color:#333;border-collapse:collapse;width:100%">
+        <tr><td style="padding:6px 12px 6px 0;font-weight:600">Company</td><td>${companyName}</td></tr>
+        <tr><td style="padding:6px 12px 6px 0;font-weight:600">Email</td><td>${email}</td></tr>
+        <tr><td style="padding:6px 12px 6px 0;font-weight:600">Domain</td><td>${domain}</td></tr>
+        <tr><td style="padding:6px 12px 6px 0;font-weight:600">Team size</td><td>${teamSize}</td></tr>
+        <tr><td style="padding:6px 12px 6px 0;font-weight:600">Plan</td><td>${planLabel}</td></tr>
+      </table>
+      ${message ? `<p style="font-size:14px;color:#444;margin-top:20px"><strong>Message</strong><br/>${message.replace(/\n/g, '<br/>')}</p>` : ''}
+    </div>
+  `;
+
+  if (!transport) {
+    console.log(`[email] Sales inquiry from ${email} (${companyName})`);
+    console.log(text);
+    return;
+  }
+
+  await transport.sendMail({
+    from,
+    to,
+    replyTo: email,
+    subject: `[Devlabs] Sales inquiry — ${companyName}`,
+    text,
+    html,
+  });
+}
+
+module.exports = { sendOtp, sendSalesLead };

@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import LoginModal from '../components/LoginModal.jsx';
+import React from 'react';
+import { Link } from 'react-router-dom';
+import MarketingPageShell, { useMarketing } from '../components/MarketingPageShell.jsx';
 
 const FEATURES = [
   {
@@ -24,103 +25,58 @@ const FEATURES = [
   },
 ];
 
-const STEPS = [
-  { n: '01', title: 'Author a challenge', body: 'Define broken services, validation rules, and an incident narrative in the authoring workspace.' },
-  { n: '02', title: 'Invite a candidate', body: 'Share a one-time link. They land straight in the assigned sandbox with terminal and metrics ready.' },
-  { n: '03', title: 'Debug live', body: 'Candidates shell into containers, trace the failure, and prove recovery when metrics cross the threshold.' },
-];
-
-export default function LandingPage({ onLoggedIn, candidateError }) {
-  const [loginOpen, setLoginOpen] = useState(false);
-
-  useEffect(() => {
-    if (candidateError) setLoginOpen(true);
-  }, [candidateError]);
-
-  const inviteError = candidateError ? `Candidate invite error: ${candidateError}` : null;
+function LandingContent() {
+  const { openLogin, openSales } = useMarketing();
 
   return (
-    <div className={`landing ${loginOpen ? 'landing-modal-open' : ''}`}>
-      <header className="landing-header">
-        <div className="landing-brand">
-          <span className="logo-dot" />
-          Devlabs
-        </div>
-      </header>
-
-      <main className="landing-main">
-        <section className="landing-hero">
-          <p className="landing-eyebrow">Technical interviews, on real systems</p>
-          <h1>
-            Broken infrastructure.
-            <br />
-            <span className="landing-hero-accent">Live sandboxes.</span>
-          </h1>
-          <p className="landing-lead">
-            Author production incidents with our agent at your side—then run candidates through
-            curated labs, agent-built and developer-reviewed, in live Docker sandboxes.
-          </p>
-          <div className="landing-cta">
-            <button type="button" onClick={() => setLoginOpen(true)}>
-              Get started as interviewer
-            </button>
-            <span className="landing-cta-note">
-              Candidates join via invite link — no sign-up required
-            </span>
-          </div>
-        </section>
-
-        <section className="landing-features">
-          <h2>Built for on-call realism</h2>
-          <div className="landing-feature-grid">
-            {FEATURES.map((f) => (
-              <article key={f.title} className="landing-feature-card">
-                <span className="landing-feature-icon" aria-hidden>{f.icon}</span>
-                <h3>{f.title}</h3>
-                <p>{f.body}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="landing-steps">
-          <h2>How it works</h2>
-          <ol className="landing-step-list">
-            {STEPS.map((s) => (
-              <li key={s.n} className="landing-step">
-                <span className="landing-step-n">{s.n}</span>
-                <div>
-                  <h3>{s.title}</h3>
-                  <p>{s.body}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
-
-        <section className="landing-footer-cta">
-          <div className="landing-footer-card">
-            <h2>Ready to run your next interview?</h2>
-            <p>Sign in to open the challenge library, authoring tools, and catalogue memories.</p>
-            <button type="button" onClick={() => setLoginOpen(true)}>
+    <>
+      <section className="landing-hero">
+        <p className="landing-eyebrow">Technical interviews, on real systems</p>
+        <h1>
+          Broken infrastructure.
+          <br />
+          <span className="landing-hero-accent">Live sandboxes.</span>
+        </h1>
+        <p className="landing-lead">
+          Author production incidents with our agent at your side—then run candidates through
+          curated labs, agent-built and developer-reviewed, in live Docker sandboxes.
+        </p>
+        <div className="landing-cta">
+          <div className="landing-cta-row">
+            <button type="button" onClick={openLogin}>
               Sign in to Devlabs
             </button>
+            <button type="button" className="secondary" onClick={openSales}>
+              Contact sales
+            </button>
           </div>
-        </section>
-      </main>
+          <span className="landing-cta-note">
+            New company? <Link to="/pricing">View pricing</Link> or contact sales to register.
+            Candidates join via invite link — no sign-up required.
+          </span>
+        </div>
+      </section>
 
-      <footer className="landing-footer">
-        <span>Devlabs v0.1</span>
-        <span className="landing-footer-sep">·</span>
-        <span>Interview platform for infrastructure debugging</span>
-      </footer>
+      <section className="landing-features">
+        <h2>Built for on-call realism</h2>
+        <div className="landing-feature-grid">
+          {FEATURES.map((f) => (
+            <article key={f.title} className="landing-feature-card">
+              <span className="landing-feature-icon" aria-hidden>{f.icon}</span>
+              <h3>{f.title}</h3>
+              <p>{f.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+}
 
-      <LoginModal
-        open={loginOpen}
-        onClose={() => setLoginOpen(false)}
-        onLoggedIn={onLoggedIn}
-        initialError={inviteError}
-      />
-    </div>
+export default function LandingPage(props) {
+  return (
+    <MarketingPageShell {...props}>
+      <LandingContent />
+    </MarketingPageShell>
   );
 }
