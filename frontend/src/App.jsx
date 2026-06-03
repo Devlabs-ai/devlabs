@@ -3,12 +3,13 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import LandingPage from './pages/LandingPage.jsx';
 import PlayPage from './pages/PlayPage.jsx';
 import AuthoringPage from './pages/AuthoringPage.jsx';
+import ReviewRoutePage from './pages/ReviewRoutePage.jsx';
+import ReviewSandboxPage from './pages/ReviewSandboxPage.jsx';
 import AppLayout from './layouts/AppLayout.jsx';
 import { AppStateProvider } from './context/AppStateContext.jsx';
 import { getToken, getCurrentUser, logout, resolveInvite } from './services/authApi.js';
 import { fetchChallenges, fetchChallenge } from './services/challengeApi.js';
 import { startSession, endSession, restoreSession } from './services/sessionApi.js';
-import { useMetricsState } from './components/MetricsDashboard.jsx';
 
 const CANDIDATE_PARAM = 'candidate';
 
@@ -29,21 +30,6 @@ function clearCandidateParam() {
   } catch (_e) { /* noop */ }
 }
 
-function useMetricsStream(wsUrl) {
-  const { series, latest, recovered, handleMessage } = useMetricsState();
-
-  useEffect(() => {
-    if (!wsUrl) return undefined;
-    const ws = new WebSocket(wsUrl);
-    ws.onmessage = (ev) => {
-      try { handleMessage(JSON.parse(ev.data)); } catch (_e) { /* ignore */ }
-    };
-    return () => { try { ws.close(); } catch (_e) { /* noop */ } };
-  }, [wsUrl, handleMessage]);
-
-  return { series, latest, recovered };
-}
-
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -62,9 +48,6 @@ export default function App() {
   const [ending, setEnding] = useState(false);
   const [startError, setStartError] = useState(null);
   const [activeTab, setActiveTab] = useState('problem');
-
-  const metricsWsUrl = playState === 'active' ? activeSession?.metricsWsUrl : null;
-  const { series, latest, recovered } = useMetricsStream(metricsWsUrl);
 
   useEffect(() => {
     const candidateToken = readCandidateToken();
@@ -252,9 +235,6 @@ export default function App() {
     endResult,
     activeTab,
     setActiveTab,
-    series,
-    latest,
-    recovered,
     ending,
     onSelectChallenge: handleSelectChallenge,
     onBackToLibrary: handleBackToLibrary,
@@ -273,9 +253,6 @@ export default function App() {
     activeChallenge,
     endResult,
     activeTab,
-    series,
-    latest,
-    recovered,
     ending,
   ]);
 
@@ -318,6 +295,8 @@ export default function App() {
               <Route path="authoring" element={<AuthoringPage />} />
               <Route path="authoring/:draftId" element={<AuthoringPage />} />
               <Route path="authoring/:draftId/:tab" element={<AuthoringPage />} />
+              <Route path="review/:sessionId/sandbox" element={<ReviewSandboxPage />} />
+              <Route path="review" element={<ReviewRoutePage />} />
             </>
           ) : (
             <>

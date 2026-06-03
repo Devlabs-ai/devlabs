@@ -8,6 +8,7 @@ const sessionStore = require('../db/sessionStore');
 const loader = require('../challenges/loader');
 const scoringEngine = require('../scoring/scoringEngine');
 const terminalEventBus = require('../observability/terminalEventBus');
+const { handleBrowse, listBrowseServices } = require('../sandbox/sessionBrowseProxy');
 
 const router = express.Router();
 
@@ -164,6 +165,24 @@ router.post('/start', requireSessionAccess, async (req, res, next) => {
   } catch (e) {
     next(e);
   }
+});
+
+function browseMount(req, res, next) {
+  const m = req.path.match(/^\/([^/]+)\/browse\/([^/]+)(.*)$/);
+  if (!m) return next();
+  req.params.id = m[1];
+  req.params.service = m[2];
+  Promise.resolve(handleBrowse(req, res)).catch(next);
+}
+
+router.use(browseMount);
+
+router.get('/:id/browse-services', (req, res) => {
+  const session = sessionStore.get(req.params.id);
+  if (!session || session.status !== 'active') {
+    return res.status(404).json({ error: 'session not found or sandbox not running' });
+  }
+  res.json({ services: listBrowseServices(session.portMap) });
 });
 
 router.get('/:id', (req, res) => {

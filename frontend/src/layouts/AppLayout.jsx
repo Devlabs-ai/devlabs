@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import SessionController from '../components/SessionController.jsx';
 import { useAppState } from '../context/AppStateContext.jsx';
 
@@ -15,8 +15,10 @@ export default function AppLayout() {
     onLogout,
   } = useAppState();
 
+  const location = useLocation();
+  const reviewSandboxOpen = /^\/review\/[^/]+\/sandbox/.test(location.pathname);
   const isAdmin = currentUser?.role === 'admin';
-  const showNav = authMode === 'interviewer' && playState !== 'active';
+  const showNav = authMode === 'interviewer' && playState !== 'active' && !reviewSandboxOpen;
 
   return (
     <div className="app">
@@ -41,6 +43,15 @@ export default function AppLayout() {
               <nav className="topnav">
                 <NavLink to="/play"      className={({ isActive }) => `topnav-pill${isActive ? ' active' : ''}`}>Play</NavLink>
                 <NavLink to="/authoring" className={({ isActive }) => `topnav-pill${isActive ? ' active' : ''}`}>Author</NavLink>
+                <NavLink
+                  to="/review"
+                  className={({ isActive }) => {
+                    const onReview = isActive || location.pathname.startsWith('/review/');
+                    return `topnav-pill${onReview ? ' active' : ''}`;
+                  }}
+                >
+                  Review
+                </NavLink>
 
                 <span className="topnav-sep" />
 
@@ -61,7 +72,7 @@ export default function AppLayout() {
         </div>
       </div>
 
-      <div className="app-body">
+      <div className={`app-body${reviewSandboxOpen ? ' app-body--review-sandbox' : ''}`}>
         <Outlet />
       </div>
     </div>

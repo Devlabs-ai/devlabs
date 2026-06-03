@@ -123,12 +123,13 @@ async function generateChallengeAssets({
     previousAttempt: sanitizePreviousAttempt(previousAttempt),
   }, null, 2);
 
-  const rawText = await completeForAgent({
+  const llmResult = await completeForAgent({
     agent: 'code',
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPayload }],
     maxTokens: 16384,
   });
+  const rawText = llmResult.text;
 
   const assets = extractAssets(rawText);
   if (!assets) {
@@ -136,7 +137,16 @@ async function generateChallengeAssets({
     err.rawText = rawText;
     throw err;
   }
-  return { rawText, assets };
+  return {
+    rawText,
+    assets,
+    llmUsage: {
+      agent: 'code',
+      label: 'generate',
+      modelId: llmResult.modelId,
+      usage: llmResult.usage,
+    },
+  };
 }
 
 module.exports = {

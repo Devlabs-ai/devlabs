@@ -1,26 +1,38 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { listReviews, pushReview, dismissReview } from '../services/reviewApi.js';
-import { BUCKETS, bucketLabel } from '../constants/buckets.js';
-
-function bucketFromReview(r) {
-  return r?.builtChallenge?.bucket
-    || r?.builtChallenge?.meta?.bucket
-    || null;
-}
+import { useNavigate } from 'react-router-dom';
+import {
+  listReviews,
+  pushReview,
+  dismissReview,
+} from '../services/reviewApi.js';
+import ReviewActionBar from '../components/ReviewActionBar.jsx';
+import MarkdownProse from '../components/MarkdownProse.jsx';
+import {
+  bucketLabel,
+  clearReviewSignoff,
+  getReviewSignoff,
+  resolvePushBucket,
+  setReviewSignoff,
+} from '../utils/reviewHelpers.js';
 
 function ReviewRow({ r, active, onClick }) {
-  const presetBucket = bucketFromReview(r);
+  const passed = !!r.buildValidation?.passed;
+  const bucket = resolvePushBucket(r);
+  const title = r.title || r.builtChallenge?.title || '(untitled)';
+  const signoff = getReviewSignoff(r.sessionId);
   return (
-    <button className={`review-row ${active ? 'active' : ''}`} onClick={onClick}>
-      <div className="title">{r.title || r.builtChallenge?.title || '(untitled)'}</div>
+    <button type="button" className={`review-row ${active ? 'active' : ''}`} onClick={onClick}>
+      <div className="title">{title}</div>
       <div className="meta">
-        <span className={`pill ${r.buildValidation?.passed ? 'pass' : 'fail'}`}>
-          {r.buildValidation?.passed ? 'validation ✓' : 'validation ✗'}
+        <span className={`pill ${passed ? 'pass' : 'fail'}`}>
+          {passed ? 'validation ✓' : 'validation ✗'}
         </span>
-        {presetBucket && (
-          <span className="pill bucket-pill" data-bucket={presetBucket}>
-            {bucketLabel(presetBucket)}
-          </span>
+        {signoff.touched && <span className="pill sm preview">sandbox</span>}
+        {r.builtChallenge?.difficulty && (
+          <span className="dim">{r.builtChallenge.difficulty}</span>
+        )}
+        {bucketLabel(bucket) && (
+          <span className="dim">{bucketLabel(bucket)}</span>
         )}
         <span className="dim">{new Date(r.savedAt).toLocaleString()}</span>
       </div>
@@ -28,127 +40,104 @@ function ReviewRow({ r, active, onClick }) {
   );
 }
 
-function ReviewDetail({ r, onPush, onDismiss, busy, bucket, onBucketChange }) {
+function ReviewDetail({ r, sandboxTouched }) {
   if (!r) {
-    return <div className="review-empty">Pick a build from the list to inspect it.</div>;
+    return <div className="review-empty">Pick a build from the queue to review it.</div>;
   }
+
   const c = r.builtChallenge || {};
-  const canPush = !busy && r.buildValidation?.passed && !!bucket;
-  const bucketName = bucketLabel(bucket);
+  const bucket = resolvePushBucket(r);
+  const tags = (c.tags || []).slice(0, 4);
+  const tagMore = (c.tags || []).length > 4 ? ` +${c.tags.length - 4}` : '';
+
   return (
-    <div className="review-detail">
-      <header>
-        <div>
-          <h3>{c.title || r.title}</h3>
-          {bucketName && (
-            <span className="review-detail-bucket pill bucket-pill" data-bucket={bucket}>
-              Ships to {bucketName}
+    <div className="review-detail review-detail--clean">
+      <header className="review-detail-top">
+        <div className="review-detail-head">
+          <p className="review-detail-meta-line">
+            <span className={`pill sm ${r.buildValidation?.passed ? 'pass' : 'fail'}`}>
+              {r.buildValidation?.passed ? 'Build passed' : 'Build failed'}
             </span>
-          )}
-          <p className="dim">{c.description}</p>
-        </div>
-        <div className="actions">
-          <div className="review-bucket-picker">
-            <label htmlFor="review-bucket">Push to</label>
-            <select
-              id="review-bucket"
-              value={bucket || ''}
-              onChange={(e) => onBucketChange(e.target.value || null)}
-              disabled={busy}
-            >
-              <option value="">Pick a bucket…</option>
-              {BUCKETS.map((b) => (
-                <option key={b.id} value={b.id}>{b.label}</option>
-              ))}
-            </select>
-          </div>
-          <button className="ghost danger" onClick={() => onDismiss(r.sessionId)} disabled={busy}>Dismiss</button>
-          <button onClick={() => onPush(r.sessionId)} disabled={!canPush}>
-            {busy ? 'Pushing…' : 'Push to verified'}
-          </button>
+            {c.difficulty && <span>{c.difficulty}</span>}
+            {c.category && <span>{c.category}</span>}
+            {tags.length > 0 && (
+              <span className="dim">{tags.join(', ')}{tagMore}</span>
+            )}
+          </p>
         </div>
       </header>
+      {!sandboxTouched && (
+        <p className="review-signoff-hint">Open sandbox to validate, then use sign-off in the toolbar above.</p>
+      )}
 
-      <div className="kv-grid">
-        <div><span className="label">Difficulty</span><span>{c.difficulty || '—'}</span></div>
-        <div><span className="label">Category</span><span>{c.category || '—'}</span></div>
-        <div><span className="label">Tags</span><span>{(c.tags || []).join(', ') || '—'}</span></div>
-        <div><span className="label">Build dir</span><code className="path">{r.buildDir || '—'}</code></div>
-      </div>
-
-      {c.metrics?.observed?.values && Object.keys(c.metrics.observed.values).length > 0 && (
-        <section>
-          <h4>Observed metrics (baseline)</h4>
-          <ul className="suggestions">
-            {Object.entries(c.metrics.observed.values)
-              .filter(([, v]) => v?.value != null)
-              .map(([id, v]) => (
-                <li key={id}><strong>{id}</strong>: {v.value}</li>
-              ))}
-          </ul>
-          <p className="dim">
-            {c.metrics.observed.sampleCount} samples from {c.metrics.observed.service}
-          </p>
-        </section>
+      {c.description && (
+        <details className="review-panel" open>
+          <summary>Candidate brief</summary>
+          <div className="review-panel-body review-brief">
+            <MarkdownProse text={c.description} className="markdown-prose" />
+          </div>
+        </details>
       )}
 
       {r.buildValidation && (
-        <section>
-          <h4>Validation</h4>
-          <div className={`validation-card ${r.buildValidation.passed ? 'passed' : 'failed'}`}>
-            <div className="head">
-              <span className="badge">{r.buildValidation.passed ? '✓ Passed' : '✗ Failed'}</span>
-              <span className="feedback">{r.buildValidation.feedback}</span>
-            </div>
+        <details className="review-panel" open>
+          <summary>Automated validation</summary>
+          <div className="review-panel-body">
+            <p className="review-validation-feedback">{r.buildValidation.feedback}</p>
             {Array.isArray(r.buildValidation.suggestions) && r.buildValidation.suggestions.length > 0 && (
-              <ul className="suggestions">
+              <ul className="review-validation-list">
                 {r.buildValidation.suggestions.map((s, i) => <li key={i}>{s}</li>)}
               </ul>
             )}
           </div>
-        </section>
+        </details>
       )}
 
-      {c.problemStatement && (
-        <section>
-          <h4>Problem statement</h4>
-          <div className="kv-grid">
-            <div><span className="label">Incident</span><span>{c.problemStatement.incident}</span></div>
-            <div><span className="label">Severity</span><span>{c.problemStatement.severity}</span></div>
-            <div className="full"><span className="label">Situation</span><span>{c.problemStatement.situation}</span></div>
-          </div>
-          {Array.isArray(c.problemStatement.tasks) && (
-            <>
-              <span className="label">Tasks</span>
-              <ol>{c.problemStatement.tasks.map((t, i) => <li key={i}>{t}</li>)}</ol>
-            </>
-          )}
-        </section>
-      )}
-
-      <section>
-        <h4>Raw artefacts</h4>
-        <details>
-          <summary>challenge.json</summary>
-          <pre>{JSON.stringify(c, null, 2)}</pre>
-        </details>
-        <details>
-          <summary>validationSpec</summary>
-          <pre>{JSON.stringify(c.validationSpec, null, 2)}</pre>
-        </details>
-      </section>
+      <details className="review-panel">
+        <summary>Technical details</summary>
+        <div className="review-panel-body">
+          <dl className="review-facts">
+            {bucketLabel(bucket) && (
+              <div>
+                <dt>Library</dt>
+                <dd>{bucketLabel(bucket)}</dd>
+              </div>
+            )}
+            {r.buildDir && (
+              <div>
+                <dt>Build dir</dt>
+                <dd><code className="path">{r.buildDir}</code></dd>
+              </div>
+            )}
+          </dl>
+          <details className="review-nested">
+            <summary>challenge.json</summary>
+            <pre>{JSON.stringify(c, null, 2)}</pre>
+          </details>
+        </div>
+      </details>
     </div>
   );
 }
 
-export default function ReviewPage({ onPromoted, refreshKey }) {
+export default function ReviewPage({
+  onPromoted,
+  refreshKey,
+  initialSessionId = null,
+  returnState = null,
+}) {
+  const navigate = useNavigate();
   const [reviews, setReviews] = useState([]);
-  const [activeId, setActiveId] = useState(null);
+  const [activeId, setActiveId] = useState(initialSessionId);
+  const [listQuery, setListQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  // Per-review bucket selection so switching between rows doesn't blow away
-  // a choice the reviewer already made on another card.
-  const [buckets, setBuckets] = useState({});
+  const [signoffRev, setSignoffRev] = useState(0);
+
+  const signoffFor = (id) => {
+    void signoffRev;
+    return id ? getReviewSignoff(id) : { touched: false, validated: false };
+  };
 
   const reload = useCallback(async () => {
     try {
@@ -164,49 +153,48 @@ export default function ReviewPage({ onPromoted, refreshKey }) {
 
   useEffect(() => { reload(); }, [reload, refreshKey]);
 
-  // Pre-fill any review's bucket from its built challenge so a reviewer who
-  // already set the bucket during authoring just confirms with Push. The manual
-  // override in `buckets[id]` still wins — we only seed missing entries.
   useEffect(() => {
-    setBuckets((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const r of reviews) {
-        if (next[r.sessionId] !== undefined) continue;
-        const seed = bucketFromReview(r);
-        if (seed) {
-          next[r.sessionId] = seed;
-          changed = true;
-        }
+    if (initialSessionId) setActiveId(initialSessionId);
+  }, [initialSessionId]);
+
+  useEffect(() => {
+    if (returnState?.sessionId) {
+      setActiveId(returnState.sessionId);
+      if (returnState.sandboxTouched) {
+        setReviewSignoff(returnState.sessionId, { touched: true });
       }
-      return changed ? next : prev;
-    });
-  }, [reviews]);
+    }
+  }, [returnState]);
 
   const active = reviews.find((r) => r.sessionId === activeId) || null;
-  const activeBucket = active ? buckets[active.sessionId] || null : null;
+  const activeSignoff = signoffFor(active?.sessionId);
+  const q = listQuery.trim().toLowerCase();
+  const filteredReviews = q
+    ? reviews.filter((r) => {
+        const title = (r.title || r.builtChallenge?.title || '').toLowerCase();
+        const cat = (r.builtChallenge?.category || '').toLowerCase();
+        return title.includes(q) || cat.includes(q);
+      })
+    : reviews;
 
-  const handleBucketChange = (value) => {
-    if (!active) return;
-    setBuckets((prev) => ({ ...prev, [active.sessionId]: value }));
+  const selectReview = (sessionId) => {
+    setActiveId(sessionId);
+    setErr(null);
   };
 
   const handlePush = async (id) => {
-    const bucket = buckets[id];
+    const review = reviews.find((r) => r.sessionId === id);
+    const bucket = review ? resolvePushBucket(review) : null;
     if (!bucket) {
-      setErr('Pick a bucket before pushing this challenge to verified.');
+      setErr('Could not determine library bucket for this challenge.');
       return;
     }
     setBusy(true);
     setErr(null);
     try {
       const out = await pushReview(id, { bucket });
+      clearReviewSignoff(id);
       if (onPromoted) onPromoted(out.slug);
-      setBuckets((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
       await reload();
       setActiveId(null);
     } catch (e) {
@@ -221,6 +209,7 @@ export default function ReviewPage({ onPromoted, refreshKey }) {
     setErr(null);
     try {
       await dismissReview(id);
+      clearReviewSignoff(id);
       await reload();
       setActiveId(null);
     } catch (e) {
@@ -230,42 +219,81 @@ export default function ReviewPage({ onPromoted, refreshKey }) {
     }
   };
 
+  const handleOpenSandbox = (reviewSessionId) => {
+    navigate(`/review/${reviewSessionId}/sandbox`);
+  };
+
+  const handleSignoffChange = (checked) => {
+    if (!active) return;
+    setReviewSignoff(active.sessionId, { validated: checked });
+    setSignoffRev((n) => n + 1);
+  };
+
+  const activeTitle = active?.builtChallenge?.title || active?.title;
+
   return (
     <div className="review-grid">
       <aside className="review-list-col panel">
         <div className="panel-header">
-          <div className="title">Review queue</div>
-          <span className="meta">{reviews.length} pending</span>
+          <div className="title">Queue</div>
+          <span className="meta">
+            {filteredReviews.length === reviews.length
+              ? `${reviews.length} pending`
+              : `${filteredReviews.length} of ${reviews.length}`}
+          </span>
         </div>
-        <div className="panel-body" style={{ padding: 0 }}>
-          {err && <div className="alert" style={{ margin: 14 }}>{err}</div>}
+        {reviews.length > 0 && (
+          <div className="review-list-search">
+            <input
+              type="search"
+              className="review-list-search-input"
+              placeholder="Filter by title or category…"
+              value={listQuery}
+              onChange={(e) => setListQuery(e.target.value)}
+              aria-label="Filter review queue"
+            />
+          </div>
+        )}
+        <div className="panel-body review-list-body">
           {reviews.length === 0 ? (
-            <div className="review-empty">No builds awaiting review. Finish a build in the pipeline tab.</div>
+            <div className="review-empty">No builds awaiting review.</div>
+          ) : filteredReviews.length === 0 ? (
+            <div className="review-empty">No matches for &ldquo;{listQuery}&rdquo;.</div>
           ) : (
-            reviews.map((r) => (
+            filteredReviews.map((r) => (
               <ReviewRow
                 key={r.sessionId}
                 r={r}
                 active={r.sessionId === activeId}
-                onClick={() => setActiveId(r.sessionId)}
+                onClick={() => selectReview(r.sessionId)}
               />
             ))
           )}
         </div>
       </aside>
 
-      <section className="review-detail-col panel">
-        <div className="panel-header">
-          <div className="title">Build artefacts</div>
+      <section className="review-right-col panel">
+        {err && <div className="review-detail-alert alert">{err}</div>}
+        <div className="panel-header review-detail-col-header">
+          <div className="title">{activeTitle || 'Review'}</div>
+          {active && <span className="meta">Details</span>}
         </div>
-        <div className="panel-body" style={{ overflow: 'auto' }}>
-          <ReviewDetail
+        {active && (
+          <ReviewActionBar
             r={active}
             onPush={handlePush}
             onDismiss={handleDismiss}
+            onOpenSandbox={handleOpenSandbox}
             busy={busy}
-            bucket={activeBucket}
-            onBucketChange={handleBucketChange}
+            sandboxValidated={activeSignoff.validated}
+            onSandboxValidatedChange={handleSignoffChange}
+            sandboxTouched={activeSignoff.touched}
+          />
+        )}
+        <div className="panel-body review-right-body">
+          <ReviewDetail
+            r={active}
+            sandboxTouched={activeSignoff.touched}
           />
         </div>
       </section>

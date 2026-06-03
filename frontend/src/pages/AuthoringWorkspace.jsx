@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { markdownExcerpt } from '../utils/markdownText.js';
 
 import AppPageHeader from '../components/AppPageHeader.jsx';
 import ProblemSetterPage from './ProblemSetterPage.jsx';
 import PipelinePage from './PipelinePage.jsx';
-import ReviewPage from './ReviewPage.jsx';
 import {
   listProblemSessions,
   createProblemSession,
@@ -15,12 +15,6 @@ import {
   cancelBuild,
 } from '../services/problemApi.js';
 
-const PHASES = [
-  { id: 'setter', label: 'Shape', lead: 'Chat with the agent and refine the challenge design.' },
-  { id: 'pipeline', label: 'Build', lead: 'Generate assets, spin up the sandbox, and validate.' },
-  { id: 'review', label: 'Ship', lead: 'Review the build and push to your library.' },
-];
-
 const DRAFT_FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'in_progress', label: 'In progress' },
@@ -28,7 +22,7 @@ const DRAFT_FILTERS = [
   { id: 'failed', label: 'Failed' },
 ];
 
-const VALID_TABS = ['setter', 'pipeline', 'review'];
+const VALID_TABS = ['setter', 'pipeline'];
 
 function statusLabel(status) {
   if (!status || status === 'draft') return 'Draft';
@@ -69,6 +63,7 @@ function DraftLibrary({
   search,
   onSearch,
   onSelect,
+  onDelete,
   onNew,
   onImportOpen,
   importOpen,
@@ -149,24 +144,40 @@ function DraftLibrary({
         <div className="author-draft-grid">
           {filtered.map((d) => {
             const status = d.buildStatus || 'draft';
+            const title = draftTitle(d);
             return (
-              <button
-                key={d.id}
-                type="button"
-                className="card author-draft-card"
-                onClick={() => onSelect(d.id)}
-              >
+              <article key={d.id} className="card author-draft-card">
                 <div className="author-draft-card-top">
                   <span className={`pill ${status}`}>{statusLabel(status)}</span>
                   <span className="author-draft-card-time">{formatRelativeTime(d.updatedAt)}</span>
                 </div>
-                <h3>{draftTitle(d)}</h3>
+                <h3>{title}</h3>
                 <p className="author-draft-card-desc">
-                  {(d.draft?.description || d.draft?.meta?.description || 'No description yet').slice(0, 120)}
-                  {(d.draft?.description || '').length > 120 ? '…' : ''}
+                  {markdownExcerpt(
+                    d.draft?.description || d.draft?.meta?.description || '',
+                    { maxLen: 140, title },
+                  )}
                 </p>
-                <span className="author-draft-card-cta">Open →</span>
-              </button>
+                <div className="author-draft-card-actions">
+                  <button
+                    type="button"
+                    className="author-draft-card-cta"
+                    onClick={() => onSelect(d.id)}
+                  >
+                    Open →
+                  </button>
+                  <button
+                    type="button"
+                    className="author-draft-card-cta author-draft-card-cta--danger"
+                    onClick={() => {
+                      if (!window.confirm(`Delete “${title}”? This cannot be undone.`)) return;
+                      onDelete(d.id);
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </article>
             );
           })}
         </div>
@@ -184,6 +195,7 @@ export default function AuthoringWorkspace({ onPromoted }) {
   const [activeDraft, setActiveDraft] = useState(null);
   const [error, setError] = useState(null);
   const [llmConfig, setLlmConfig] = useState(null);
+  const [llmConfigReady, setLlmConfigReady] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
@@ -194,12 +206,24 @@ export default function AuthoringWorkspace({ onPromoted }) {
   const tab = (urlTab && VALID_TABS.includes(urlTab)) ? urlTab : 'setter';
   const inWorkspace = Boolean(urlDraftId);
   const draftLoading = Boolean(urlDraftId && !activeDraft);
-  const activePhase = PHASES.find((p) => p.id === tab) || PHASES[0];
   const stuckBuilding = activeDraft?.buildStatus === 'building';
 
   const setTab = useCallback((t) => {
     if (activeDraftId) navigate(`/authoring/${activeDraftId}/${t}`, { replace: true });
   }, [navigate, activeDraftId]);
+
+  const goPipelineLogs = useCallback((attempt = null) => {
+    if (!activeDraftId) return;
+    navigate(`/authoring/${activeDraftId}/pipeline`, {
+      state: attempt != null ? { focusAttempt: attempt } : undefined,
+    });
+  }, [activeDraftId, navigate]);
+
+  const goReview = useCallback((sessionId = null) => {
+    navigate('/review', {
+      state: sessionId ? { sessionId } : undefined,
+    });
+  }, [navigate]);
 
   const reload = useCallback(async () => {
     try {
@@ -220,12 +244,33 @@ export default function AuthoringWorkspace({ onPromoted }) {
   }, [activeDraftId, navigate]);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      try { setLlmConfig(await getProblemConfig()); } catch (_e) { /* noop */ }
+      try {
+        const cfg = await getProblemConfig();
+        if (!cancelled) setLlmConfig(cfg);
+      } catch (_e) { /* noop */ }
+      finally {
+        if (!cancelled) setLlmConfigReady(true);
+      }
     })();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => { reload(); }, [reload, refreshKey]);
+
+  useEffect(() => {
+    if (urlTab === 'review') {
+      navigate('/review', {
+        replace: true,
+        state: urlDraftId ? { sessionId: urlDraftId } : undefined,
+      });
+      return;
+    }
+    if (urlDraftId && (!urlTab || !VALID_TABS.includes(urlTab))) {
+      navigate(`/authoring/${urlDraftId}/setter`, { replace: true });
+    }
+  }, [urlDraftId, urlTab, navigate]);
 
   useEffect(() => {
     if (!urlDraftId) {
@@ -314,44 +359,47 @@ export default function AuthoringWorkspace({ onPromoted }) {
 
   const llmKey = llmConfig?.provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY';
 
+  const llmBanner = llmConfigReady && !llmConfig?.llmConfigured && (
+    <div className="authoring-banner alert">
+      <strong>LLM not configured.</strong> Set <code>{llmKey}</code> in{' '}
+      <code>backend/.env</code> to enable chat and the AI build pipeline. You can still import
+      hand-written draft JSON.
+    </div>
+  );
+
   return (
     <div className={`authoring-studio ${inWorkspace ? 'authoring-studio--workspace' : 'authoring-studio--library'}`}>
-      <AppPageHeader
-        eyebrow="Author"
-        title={inWorkspace && activeDraft ? draftTitle(activeDraft) : inWorkspace ? 'Loading…' : 'Your drafts'}
-        lead={inWorkspace ? activePhase.lead : 'Create, build, and ship interview challenges with the agent.'}
-        aside={(
-          <div className="author-header-aside">
-            {inWorkspace && activeDraft?.buildStatus && (
-              <span className={`pill ${activeDraft.buildStatus}`}>
-                {statusLabel(activeDraft.buildStatus)}
-              </span>
-            )}
-            {llmConfig?.llmConfigured ? (
-              <span className="authoring-llm-pill ok" title="LLM agent is configured">
-                <span className="dot" />
-                Agent ready
-              </span>
-            ) : (
-              <span className="authoring-llm-pill warn" title={`Set ${llmKey} in backend/.env`}>
-                <span className="dot" />
-                Agent offline
-              </span>
-            )}
-          </div>
-        )}
-        className="author-page-header"
-      />
-
-      {!llmConfig?.llmConfigured && (
-        <div className="authoring-banner alert">
-          <strong>LLM not configured.</strong> Set <code>{llmKey}</code> in{' '}
-          <code>backend/.env</code> to enable chat and the AI build pipeline. You can still import
-          hand-written draft JSON.
-        </div>
+      {!inWorkspace && (
+        <AppPageHeader
+          eyebrow="Author"
+          title="Your drafts"
+          lead="Create, build, and ship interview challenges with the agent."
+          aside={(
+            <div className="author-header-aside">
+              {!llmConfigReady ? (
+                <span className="authoring-llm-pill dim" title="Checking LLM configuration">
+                  <span className="dot" />
+                  Agent…
+                </span>
+              ) : llmConfig?.llmConfigured ? (
+                <span className="authoring-llm-pill ok" title="LLM agent is configured">
+                  <span className="dot" />
+                  Agent ready
+                </span>
+              ) : (
+                <span className="authoring-llm-pill warn" title={`Set ${llmKey} in backend/.env`}>
+                  <span className="dot" />
+                  Agent offline
+                </span>
+              )}
+            </div>
+          )}
+          className="author-page-header"
+        />
       )}
 
-      {error && <div className="authoring-banner alert">{error}</div>}
+      {!inWorkspace && llmBanner}
+      {!inWorkspace && error && <div className="authoring-banner alert">{error}</div>}
 
       {!inWorkspace ? (
         <DraftLibrary
@@ -361,6 +409,7 @@ export default function AuthoringWorkspace({ onPromoted }) {
           search={draftSearch}
           onSearch={setDraftSearch}
           onSelect={handleSelectDraft}
+          onDelete={handleDeleteDraft}
           onNew={handleNewDraft}
           onImportOpen={() => setImportOpen(true)}
           importOpen={importOpen}
@@ -376,43 +425,8 @@ export default function AuthoringWorkspace({ onPromoted }) {
         </div>
       ) : (
         <>
-          <div className="library-toolbar author-toolbar">
-            <button
-              type="button"
-              className="ghost sm author-back-btn"
-              onClick={() => navigate('/authoring')}
-            >
-              ← All drafts
-            </button>
-
-            <div className="library-collections" role="tablist">
-              {PHASES.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === p.id}
-                  className={`lib-tab ${tab === p.id ? 'active' : ''}`}
-                  onClick={() => setTab(p.id)}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="author-toolbar-actions">
-              {stuckBuilding && (
-                <button
-                  type="button"
-                  className="ghost sm danger"
-                  onClick={handleCancelBuild}
-                  disabled={cancelBusy}
-                >
-                  {cancelBusy ? 'Cancelling…' : 'Cancel build'}
-                </button>
-              )}
-            </div>
-          </div>
+          {llmBanner}
+          {error && <div className="authoring-banner alert authoring-banner--compact">{error}</div>}
 
           <main className="authoring-stage authoring-stage--solo">
             <div className="authoring-stage-inner">
@@ -420,10 +434,12 @@ export default function AuthoringWorkspace({ onPromoted }) {
                 <ProblemSetterPage
                   draft={activeDraft}
                   llmConfig={llmConfig}
+                  onGoPipelineLogs={goPipelineLogs}
+                  onGoBuild={() => setTab('pipeline')}
+                  onGoReview={() => goReview(activeDraftId)}
                   onDraftChanged={handleDraftChanged}
                   onImportDraft={handleImportDraft}
                   onDeleteDraft={handleDeleteDraft}
-                  onGoPipeline={() => setTab('pipeline')}
                   onRefreshSession={async () => {
                     if (!activeDraftId) return;
                     const fresh = await getProblemSession(activeDraftId);
@@ -436,19 +452,9 @@ export default function AuthoringWorkspace({ onPromoted }) {
                   draft={activeDraft}
                   llmConfig={llmConfig}
                   onDraftChanged={handleDraftChanged}
-                  onGoReview={() => { setTab('review'); setRefreshKey((k) => k + 1); }}
-                />
-              )}
-              {tab === 'review' && (
-                <ReviewPage
-                  onPromoted={(slug) => {
-                    setActiveDraftId(null);
-                    setActiveDraft(null);
-                    setRefreshKey((k) => k + 1);
-                    navigate('/authoring', { replace: true });
-                    if (onPromoted) onPromoted(slug);
-                  }}
-                  refreshKey={refreshKey}
+                  onGoReview={() => goReview(activeDraftId)}
+                  onCancelBuild={stuckBuilding ? handleCancelBuild : undefined}
+                  cancelBuildBusy={cancelBusy}
                 />
               )}
             </div>

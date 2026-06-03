@@ -175,12 +175,13 @@ async function validate({ buildDir, portMap, sandboxSpec, draft, validationSpec,
   }, null, 2);
 
   log({ level: 'phase', tag: 'validate', message: 'Asking validation judge to evaluate evidence…' });
-  const text = await llm.completeMessage({
+  const llmResult = await llm.completeMessage({
     agent: 'validation',
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userMessage }],
     maxTokens: 1024,
   });
+  const text = llmResult.text;
 
   const parsed = extractResult(text) || {
     passed: evidence.every((e) => e.ok),
@@ -199,7 +200,15 @@ async function validate({ buildDir, portMap, sandboxSpec, draft, validationSpec,
     message: parsed.passed ? 'Judge: PASS' : 'Judge: FAIL',
     detail: parsed.feedback,
   });
-  return parsed;
+  return {
+    ...parsed,
+    llmUsage: {
+      agent: 'validation',
+      label: 'judge',
+      modelId: llmResult.modelId,
+      usage: llmResult.usage,
+    },
+  };
 }
 
 module.exports = { validate, runStep, SYSTEM_PROMPT };

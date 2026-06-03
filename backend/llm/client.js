@@ -24,6 +24,7 @@ const {
   listConfiguredModels,
   configurationReport,
 } = require('./models');
+const { normalizeUsage } = require('./usage');
 
 const DEFAULT_TEXT_AGENT = 'design';
 const EMBED_MAX_CHARS = 8000;
@@ -55,7 +56,7 @@ async function streamMessage({
   agent = DEFAULT_TEXT_AGENT,
 }) {
   const model = languageModelFor(agent);
-  const { textStream } = streamText({
+  const result = streamText({
     model,
     system,
     messages,
@@ -63,13 +64,14 @@ async function streamMessage({
   });
 
   let full = '';
-  for await (const delta of textStream) {
+  for await (const delta of result.textStream) {
     full += delta;
     if (onText) {
       try { onText(delta); } catch (_e) { /* never let UI callback kill the stream */ }
     }
   }
-  return full;
+  const usage = normalizeUsage(await result.usage);
+  return { text: full, usage, modelId: modelIdFor(agent) };
 }
 
 async function completeMessage({
@@ -79,13 +81,17 @@ async function completeMessage({
   agent = DEFAULT_TEXT_AGENT,
 }) {
   const model = languageModelFor(agent);
-  const { text } = await generateText({
+  const result = await generateText({
     model,
     system,
     messages,
     maxOutputTokens: maxTokens,
   });
-  return text;
+  return {
+    text: result.text,
+    usage: normalizeUsage(result.usage),
+    modelId: modelIdFor(agent),
+  };
 }
 
 // --- embeddings ----------------------------------------------------------

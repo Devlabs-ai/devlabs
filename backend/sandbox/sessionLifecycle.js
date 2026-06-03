@@ -122,6 +122,81 @@ async function start({ challengeId, candidateToken } = {}) {
   return { session, challenge };
 }
 
+function challengeFromBuilt(built, reviewSessionId) {
+  const b = built || {};
+  const meta = b.meta || {};
+  return {
+    id: `preview:${reviewSessionId}`,
+    title: b.title || meta.name || 'Preview',
+    description: b.description || '',
+    difficulty: b.difficulty || meta.difficulty || null,
+    category: b.category || meta.category || null,
+    tags: b.tags || meta.tags || [],
+    problemStatement: b.problemStatement || null,
+    validationSpec: b.validationSpec || null,
+  };
+}
+
+/** Spin a candidate-style sandbox from pending build artefacts (review gate). */
+async function startPreview({ buildDir, builtChallenge, reviewSessionId }) {
+  if (!buildDir || !fs.existsSync(buildDir)) {
+    const e = new Error('build directory not found');
+    e.status = 404;
+    throw e;
+  }
+  const composePath = path.join(buildDir, 'docker-compose.yml');
+  if (!fs.existsSync(composePath)) {
+    const e = new Error('docker-compose.yml missing in build directory');
+    e.status = 400;
+    throw e;
+  }
+
+  const sessionId = uuidv4();
+  const { content: composeYaml } = composeManager.readComposeFile(buildDir);
+  const portMap = await composeManager.resolvePortMap(buildDir, composeYaml, sessionId);
+  const services = composeManager.extractServiceNames(composeYaml);
+  const spec = builtChallenge?.validationSpec || {};
+
+  const session = sessionStore.makeSession({
+    id: sessionId,
+    challengeId: `preview:${reviewSessionId}`,
+    candidateName: 'Author preview',
+    status: 'active',
+  });
+  session.buildDir = path.resolve(buildDir);
+  session.portMap = portMap;
+  session.services = services;
+  session.metricsService = spec.metricsService || null;
+  session.terminalService = spec.terminalService || (services[0] || null);
+  session.isReviewPreview = true;
+  session.reviewSessionId = reviewSessionId;
+  sessionStore.set(sessionId, session);
+
+  await sessionStore.persistRow(session);
+
+  try {
+    await composeManager.down(buildDir).catch(() => {});
+    await composeManager.up(buildDir, portMap);
+    await composeManager.waitForServices(buildDir, portMap, 90_000);
+  } catch (e) {
+    console.error(`[lifecycle] preview startup failed for ${sessionId}: ${e.message}`);
+    await composeManager.down(buildDir).catch(() => {});
+    await portAllocator.release(sessionId);
+    session.status = 'ended';
+    session.endTime = Date.now();
+    sessionStore.set(sessionId, session);
+    await sessionStore.persistRow(session);
+    const err = new Error(`failed to start preview sandbox: ${e.message}`);
+    err.status = 500;
+    throw err;
+  }
+
+  await sessionStore.persistRuntime(session);
+
+  const challenge = challengeFromBuilt(builtChallenge, reviewSessionId);
+  return { session, challenge };
+}
+
 async function end(sessionId) {
   const session = sessionStore.get(sessionId);
   if (!session) {
@@ -140,7 +215,9 @@ async function end(sessionId) {
     } catch (e) {
       console.warn(`[lifecycle] compose down failed: ${e.message}`);
     }
-    rmDirSync(session.buildDir);
+    if (!session.isReviewPreview) {
+      rmDirSync(session.buildDir);
+    }
   }
 
   try {
@@ -158,4 +235,4 @@ async function end(sessionId) {
   return session;
 }
 
-module.exports = { start, end };
+module.exports = { start, startPreview, end, challengeFromBuilt };

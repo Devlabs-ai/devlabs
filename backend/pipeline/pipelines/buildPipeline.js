@@ -31,6 +31,8 @@ const { normalizeDraft, isDraftReady } = require('../draft/draftSchema');
 const { emitLog } = require('../build/buildLogger');
 const { buildIterationChecklist } = require('../validation/validationChecklist');
 const { BUILDS_ROOT } = require('../../sandbox/paths');
+const { createUsageAccumulator } = require('../../llm/usage');
+const { formatCostUsd } = require('../../llm/cost');
 
 const MAX_ITERATIONS = 3;
 
@@ -143,6 +145,7 @@ function emitIterationSummary(onEvent, {
   validation,
   draft,
   validationSpec,
+  cost = null,
 }) {
   const checklist = buildIterationChecklist({
     attempt,
@@ -151,6 +154,7 @@ function emitIterationSummary(onEvent, {
     validation,
     draft,
     validationSpec,
+    cost,
   });
   const phaseLines = checklist.phases.map((p) => {
     const icon = p.status === 'pass' ? '✓' : p.status === 'fail' ? '✗' : '○';
@@ -160,13 +164,20 @@ function emitIterationSummary(onEvent, {
     const icon = i.status === 'pass' ? '✓' : i.status === 'fail' ? '✗' : i.status === 'skip' ? '–' : '○';
     return `${icon} ${i.label}`;
   });
+  const costLine = checklist.cost
+    ? `Est. LLM cost: ${formatCostUsd(checklist.cost.totalUsd)} (${checklist.cost.inputTokens.toLocaleString()} in / ${checklist.cost.outputTokens.toLocaleString()} out tokens)`
+    : null;
   emitLog(onEvent, {
     level: checklist.passed ? 'ok' : (failedPhase ? 'warn' : 'info'),
     tag: 'build',
     message: checklist.passed
       ? `Iteration ${attempt}/${total} — validation passed`
       : `Iteration ${attempt}/${total} — ${failedPhase || 'pipeline'} did not complete`,
-    detail: [...phaseLines, ...(checkLines.length ? ['', 'Validation checklist:', ...checkLines] : [])].join('\n'),
+    detail: [
+      ...phaseLines,
+      ...(costLine ? ['', costLine] : []),
+      ...(checkLines.length ? ['', 'Validation checklist:', ...checkLines] : []),
+    ].join('\n'),
   });
   onEvent({ type: 'checklist', checklist });
 }
@@ -290,6 +301,7 @@ async function runBuildLoop({
   }
 
   for (let attempt = 1; attempt <= MAX_ITERATIONS; attempt++) {
+    const attemptCost = createUsageAccumulator();
     onEvent({ type: 'phase', phase: 'GENERATE', attempt, total: MAX_ITERATIONS });
     const retryHint = spinFailureMsg
       ? 'SPIN'
@@ -360,6 +372,7 @@ async function runBuildLoop({
       rawText = generated.rawText;
       assets = generated.assets;
       lastAssets = assets;
+      if (generated.llmUsage) attemptCost.add(generated.llmUsage);
       emitLog(onEvent, {
         level: 'ok',
         tag: 'generate',
@@ -382,6 +395,7 @@ async function runBuildLoop({
         validation: null,
         draft: normalized,
         validationSpec: lastAssets?.validationSpec,
+        cost: attemptCost.isEmpty() ? null : attemptCost.summary(),
       });
       // eslint-disable-next-line no-continue
       continue;
@@ -445,6 +459,7 @@ async function runBuildLoop({
         validation: null,
         draft: normalized,
         validationSpec: assets?.validationSpec,
+        cost: attemptCost.isEmpty() ? null : attemptCost.summary(),
       });
       // eslint-disable-next-line no-continue
       continue;
@@ -511,6 +526,7 @@ async function runBuildLoop({
         validation: null,
         draft: normalized,
         validationSpec: assets?.validationSpec,
+        cost: attemptCost.isEmpty() ? null : attemptCost.summary(),
       });
       // eslint-disable-next-line no-continue
       continue;
@@ -535,6 +551,7 @@ async function runBuildLoop({
           }
         },
       });
+      if (validation.llmUsage) attemptCost.add(validation.llmUsage);
       onEvent({ type: 'validation', result: validation });
     } catch (e) {
       emitLog(onEvent, { level: 'error', tag: 'validate', message: e.message });
@@ -556,6 +573,7 @@ async function runBuildLoop({
         validation: { passed: false, feedback: e.message, evidence: [], checklist: [] },
         draft: normalized,
         validationSpec: assets?.validationSpec,
+        cost: attemptCost.isEmpty() ? null : attemptCost.summary(),
       });
       // eslint-disable-next-line no-continue
       continue;
@@ -568,6 +586,7 @@ async function runBuildLoop({
       validation,
       draft: normalized,
       validationSpec: assets?.validationSpec,
+      cost: attemptCost.isEmpty() ? null : attemptCost.summary(),
     });
 
     if (validation.passed) {

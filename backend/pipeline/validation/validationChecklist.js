@@ -118,6 +118,7 @@ function buildIterationChecklist({
   validation,
   draft,
   validationSpec,
+  cost = null,
 }) {
   const phases = buildPhaseChecklist(failedPhase);
   let items = [];
@@ -139,6 +140,7 @@ function buildIterationChecklist({
     items,
     feedback: validation?.feedback || null,
     suggestions: validation?.suggestions || [],
+    cost: cost && (cost.totalUsd > 0 || cost.inputTokens > 0) ? cost : null,
   };
 }
 

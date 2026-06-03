@@ -8,6 +8,44 @@ const draftStore = require('../pipeline/stores/problemDraftStore');
 const buildPipeline = require('../pipeline/pipelines/buildPipeline');
 const { promote } = require('../pipeline/promoteToVerified');
 const { normalizeBucket } = require('../challenges/buckets');
+const lifecycle = require('../sandbox/sessionLifecycle');
+const sessionStore = require('../db/sessionStore');
+
+const PORT = parseInt(process.env.PORT || '4000', 10);
+const BACKEND_HOST = `localhost:${PORT}`;
+
+const activePreviews = new Map();
+
+function previewWsUrls(sessionId) {
+  return {
+    terminalWsUrl: `ws://${BACKEND_HOST}/ws/terminal?sessionId=${sessionId}`,
+    metricsWsUrl: `ws://${BACKEND_HOST}/ws/metrics?sessionId=${sessionId}`,
+  };
+}
+
+function publicPreviewSession(session, challenge) {
+  const services = (session.services || []).filter((s) => !/^load[-_]?gen/i.test(s));
+  return {
+    id: session.id,
+    status: session.status,
+    startTime: session.startTime,
+    services: services.length ? services : session.services,
+    portMap: session.portMap,
+    metricsService: session.metricsService,
+    terminalService: session.terminalService,
+    challenge,
+  };
+}
+
+async function endPreviewForReview(reviewSessionId) {
+  const playId = activePreviews.get(reviewSessionId);
+  if (!playId) return;
+  activePreviews.delete(reviewSessionId);
+  try {
+    await lifecycle.end(playId);
+  } catch (_e) { /* noop */ }
+  sessionStore.remove(playId);
+}
 
 const router = express.Router();
 router.use(requireInterviewer);
@@ -23,7 +61,49 @@ router.get('/:sessionId', async (req, res, next) => {
   try {
     const r = await reviewStore.get(req.params.sessionId);
     if (!r) return res.status(404).json({ error: 'review not found' });
-    res.json({ review: r });
+    res.json({
+      review: r,
+      previewSessionId: activePreviews.get(req.params.sessionId) || null,
+    });
+  } catch (e) { next(e); }
+});
+
+router.post('/:sessionId/preview', async (req, res, next) => {
+  try {
+    const review = await reviewStore.get(req.params.sessionId);
+    if (!review) return res.status(404).json({ error: 'review not found' });
+    if (!review.buildDir) {
+      return res.status(400).json({ error: 'review has no build directory' });
+    }
+
+    await endPreviewForReview(req.params.sessionId);
+
+    const { session, challenge } = await lifecycle.startPreview({
+      buildDir: review.buildDir,
+      builtChallenge: review.builtChallenge,
+      reviewSessionId: req.params.sessionId,
+    });
+
+    activePreviews.set(req.params.sessionId, session.id);
+    const ws = previewWsUrls(session.id);
+    res.status(201).json({
+      sessionId: session.id,
+      ...ws,
+      services: session.services,
+      terminalService: session.terminalService,
+      portMap: session.portMap,
+      challenge,
+      session: publicPreviewSession(session, challenge),
+    });
+  } catch (e) { next(e); }
+});
+
+router.post('/:sessionId/preview/end', async (req, res, next) => {
+  try {
+    const review = await reviewStore.get(req.params.sessionId);
+    if (!review) return res.status(404).json({ error: 'review not found' });
+    await endPreviewForReview(req.params.sessionId);
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -60,6 +140,8 @@ router.post('/:sessionId/push', async (req, res, next) => {
       authoredBy: req.user?.sub || null,
     });
 
+    await endPreviewForReview(req.params.sessionId);
+
     if (draft.buildDir) {
       await buildPipeline.teardownBuild(draft.id, draft.buildDir).catch(() => {});
     }
@@ -72,6 +154,7 @@ router.post('/:sessionId/push', async (req, res, next) => {
 
 router.delete('/:sessionId', async (req, res, next) => {
   try {
+    await endPreviewForReview(req.params.sessionId);
     const draft = draftStore.get(req.params.sessionId);
     if (draft && draft.buildDir) {
       await buildPipeline.teardownBuild(draft.id, draft.buildDir).catch(() => {});

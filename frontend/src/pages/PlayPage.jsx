@@ -2,10 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useAppState } from '../context/AppStateContext.jsx';
 import AppPageHeader from '../components/AppPageHeader.jsx';
 import ChallengeLibrary from '../components/ChallengeLibrary.jsx';
-import ProblemStatement from '../components/ProblemStatement.jsx';
-import TerminalWorkspace from '../components/TerminalWorkspace.jsx';
-import CodeEditor from '../components/CodeEditor.jsx';
-import BrowserTab from '../components/BrowserTab.jsx';
+import SandboxWorkspace from '../components/SandboxWorkspace.jsx';
 
 const COLLECTIONS = [
   { id: 'my',     label: 'My Challenges' },
@@ -25,7 +22,7 @@ const DOMAINS = [
 function LibraryView({ challenges, challengesError, startError, onSelectChallenge }) {
   const { currentUser } = useAppState();
 
-  const [collection, setCollection] = useState('public');
+  const [collection, setCollection] = useState('my');
   const [difficulty, setDifficulty] = useState(null);
   const [domain, setDomain]         = useState(null);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -184,8 +181,6 @@ export default function PlayPage() {
     onBackToLibrary,
   } = useAppState();
 
-  const [rightTab, setRightTab] = useState('terminal');
-
   if (playState === 'library') {
     return (
       <LibraryView
@@ -215,81 +210,11 @@ export default function PlayPage() {
 
   if (playState === 'active' && activeSession) {
     return (
-      <div className="workspace workspace-2col">
-        <div className="col">
-          <div className="panel" style={{ flex: 1 }}>
-            <div className="panel-header">
-              <div className="title">
-                <span className="icon">◆</span> Inc Brief
-              </div>
-              {activeChallenge?.difficulty && (
-                <span className="meta">{activeChallenge.difficulty}</span>
-              )}
-            </div>
-            <div className="panel-body">
-              <ProblemStatement challenge={activeChallenge} />
-            </div>
-          </div>
-        </div>
-
-        <div className="col col-main">
-          <div className="panel" style={{ flex: 1 }}>
-            <div className="panel-header">
-              <div className="panel-tabs">
-                <button
-                  type="button"
-                  className={`panel-tab ${rightTab === 'terminal' ? 'active' : ''}`}
-                  onClick={() => setRightTab('terminal')}
-                >
-                  <span className="term-dots"><span /><span /><span /></span>
-                  Terminal
-                </button>
-                <button
-                  type="button"
-                  className={`panel-tab ${rightTab === 'editor' ? 'active' : ''}`}
-                  onClick={() => setRightTab('editor')}
-                >
-                  <span className="icon">&#9632;</span> Editor
-                </button>
-                <button
-                  type="button"
-                  className={`panel-tab ${rightTab === 'browser' ? 'active' : ''}`}
-                  onClick={() => setRightTab('browser')}
-                >
-                  <span className="icon">⬡</span> Browser
-                </button>
-              </div>
-              <span className="meta">
-                {(activeSession.services || []).length}{' '}
-                {(activeSession.services || []).length === 1 ? 'container' : 'containers'} ·{' '}
-                <span title={activeSession.id} style={{ fontFamily: 'monospace', fontSize: 11 }}>
-                  {activeSession.id.slice(0, 8)}
-                </span>
-              </span>
-            </div>
-            <div className="panel-body flush">
-              {/* Terminal stays mounted to keep WebSocket alive */}
-              <div style={{ display: rightTab === 'terminal' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-                <TerminalWorkspace
-                  services={activeSession.services}
-                  baseWsUrl={activeSession.terminalWsUrl}
-                  defaultService={activeSession.terminalService}
-                />
-              </div>
-              <div style={{ display: rightTab === 'editor' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-                <CodeEditor
-                  sessionId={activeSession.id}
-                  services={activeSession.services}
-                  defaultContainer={activeSession.terminalService}
-                />
-              </div>
-              <div style={{ display: rightTab === 'browser' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-                <BrowserTab />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <SandboxWorkspace
+        mode="play"
+        challenge={activeChallenge}
+        session={activeSession}
+      />
     );
   }
 

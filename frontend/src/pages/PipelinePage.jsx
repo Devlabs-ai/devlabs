@@ -1,51 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { PhaseTracker } from '../components/PhaseTracker.jsx';
 import { streamBuild, getProblemSession } from '../services/problemApi.js';
-
-const PHASES = ['GENERATE', 'WRITE', 'SPIN', 'VALIDATE'];
-
-function PhaseTracker({ phase, attempt, total, status, validation, running }) {
-  // The run is finished once we know its terminal state. After this point
-  // there are no more `phase` events, so we must mark VALIDATE done ourselves
-  // (otherwise the pill stays stuck on "current"/blue even after the green
-  // PASSED card appears).
-  const finished = !running
-    && (status === 'review_ready' || status === 'failed' || !!validation);
-  const phaseIdx = PHASES.indexOf(phase || '');
-
-  return (
-    <div className="phase-tracker">
-      <div className="phase-row">
-        {PHASES.map((p, idx) => {
-          let done = phaseIdx > idx;
-          let isCurrent = !finished && p === phase;
-          if (finished) {
-            // VALIDATE: green if the LLM judge passed, red if it failed.
-            // Earlier phases: green if we reached them at all this iteration.
-            if (p === 'VALIDATE') {
-              done = !!validation?.passed || status === 'review_ready';
-            } else {
-              done = idx <= phaseIdx;
-            }
-          }
-          const failed = finished && p === 'VALIDATE' && validation && !validation.passed;
-          return (
-            <div
-              key={p}
-              className={`phase-pill ${isCurrent ? 'current' : ''} ${done ? 'done' : ''} ${failed ? 'failed' : ''}`}
-            >
-              <span className="dot" />
-              {p}
-            </div>
-          );
-        })}
-      </div>
-      <div className="phase-meta">
-        <span>Attempt {attempt || 0} / {total || 5}</span>
-        <span className={`status-pill ${status || 'idle'}`}>{status || 'idle'}</span>
-      </div>
-    </div>
-  );
-}
+import { logsForAttempt } from '../utils/buildLogFilter.js';
+import { buildCostLabel } from '../utils/buildCost.js';
 
 function logLineClass(line) {
   if (line.includes('✗') || line.includes(' FAIL') || line.includes('failed')) return 'log-error';
@@ -55,13 +13,13 @@ function logLineClass(line) {
   return '';
 }
 
-function LogStream({ lines }) {
+function LogStream({ lines, scrollKey }) {
   const ref = useRef(null);
   useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [lines.length]);
+  }, [lines.length, scrollKey]);
   return (
-    <div className="log-stream" ref={ref}>
+    <div id="pipeline-logs" className="log-stream" ref={ref}>
       {lines.length === 0 && <div className="log-empty">Logs will appear here once the build starts.</div>}
       {lines.map((l, i) => (
         <div key={i} className={`log-line ${logLineClass(l)}`}>{l}</div>
@@ -86,6 +44,11 @@ function IterationChecklist({ checklist }) {
           Iteration {checklist.attempt}/{checklist.total}
           {checklist.passed ? ' · passed' : checklist.failedPhase ? ` · failed at ${checklist.failedPhase}` : ''}
         </span>
+        {buildCostLabel(checklist.cost) && (
+          <span className="pipeline-build-cost dim" title="Estimated LLM cost (code + validation agents)">
+            {buildCostLabel(checklist.cost)}
+          </span>
+        )}
         {checklist.feedback && <span className="feedback dim">{checklist.feedback}</span>}
       </div>
       <div className="checklist-section">
@@ -150,7 +113,11 @@ function ValidationCard({ result }) {
   );
 }
 
-export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoReview }) {
+export default function PipelinePage({
+  draft, llmConfig, onDraftChanged, onGoReview, onCancelBuild, cancelBuildBusy,
+}) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState(null);
   const [attempt, setAttempt] = useState(0);
@@ -161,6 +128,9 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
   const [status, setStatus] = useState(null); // 'building' | 'review_ready' | 'failed'
   const [err, setErr] = useState(null);
   const abortRef = useRef(null);
+  const [viewAttempt, setViewAttempt] = useState(null);
+
+  const allLogs = running ? logs : (draft?.buildLogs || logs);
 
   // hydrate from draft state when switching tabs
   useEffect(() => {
@@ -172,9 +142,36 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
     setValidation(draft.buildValidation || null);
     setLatestChecklist(draft.buildLatestChecklist || null);
     setChecklistHistory(draft.buildChecklists || []);
-  }, [draft?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    draft?.id,
+    draft?.buildStatus,
+    draft?.buildLogs?.length,
+    draft?.buildCurrentAttempt,
+    draft?.buildAttempts,
+    draft?.buildValidation,
+    draft?.buildLatestChecklist,
+    draft?.buildChecklists?.length,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const focus = location.state?.focusAttempt;
+    setViewAttempt(focus ?? null);
+    if (focus == null) return undefined;
+    const t = window.setTimeout(() => {
+      document.getElementById('pipeline-logs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [location.state?.focusAttempt, draft?.id]);
 
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
+
+  const displayLogs = viewAttempt ? logsForAttempt(allLogs, viewAttempt) : allLogs;
+  const viewChecklist = viewAttempt
+    ? (draft?.buildChecklists || []).find((c) => c.attempt === viewAttempt)
+    : null;
+  const inLogsView = viewAttempt != null;
+  const effectiveStatus = running ? 'building' : (status || draft?.buildStatus || null);
+  const buildSucceeded = effectiveStatus === 'review_ready' && !running;
 
   if (!draft) {
     return (
@@ -256,8 +253,15 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
         <div className="panel-header">
           <div className="title">Build pipeline</div>
           <div className="right">
-            {status === 'review_ready' && (
-              <button className="primary sm" onClick={onGoReview}>Open Review →</button>
+            {onCancelBuild && draft?.buildStatus === 'building' && !running && (
+              <button
+                type="button"
+                className="ghost sm danger"
+                onClick={onCancelBuild}
+                disabled={cancelBuildBusy}
+              >
+                {cancelBuildBusy ? 'Cancelling…' : 'Cancel build'}
+              </button>
             )}
             {running && (
               <button
@@ -272,7 +276,7 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
               disabled={startDisabled}
               title={!draftReady ? 'Draft incomplete (description, rootCause, infra.services)' : !llmReady ? 'LLM not configured' : ''}
             >
-              {running ? 'Running…' : status === 'review_ready' ? 'Rebuild' : (draft.buildFailedDir ? 'Resume build' : 'Start build')}
+              {running ? 'Running…' : buildSucceeded ? 'Rebuild' : (draft.buildFailedDir ? 'Resume build' : 'Start build')}
             </button>
           </div>
         </div>
@@ -281,11 +285,24 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
             phase={phase}
             attempt={attempt}
             total={maxAttempts}
-            status={status}
+            status={effectiveStatus}
             validation={validation}
             running={running}
           />
-          {draft.buildFailedDir && !running && status !== 'review_ready' && (
+          {buildSucceeded && !inLogsView && onGoReview && (
+            <div className="pipeline-build-success" role="status">
+              <div className="pipeline-build-success-copy">
+                <strong>Build passed</strong>
+                <span className="dim">
+                  Validation succeeded. Open Ship to inspect the challenge and push to your library.
+                </span>
+              </div>
+              <button type="button" className="primary sm" onClick={onGoReview}>
+                Open review →
+              </button>
+            </div>
+          )}
+          {draft.buildFailedDir && !running && !buildSucceeded && (
             <div className="alert info">
               Previous failed build preserved — clicking <strong>Resume build</strong> will reuse
               its generated assets as a starting point for the new run.
@@ -295,9 +312,26 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
             </div>
           )}
           {err && <div className="alert">{err}</div>}
-          {latestChecklist && <IterationChecklist checklist={latestChecklist} />}
-          {validation && <ValidationCard result={validation} />}
-          {checklistHistory.length > 1 && (
+          {viewAttempt != null && (
+            <div className="pipeline-logs-banner alert info">
+              Showing logs for <strong>attempt {viewAttempt}</strong>
+              <button
+                type="button"
+                className="ghost sm"
+                onClick={() => {
+                  setViewAttempt(null);
+                  navigate(location.pathname, { replace: true, state: {} });
+                }}
+              >
+                Show all logs
+              </button>
+            </div>
+          )}
+          {viewChecklist ? (
+            <IterationChecklist checklist={viewChecklist} />
+          ) : latestChecklist && <IterationChecklist checklist={latestChecklist} />}
+          {!viewAttempt && validation && <ValidationCard result={validation} />}
+          {!viewAttempt && checklistHistory.length > 1 && (
             <details className="checklist-history">
               <summary>Previous iterations ({checklistHistory.length - 1})</summary>
               <div className="checklist-history-list">
@@ -307,7 +341,7 @@ export default function PipelinePage({ draft, llmConfig, onDraftChanged, onGoRev
               </div>
             </details>
           )}
-          <LogStream lines={logs} />
+          <LogStream lines={displayLogs} scrollKey={viewAttempt} />
         </div>
       </section>
     </div>

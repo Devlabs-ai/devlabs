@@ -1,33 +1,97 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import {
+  directServiceUrl,
+  isMixedContentBlocked,
+  isBrowseProxyErrorPayload,
+  normalizeBrowseUrl,
+  pickDefaultBrowseService,
+  displayBrowseUrl,
+  proxiedBrowseUrl,
+  sandboxHost,
+  servicesFromPortMap,
+} from '../utils/sandboxBrowse.js';
 
-export default function BrowserTab() {
-  const [inputUrl, setInputUrl] = useState('http://localhost:');
+export default function BrowserTab({ sessionId, portMap }) {
+  const services = useMemo(() => servicesFromPortMap(portMap), [portMap]);
+  const defaultService = useMemo(() => pickDefaultBrowseService(portMap), [portMap]);
+  const [activeService, setActiveService] = useState(defaultService);
+  const [inputUrl, setInputUrl] = useState('');
   const [committedUrl, setCommittedUrl] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [blockReason, setBlockReason] = useState(null);
   const [history, setHistory] = useState([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
   const iframeRef = useRef(null);
   const inputRef = useRef(null);
 
-  const canBack = historyIdx > 0;
-  const canForward = historyIdx < history.length - 1;
+  useEffect(() => {
+    if (!sessionId) return;
+    const def = pickDefaultBrowseService(portMap);
+    if (def) setActiveService(def);
+  }, [sessionId, portMap]);
 
-  const commit = useCallback((url) => {
-    const normalized = url.trim();
-    if (!normalized) return;
-    const withScheme = /^https?:\/\//i.test(normalized) ? normalized : `http://${normalized}`;
+  const canEmbed = sessionId && activeService;
+  const proxiedUrl = canEmbed ? proxiedBrowseUrl(sessionId, activeService) : null;
+  const directUrl = activeService
+    ? directServiceUrl(
+      services.find((s) => s.id === activeService)?.port,
+      sandboxHost(),
+    )
+    : null;
+
+  const loadEmbedUrl = useCallback((iframeSrc, addressBarUrl = null) => {
+    const withScheme = normalizeBrowseUrl(iframeSrc);
+    if (!withScheme) return;
+    const shown = addressBarUrl || withScheme;
+
+    if (isMixedContentBlocked(withScheme)) {
+      setCommittedUrl(withScheme);
+      setInputUrl(shown);
+      setLoadError(true);
+      setBlockReason('mixed-content');
+      setLoading(false);
+      return;
+    }
+
     setCommittedUrl(withScheme);
-    setInputUrl(withScheme);
+    setInputUrl(shown);
     setLoadError(false);
+    setBlockReason(null);
     setLoading(true);
+  }, []);
+
+  useEffect(() => {
+    if (!proxiedUrl || !sessionId) {
+      setCommittedUrl(null);
+      return;
+    }
+    const display = displayBrowseUrl(sessionId, activeService) || proxiedUrl;
+    loadEmbedUrl(proxiedUrl, display);
+  }, [proxiedUrl, sessionId, activeService, loadEmbedUrl]);
+
+  useEffect(() => {
+    if (!loading || loadError || !committedUrl) return undefined;
+    const timer = window.setTimeout(() => {
+      setLoading(false);
+    }, 25_000);
+    return () => window.clearTimeout(timer);
+  }, [loading, loadError, committedUrl]);
+
+  const commit = useCallback((url, reason = null) => {
+    const withScheme = normalizeBrowseUrl(url);
+    if (!withScheme) return;
+    const shown = url.startsWith('/') && sessionId && activeService
+      ? (displayBrowseUrl(sessionId, activeService) || url)
+      : url;
+    loadEmbedUrl(withScheme, shown);
     setHistory((prev) => {
       const next = prev.slice(0, historyIdx + 1);
-      next.push(withScheme);
+      next.push(shown);
       setHistoryIdx(next.length - 1);
       return next;
     });
-  }, [historyIdx]);
+  }, [historyIdx, sessionId, activeService, loadEmbedUrl]);
 
   const handleGo = () => commit(inputUrl);
 
@@ -35,15 +99,23 @@ export default function BrowserTab() {
     if (e.key === 'Enter') handleGo();
   };
 
+  const handleSelectService = (serviceId) => {
+    setActiveService(serviceId);
+    if (!sessionId) {
+      const svc = services.find((s) => s.id === serviceId);
+      if (svc) commit(directServiceUrl(svc.port));
+    }
+  };
+
+  const canBack = historyIdx > 0;
+  const canForward = historyIdx < history.length - 1;
+
   const handleBack = () => {
     if (!canBack) return;
     const idx = historyIdx - 1;
     const url = history[idx];
     setHistoryIdx(idx);
-    setInputUrl(url);
-    setCommittedUrl(url);
-    setLoadError(false);
-    setLoading(true);
+    loadEmbedUrl(url, url);
   };
 
   const handleForward = () => {
@@ -51,52 +123,88 @@ export default function BrowserTab() {
     const idx = historyIdx + 1;
     const url = history[idx];
     setHistoryIdx(idx);
-    setInputUrl(url);
-    setCommittedUrl(url);
-    setLoadError(false);
-    setLoading(true);
+    loadEmbedUrl(url, url);
   };
 
   const handleReload = () => {
-    if (!committedUrl || !iframeRef.current) return;
+    if (!committedUrl) return;
     setLoadError(false);
+    setBlockReason(null);
     setLoading(true);
-    iframeRef.current.src = committedUrl;
+    if (iframeRef.current) {
+      iframeRef.current.src = committedUrl;
+    }
   };
 
   const handleOpenExternal = () => {
-    const url = committedUrl || inputUrl.trim();
+    const url = directUrl || committedUrl || inputUrl.trim();
     if (!url) return;
-    const withScheme = /^https?:\/\//i.test(url) ? url : `http://${url}`;
-    window.open(withScheme, '_blank', 'noopener');
+    const external = url.startsWith('/')
+      ? directUrl || normalizeBrowseUrl(url)
+      : normalizeBrowseUrl(url);
+    if (!external || external.startsWith('/')) return;
+    window.open(external, '_blank', 'noopener,noreferrer');
   };
 
   const handleInputFocus = () => inputRef.current?.select();
 
+  const handleIframeLoad = () => {
+    setLoading(false);
+    try {
+      const doc = iframeRef.current?.contentDocument;
+      if (!doc?.body) return;
+      const text = (doc.body.innerText || '').trim();
+      if (isBrowseProxyErrorPayload(text)) {
+        setLoadError(true);
+        setBlockReason('proxy-failed');
+        return;
+      }
+      setLoadError(false);
+      setBlockReason(null);
+    } catch (_e) {
+      /* cross-origin — treat as loaded */
+      setLoadError(false);
+      setBlockReason(null);
+    }
+  };
+
   return (
     <div className="browser-tab">
+      {services.length > 0 && (
+        <div className="browser-service-bar">
+          <span className="browser-service-label">Services</span>
+          <div className="browser-service-chips">
+            {services.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={`browser-service-chip ${activeService === s.id ? 'active' : ''}`}
+                onClick={() => handleSelectService(s.id)}
+                title={`Host port ${s.port}`}
+              >
+                {s.id}
+              </button>
+            ))}
+          </div>
+          {directUrl && sandboxHost() === 'localhost' && (
+            <button type="button" className="ghost sm browser-open-direct" onClick={handleOpenExternal}>
+              Open {activeService || 'service'} on host ↗
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="browser-bar">
+        <button type="button" className="browser-nav-btn" onClick={handleBack} disabled={!canBack} title="Back">‹</button>
+        <button type="button" className="browser-nav-btn" onClick={handleForward} disabled={!canForward} title="Forward">›</button>
         <button
-          className="browser-nav-btn"
-          onClick={handleBack}
-          disabled={!canBack}
-          title="Back"
-        >‹</button>
-        <button
-          className="browser-nav-btn"
-          onClick={handleForward}
-          disabled={!canForward}
-          title="Forward"
-        >›</button>
-        <button
+          type="button"
           className="browser-nav-btn"
           onClick={committedUrl ? handleReload : handleGo}
           title={committedUrl ? 'Reload' : 'Go'}
           disabled={loading && !loadError}
         >
-          {loading && !loadError ? (
-            <span className="browser-spinner" />
-          ) : '↺'}
+          {loading && !loadError ? <span className="browser-spinner" /> : '↺'}
         </button>
 
         <div className="browser-url-wrap">
@@ -110,15 +218,20 @@ export default function BrowserTab() {
             onFocus={handleInputFocus}
             spellCheck={false}
             autoComplete="off"
-            placeholder="http://localhost:8080"
+            placeholder="Loads via platform proxy (/api/session/…/browse/…)"
           />
         </div>
 
-        <button
-          className="browser-nav-btn"
-          onClick={handleOpenExternal}
-          title="Open in new browser tab"
-        >↗</button>
+        {sandboxHost() === 'localhost' && directUrl && (
+          <button
+            type="button"
+            className="browser-nav-btn"
+            onClick={handleOpenExternal}
+            title={`Open on host (${directUrl})`}
+          >
+            ↗
+          </button>
+        )}
       </div>
 
       {!committedUrl ? (
@@ -126,7 +239,9 @@ export default function BrowserTab() {
           <div className="browser-prompt-inner">
             <div className="browser-prompt-icon">⬡</div>
             <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-              Enter a URL above and press <kbd>Enter</kbd> to load
+              {sessionId
+                ? 'Pick a service chip — web UIs load through the Devlabs proxy, not raw localhost ports.'
+                : 'Start a sandbox session to browse services here.'}
             </p>
           </div>
         </div>
@@ -134,14 +249,36 @@ export default function BrowserTab() {
         <div className="browser-prompt">
           <div className="browser-prompt-inner">
             <div className="browser-prompt-icon" style={{ color: 'var(--danger)' }}>✕</div>
-            <p style={{ fontWeight: 600 }}>Failed to load</p>
-            <code style={{ fontSize: 12, color: 'var(--text-muted)', wordBreak: 'break-all' }}>{committedUrl}</code>
-            <p className="dim" style={{ fontSize: 12 }}>
-              The service may be starting up, blocking iframes (<code>X-Frame-Options</code>), or not serving HTTP on this URL.
-            </p>
+            <p style={{ fontWeight: 600 }}>Embedded browser could not load this service</p>
+            <code style={{ fontSize: 12, color: 'var(--text-muted)', wordBreak: 'break-all' }}>
+              {inputUrl || committedUrl}
+            </code>
+            {blockReason === 'mixed-content' && (
+              <p className="dim" style={{ fontSize: 12 }}>
+                Devlabs is on HTTPS but a direct HTTP URL was used. Use the{' '}
+                <strong>/api/session/…/browse/…</strong> proxy path.
+              </p>
+            )}
+            {blockReason === 'proxy-failed' && (
+              <p className="dim" style={{ fontSize: 12 }}>
+                The browse proxy returned an error. Wait until the container is healthy, then click Retry.
+                {directUrl && (
+                  <> On local dev you can also use <strong>Open on host ↗</strong> ({directUrl}).</>
+                )}
+              </p>
+            )}
+            {blockReason === 'embed-failed' && (
+              <p className="dim" style={{ fontSize: 12 }}>
+                The iframe failed to load. Retry or use Open on host ↗ if available.
+              </p>
+            )}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-              <button className="sm" onClick={handleReload}>Retry</button>
-              <button className="ghost sm" onClick={handleOpenExternal}>Open in new tab ↗</button>
+              <button type="button" className="sm" onClick={handleReload}>Retry</button>
+              {directUrl && (
+                <button type="button" className="ghost sm" onClick={handleOpenExternal}>
+                  Open on host ↗
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -153,9 +290,9 @@ export default function BrowserTab() {
             className="browser-frame"
             src={committedUrl}
             title="sandbox-preview"
-            sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
-            onLoad={() => setLoading(false)}
-            onError={() => { setLoading(false); setLoadError(true); }}
+            sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads"
+            onLoad={handleIframeLoad}
+            onError={() => { setLoading(false); setLoadError(true); setBlockReason('embed-failed'); }}
           />
         </div>
       )}

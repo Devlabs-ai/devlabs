@@ -38,13 +38,14 @@ async function streamWithEvents({
 
   let fullText = '';
   try {
-    fullText = await llm.streamMessage({
+    const streamed = await llm.streamMessage({
       agent,
       system,
       messages,
       maxTokens,
       onText: (delta) => onEvent?.({ type: 'text', delta }),
     });
+    fullText = streamed.text;
   } catch (e) {
     onEvent?.({ type: 'error', message: e.message });
     throw e;
@@ -65,7 +66,8 @@ async function completeForAgent({
   maxTokens = 8192,
 }) {
   assertLlmConfigured(agent);
-  return llm.completeMessage({ agent, system, messages, maxTokens });
+  const result = await llm.completeMessage({ agent, system, messages, maxTokens });
+  return result;
 }
 
 module.exports = {

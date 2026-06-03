@@ -92,7 +92,7 @@ function buildSynthesisUserMessage({ type, phase, failures, assets }) {
 async function synthesizeLesson({ type, phase, failures, assets }) {
   if (!llm.isConfigured()) return null;
   try {
-    const text = await llm.completeMessage({
+    const { text } = await llm.completeMessage({
       system: SYNTHESIS_SYSTEM,
       messages: [{ role: 'user', content: buildSynthesisUserMessage({ type, phase, failures, assets }) }],
       maxTokens: 200,

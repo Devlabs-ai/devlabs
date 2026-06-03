@@ -376,6 +376,15 @@ function readComposeFile(buildDir) {
   throw new Error(`no compose file found in ${buildDir}`);
 }
 
+/** Container port from `ports: - "${HOST_PORT_X}:8080"` for a compose service. */
+function containerPortForService(composeYaml, serviceName) {
+  if (!composeYaml || !serviceName) return 80;
+  const esc = serviceName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^  ${esc}:[\\s\\S]*?\\$\\{HOST_PORT_[^}]+\\}:(\\d+)`, 'm');
+  const m = composeYaml.match(re);
+  return m ? parseInt(m[1], 10) : 80;
+}
+
 module.exports = {
   runCompose,
   up,
@@ -386,6 +395,7 @@ module.exports = {
   resolvePortMap,
   waitForServices,
   readComposeFile,
+  containerPortForService,
   placeholderFields,
   extractServiceNames,
   extractBuildContexts,

@@ -1,4 +1,5 @@
 import React from 'react';
+import { markdownExcerpt } from '../utils/markdownText.js';
 
 function difficultyClass(d) {
   const s = (d || '').toLowerCase();
@@ -37,8 +38,7 @@ export default function ChallengeLibrary({ challenges, onSelect }) {
             </div>
             <h3>{c.title}</h3>
             <p className="challenge-card-description">
-              {(c.description || '').slice(0, 140)}
-              {c.description && c.description.length > 140 ? '…' : ''}
+              {markdownExcerpt(c.description || '', { maxLen: 140, title: c.title })}
             </p>
             <div className="challenge-card-footer">
               <div className="meta">
