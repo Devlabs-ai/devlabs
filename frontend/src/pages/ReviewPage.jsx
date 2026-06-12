@@ -4,8 +4,10 @@ import {
   listReviews,
   pushReview,
   dismissReview,
+  sendBackReview,
 } from '../services/reviewApi.js';
 import ReviewActionBar from '../components/ReviewActionBar.jsx';
+import ReviewFeedbackPanel from '../components/ReviewFeedbackPanel.jsx';
 import MarkdownProse from '../components/MarkdownProse.jsx';
 import {
   bucketLabel,
@@ -40,36 +42,35 @@ function ReviewRow({ r, active, onClick }) {
   );
 }
 
-function ReviewDetail({ r, sandboxTouched }) {
+function ReviewMetaChips({ r }) {
+  const c = r.builtChallenge || {};
+  const passed = !!r.buildValidation?.passed;
+  const tags = c.tags || [];
+
+  return (
+    <div className="review-meta-chips">
+      <span className={`pill sm ${passed ? 'pass' : 'fail'}`}>
+        {passed ? 'Build passed' : 'Build failed'}
+      </span>
+      {c.difficulty && <span className="review-meta-chip">{c.difficulty}</span>}
+      {c.category && <span className="review-meta-chip">{c.category}</span>}
+      {tags.map((t) => (
+        <span key={t} className="review-meta-chip review-meta-chip--tag">{t}</span>
+      ))}
+    </div>
+  );
+}
+
+function ReviewDetail({ r, onSendBack, feedbackBusy }) {
   if (!r) {
     return <div className="review-empty">Pick a build from the queue to review it.</div>;
   }
 
   const c = r.builtChallenge || {};
   const bucket = resolvePushBucket(r);
-  const tags = (c.tags || []).slice(0, 4);
-  const tagMore = (c.tags || []).length > 4 ? ` +${c.tags.length - 4}` : '';
 
   return (
     <div className="review-detail review-detail--clean">
-      <header className="review-detail-top">
-        <div className="review-detail-head">
-          <p className="review-detail-meta-line">
-            <span className={`pill sm ${r.buildValidation?.passed ? 'pass' : 'fail'}`}>
-              {r.buildValidation?.passed ? 'Build passed' : 'Build failed'}
-            </span>
-            {c.difficulty && <span>{c.difficulty}</span>}
-            {c.category && <span>{c.category}</span>}
-            {tags.length > 0 && (
-              <span className="dim">{tags.join(', ')}{tagMore}</span>
-            )}
-          </p>
-        </div>
-      </header>
-      {!sandboxTouched && (
-        <p className="review-signoff-hint">Open sandbox to validate, then use sign-off in the toolbar above.</p>
-      )}
-
       {c.description && (
         <details className="review-panel" open>
           <summary>Candidate brief</summary>
@@ -80,7 +81,7 @@ function ReviewDetail({ r, sandboxTouched }) {
       )}
 
       {r.buildValidation && (
-        <details className="review-panel" open>
+        <details className="review-panel">
           <summary>Automated validation</summary>
           <div className="review-panel-body">
             <p className="review-validation-feedback">{r.buildValidation.feedback}</p>
@@ -116,6 +117,8 @@ function ReviewDetail({ r, sandboxTouched }) {
           </details>
         </div>
       </details>
+
+      <ReviewFeedbackPanel onSendBack={onSendBack} busy={feedbackBusy} />
     </div>
   );
 }
@@ -131,6 +134,7 @@ export default function ReviewPage({
   const [activeId, setActiveId] = useState(initialSessionId);
   const [listQuery, setListQuery] = useState('');
   const [busy, setBusy] = useState(false);
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [signoffRev, setSignoffRev] = useState(0);
 
@@ -219,6 +223,23 @@ export default function ReviewPage({
     }
   };
 
+  const handleSendBack = async ({ observations, tags, severity }) => {
+    if (!active?.sessionId) return;
+    setFeedbackBusy(true);
+    setErr(null);
+    try {
+      await sendBackReview(active.sessionId, { observations, tags, severity });
+      clearReviewSignoff(active.sessionId);
+      await reload();
+      setActiveId(null);
+    } catch (e) {
+      setErr(e?.response?.data?.error || e.message);
+      throw e;
+    } finally {
+      setFeedbackBusy(false);
+    }
+  };
+
   const handleOpenSandbox = (reviewSessionId) => {
     navigate(`/review/${reviewSessionId}/sandbox`);
   };
@@ -274,26 +295,33 @@ export default function ReviewPage({
 
       <section className="review-right-col panel">
         {err && <div className="review-detail-alert alert">{err}</div>}
-        <div className="panel-header review-detail-col-header">
-          <div className="title">{activeTitle || 'Review'}</div>
-          {active && <span className="meta">Details</span>}
-        </div>
-        {active && (
-          <ReviewActionBar
-            r={active}
-            onPush={handlePush}
-            onDismiss={handleDismiss}
-            onOpenSandbox={handleOpenSandbox}
-            busy={busy}
-            sandboxValidated={activeSignoff.validated}
-            onSandboxValidatedChange={handleSignoffChange}
-            sandboxTouched={activeSignoff.touched}
-          />
+        {active ? (
+          <div className="review-detail-header">
+            <div className="review-detail-header-text">
+              <h2 className="review-detail-title">{activeTitle}</h2>
+              <ReviewMetaChips r={active} />
+            </div>
+            <ReviewActionBar
+              r={active}
+              onPush={handlePush}
+              onDismiss={handleDismiss}
+              onOpenSandbox={handleOpenSandbox}
+              busy={busy}
+              sandboxValidated={activeSignoff.validated}
+              onSandboxValidatedChange={handleSignoffChange}
+              sandboxTouched={activeSignoff.touched}
+            />
+          </div>
+        ) : (
+          <div className="panel-header review-detail-col-header">
+            <div className="title">Review</div>
+          </div>
         )}
         <div className="panel-body review-right-body">
           <ReviewDetail
             r={active}
-            sandboxTouched={activeSignoff.touched}
+            onSendBack={handleSendBack}
+            feedbackBusy={busy || feedbackBusy}
           />
         </div>
       </section>

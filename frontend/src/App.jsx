@@ -7,6 +7,7 @@ import PlayPage from './pages/PlayPage.jsx';
 import AuthoringPage from './pages/AuthoringPage.jsx';
 import ReviewRoutePage from './pages/ReviewRoutePage.jsx';
 import ReviewSandboxPage from './pages/ReviewSandboxPage.jsx';
+import ProfilePage from './pages/ProfilePage.jsx';
 import AppLayout from './layouts/AppLayout.jsx';
 import { AppStateProvider } from './context/AppStateContext.jsx';
 import { getToken, getCurrentUser, logout, resolveInvite } from './services/authApi.js';
@@ -317,6 +318,7 @@ export default function App() {
               <Route path="authoring/:draftId/:tab" element={<AuthoringPage />} />
               <Route path="review/:sessionId/sandbox" element={<ReviewSandboxPage />} />
               <Route path="review" element={<ReviewRoutePage />} />
+              <Route path="profile" element={<ProfilePage />} />
             </>
           ) : (
             <>

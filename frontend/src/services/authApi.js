@@ -83,10 +83,10 @@ export function logout() {
 // Invites
 // ---------------------------------------------------------------------------
 
-export async function createInvite({ challengeId, name } = {}) {
+export async function createInvite({ challengeId, name, email } = {}) {
   const { data } = await axios.post(
     '/api/auth/invites',
-    { challengeId, name },
+    { challengeId, name, email },
     { headers: getAuthHeader() },
   );
   return data.invite;

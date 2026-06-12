@@ -44,6 +44,15 @@ export async function dismissReview(sessionId) {
   return data;
 }
 
+export async function sendBackReview(sessionId, { observations, tags = [], severity = 'blocker' } = {}) {
+  const { data } = await axios.post(
+    `/api/reviews/${sessionId}/send-back`,
+    { observations, tags, severity },
+    { headers: getAuthHeader() },
+  );
+  return data;
+}
+
 export async function startReviewPreview(sessionId) {
   const { data } = await axios.post(
     `/api/reviews/${sessionId}/preview`,

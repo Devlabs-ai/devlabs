@@ -55,7 +55,12 @@ export default function AppLayout() {
 
                 <span className="topnav-sep" />
 
-                <button type="button" className="topnav-pill topnav-action">Profile</button>
+                <NavLink
+                  to="/profile"
+                  className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
+                >
+                  Profile
+                </NavLink>
                 {isAdmin && (
                   <button type="button" className="topnav-pill topnav-action">Billing</button>
                 )}

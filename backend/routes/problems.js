@@ -83,6 +83,7 @@ function publicDraft(d) {
     buildValidation: d.buildValidation,
     buildCurrentPhase: d.buildCurrentPhase,
     buildCurrentAttempt: d.buildCurrentAttempt,
+    reviewFeedback: d.reviewFeedback || null,
   };
 }
 
@@ -400,6 +401,7 @@ router.post('/:sessionId/build', async (req, res) => {
   d.buildLatestChecklist = null;
   d.buildCurrentPhase = null;
   d.buildCurrentAttempt = 0;
+  d.reviewFeedback = null;
   // Keep buildFailedDir until the new run completes (it may need it)
   draftStore.set(d.id, d);
   await draftStore.snapshotBuildState(d);

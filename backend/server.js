@@ -12,6 +12,7 @@ const { seedCatalogueIfEmpty } = require('./pipeline/catalogue/seeds/runCatalogu
 const sessionStore = require('./db/sessionStore');
 const draftStore = require('./pipeline/stores/problemDraftStore');
 const { loadChallengesFromDB, seedChallengesFromDisk } = require('./challenges/loader');
+const { maybeArchiveLegacyChallengesAndPurgeDrafts } = require('./boot/maintenance');
 const { VERIFIED_ROOT } = require('./sandbox/paths');
 
 const { ensurePublicLibrary } = require('./auth/companyStore');
@@ -91,6 +92,11 @@ async function start() {
 
   console.log('[boot] restoring active sessions from db...');
   await sessionStore.restoreFromDB();
+
+  console.log('[boot] one-time legacy archive + draft purge (if needed)...');
+  await maybeArchiveLegacyChallengesAndPurgeDrafts().catch((e) => {
+    console.warn('[boot] legacy maintenance failed:', e.message);
+  });
 
   console.log('[boot] restoring draft sessions from db...');
   await draftStore.restoreFromDB().catch((e) => console.warn('[boot] draftStore restore failed:', e.message));

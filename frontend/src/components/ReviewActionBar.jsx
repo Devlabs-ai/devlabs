@@ -20,19 +20,24 @@ export default function ReviewActionBar({
 
   return (
     <div className="review-action-bar">
-      <label className="review-signoff review-signoff--inline">
-        <input
-          type="checkbox"
-          checked={sandboxValidated}
-          onChange={(e) => onSandboxValidatedChange(e.target.checked)}
-          disabled={busy || previewBusy || !sandboxTouched}
-        />
-        <span>Sandbox sign-off</span>
-      </label>
+      <div className="review-action-bar-signoff">
+        <label className="review-signoff review-signoff--compact">
+          <input
+            type="checkbox"
+            checked={sandboxValidated}
+            onChange={(e) => onSandboxValidatedChange(e.target.checked)}
+            disabled={busy || previewBusy || !sandboxTouched}
+          />
+          <span>Sandbox sign-off</span>
+        </label>
+        {!sandboxTouched && (
+          <p className="review-signoff-hint">Open sandbox to validate before shipping.</p>
+        )}
+      </div>
       <div className="review-action-bar-buttons">
         {onBack && (
           <button type="button" className="ghost sm" onClick={onBack} disabled={busy || previewBusy}>
-            ← Back to queue
+            ← Back
           </button>
         )}
         {showOpenSandbox && (

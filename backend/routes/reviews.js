@@ -168,4 +168,70 @@ router.delete('/:sessionId', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+const REVIEW_FEEDBACK_TAGS = new Set([
+  'url-routing',
+  'metrics-grafana',
+  'candidate-brief',
+  'compose-infra',
+  'validation-gap',
+  'other',
+]);
+
+function normalizeFeedbackTags(raw) {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(
+    raw
+      .map((t) => String(t || '').trim().toLowerCase())
+      .filter((t) => REVIEW_FEEDBACK_TAGS.has(t)),
+  )];
+}
+
+async function ensureDraftFromReview(review, sessionId) {
+  let draft = draftStore.get(sessionId);
+  if (!draft) {
+    draft = draftStore.makeDraft({ id: sessionId });
+    draft.buildDir = review.buildDir;
+    draft.builtChallenge = review.builtChallenge;
+    draft.buildValidation = review.buildValidation;
+    draftStore.set(draft.id, draft);
+  }
+  return draft;
+}
+
+router.post('/:sessionId/send-back', async (req, res, next) => {
+  try {
+    const sessionId = req.params.sessionId;
+    const review = await reviewStore.get(sessionId);
+    if (!review) return res.status(404).json({ error: 'review not found' });
+
+    const observations = String(req.body?.observations || '').trim();
+    if (!observations) {
+      return res.status(400).json({ error: 'Observations are required' });
+    }
+
+    const severity = req.body?.severity === 'suggestion' ? 'suggestion' : 'blocker';
+    const tags = normalizeFeedbackTags(req.body?.tags);
+
+    const draft = await ensureDraftFromReview(review, sessionId);
+    draft.reviewFeedback = {
+      observations,
+      tags,
+      severity,
+      submittedAt: Date.now(),
+      submittedBy: req.user?.sub || null,
+    };
+    draft.buildStatus = 'changes_requested';
+    draft.buildDir = review.buildDir || draft.buildDir;
+    draft.builtChallenge = review.builtChallenge || draft.builtChallenge;
+    draft.buildValidation = review.buildValidation || draft.buildValidation;
+    draftStore.set(draft.id, draft);
+    await draftStore.persist(draft);
+
+    await endPreviewForReview(sessionId);
+    await reviewStore.remove(sessionId);
+
+    res.json({ ok: true, draftId: draft.id });
+  } catch (e) { next(e); }
+});
+
 module.exports = router;

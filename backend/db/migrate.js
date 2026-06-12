@@ -175,6 +175,20 @@ const STATEMENTS = [
      WHERE authored_by IS NULL
        AND EXISTS (SELECT 1 FROM users WHERE email = 'admin@devlabs.app')`,
 
+  `ALTER TABLE invites ADD COLUMN IF NOT EXISTS candidate_email TEXT`,
+  `ALTER TABLE invites ADD COLUMN IF NOT EXISTS created_by TEXT REFERENCES users(id)`,
+  `ALTER TABLE invites ADD COLUMN IF NOT EXISTS expires_at BIGINT`,
+  `CREATE INDEX IF NOT EXISTS idx_invites_created_by ON invites (created_by)`,
+  `UPDATE invites SET expires_at = created_at + 86400000 WHERE expires_at IS NULL`,
+
+  `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false`,
+  `CREATE INDEX IF NOT EXISTS idx_challenges_archived ON challenges (archived)`,
+
+  `CREATE TABLE IF NOT EXISTS app_meta (
+     key   TEXT PRIMARY KEY,
+     value TEXT NOT NULL
+   )`,
+
   // Remove draft sessions already shipped to Play (built challenge promoted, not in review queue)
   `DELETE FROM draft_sessions ds
      WHERE ds.build_dir IS NULL

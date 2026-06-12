@@ -2,12 +2,14 @@ import React, { useMemo, useState } from 'react';
 import { useAppState } from '../context/AppStateContext.jsx';
 import AppPageHeader from '../components/AppPageHeader.jsx';
 import ChallengeLibrary from '../components/ChallengeLibrary.jsx';
+import ShareEvalModal from '../components/ShareEvalModal.jsx';
 import SandboxWorkspace from '../components/SandboxWorkspace.jsx';
 
 const COLLECTIONS = [
-  { id: 'my',     label: 'My Challenges' },
-  { id: 'org',    label: 'Org Challenges' },
-  { id: 'public', label: 'Public Challenges' },
+  { id: 'my',      label: 'My Challenges' },
+  { id: 'org',     label: 'Org Challenges' },
+  { id: 'public',  label: 'Public Challenges' },
+  { id: 'archive', label: 'Archive' },
 ];
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
@@ -26,6 +28,7 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
   const [difficulty, setDifficulty] = useState(null);
   const [domain, setDomain]         = useState(null);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [shareChallenge, setShareChallenge] = useState(null);
   const filterRef = React.useRef(null);
 
   // Close popover on outside click
@@ -40,21 +43,31 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
 
   const activeFilterCount = (difficulty ? 1 : 0) + (domain ? 1 : 0);
 
+  const activeChallenges = useMemo(
+    () => challenges.filter((c) => !c.archived),
+    [challenges],
+  );
+  const archivedChallenges = useMemo(
+    () => challenges.filter((c) => c.archived),
+    [challenges],
+  );
+
   const collectionCounts = useMemo(() => ({
-    my:     challenges.filter((c) => c.authored_by && c.authored_by === currentUser?.id).length,
-    org:    challenges.filter((c) => c.authored_by && c.authored_by !== currentUser?.id).length,
-    public: challenges.filter((c) => !c.authored_by || c.visibility === 'public').length,
-  }), [challenges, currentUser]);
+    my:      activeChallenges.filter((c) => c.authored_by && c.authored_by === currentUser?.id).length,
+    org:     activeChallenges.filter((c) => c.authored_by && c.authored_by !== currentUser?.id).length,
+    public:  activeChallenges.filter((c) => !c.authored_by || c.visibility === 'public').length,
+    archive: archivedChallenges.length,
+  }), [activeChallenges, archivedChallenges, currentUser]);
 
   const filtered = useMemo(() => {
-    let list = challenges;
+    let list = collection === 'archive' ? archivedChallenges : activeChallenges;
 
     // Collection tab
     if (collection === 'my') {
       list = list.filter((c) => c.authored_by && c.authored_by === currentUser?.id);
     } else if (collection === 'org') {
       list = list.filter((c) => c.authored_by && c.authored_by !== currentUser?.id);
-    } else {
+    } else if (collection === 'public') {
       list = list.filter((c) => !c.authored_by || c.visibility === 'public');
     }
 
@@ -69,7 +82,7 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
     }
 
     return list;
-  }, [challenges, collection, difficulty, domain, currentUser]);
+  }, [activeChallenges, archivedChallenges, collection, difficulty, domain, currentUser]);
 
   return (
     <div className="app-page">
@@ -163,7 +176,19 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
         </div>
       </div>
 
-      <ChallengeLibrary challenges={filtered} onSelect={onSelectChallenge} />
+      <ChallengeLibrary
+        challenges={filtered}
+        onSelect={onSelectChallenge}
+        showCardMenu={collection === 'my'}
+        onShareChallenge={(c) => setShareChallenge(c)}
+        archiveMode={collection === 'archive'}
+      />
+
+      <ShareEvalModal
+        open={Boolean(shareChallenge)}
+        challenge={shareChallenge}
+        onClose={() => setShareChallenge(null)}
+      />
     </div>
   );
 }

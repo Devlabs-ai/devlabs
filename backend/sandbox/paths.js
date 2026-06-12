@@ -23,6 +23,7 @@ function appRoot() {
 
 const SANDBOX_ROOT = path.join(appRoot(), 'sandbox');
 const VERIFIED_ROOT = path.join(SANDBOX_ROOT, 'verified');
+const ARCHIVE_ROOT = path.join(SANDBOX_ROOT, 'archive');
 const BUILDS_ROOT = path.join(SANDBOX_ROOT, 'builds');
 const SESSIONS_ROOT = path.join(SANDBOX_ROOT, 'sessions');
 
@@ -30,6 +31,7 @@ module.exports = {
   appRoot,
   SANDBOX_ROOT,
   VERIFIED_ROOT,
+  ARCHIVE_ROOT,
   BUILDS_ROOT,
   SESSIONS_ROOT,
 };

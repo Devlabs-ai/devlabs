@@ -49,6 +49,12 @@ async function start({ challengeId, candidateToken } = {}) {
     throw e;
   }
 
+  if (challenge.archived) {
+    const e = new Error(`challenge "${challengeId}" is archived and cannot be played`);
+    e.status = 403;
+    throw e;
+  }
+
   if (!challenge.verifiedDir || !fs.existsSync(challenge.verifiedDir)) {
     const e = new Error(
       `challenge "${challengeId}" has no verifiedDir; legacy sandbox path is not enabled in this MVP`,
@@ -60,9 +66,9 @@ async function start({ challengeId, candidateToken } = {}) {
   let candidateName = null;
   if (candidateToken) {
     const invite = await invites.resolveInvite(candidateToken);
-    if (!invite) {
-      const e = new Error('invalid candidate token');
-      e.status = 401;
+    if (!invite || invite.expired) {
+      const e = new Error(invite?.expired ? 'invite link has expired' : 'invalid candidate token');
+      e.status = invite?.expired ? 410 : 401;
       throw e;
     }
     candidateName = invite.name;

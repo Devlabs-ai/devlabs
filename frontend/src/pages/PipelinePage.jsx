@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PhaseTracker } from '../components/PhaseTracker.jsx';
+import AuthorReviewFeedbackBanner from '../components/AuthorReviewFeedbackBanner.jsx';
 import { streamBuild, getProblemSession } from '../services/problemApi.js';
 import { logsForAttempt } from '../utils/buildLogFilter.js';
 import { buildCostLabel } from '../utils/buildCost.js';
@@ -281,6 +282,9 @@ export default function PipelinePage({
           </div>
         </div>
         <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 14, overflow: 'auto' }}>
+          {draft.reviewFeedback && (
+            <AuthorReviewFeedbackBanner feedback={draft.reviewFeedback} />
+          )}
           <PhaseTracker
             phase={phase}
             attempt={attempt}
@@ -294,12 +298,18 @@ export default function PipelinePage({
               <div className="pipeline-build-success-copy">
                 <strong>Build passed</strong>
                 <span className="dim">
-                  Validation succeeded. Open Ship to inspect the challenge and push to your library.
+                  Validation succeeded. Open Review to inspect the sandbox before shipping.
                 </span>
               </div>
               <button type="button" className="primary sm" onClick={onGoReview}>
                 Open review →
               </button>
+            </div>
+          )}
+          {effectiveStatus === 'changes_requested' && !running && (
+            <div className="alert info">
+              Reviewer sent this build back with notes above. Update the draft or infra, then run{' '}
+              <strong>Rebuild</strong>.
             </div>
           )}
           {draft.buildFailedDir && !running && !buildSucceeded && (

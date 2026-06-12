@@ -19,6 +19,7 @@ const DRAFT_FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'in_progress', label: 'In progress' },
   { id: 'ready', label: 'Ready to ship' },
+  { id: 'changes', label: 'Needs changes' },
   { id: 'failed', label: 'Failed' },
 ];
 
@@ -28,6 +29,7 @@ function statusLabel(status) {
   if (!status || status === 'draft') return 'Draft';
   if (status === 'building') return 'Building';
   if (status === 'review_ready') return 'Ready';
+  if (status === 'changes_requested') return 'Needs changes';
   if (status === 'failed') return 'Failed';
   return status;
 }
@@ -52,6 +54,7 @@ function matchesDraftFilter(d, filterId) {
   if (filterId === 'all') return true;
   if (filterId === 'in_progress') return status === 'draft' || status === 'building';
   if (filterId === 'ready') return status === 'review_ready';
+  if (filterId === 'changes') return status === 'changes_requested';
   if (filterId === 'failed') return status === 'failed';
   return true;
 }
@@ -76,6 +79,7 @@ function DraftLibrary({
     all: drafts.length,
     in_progress: drafts.filter((d) => matchesDraftFilter(d, 'in_progress')).length,
     ready: drafts.filter((d) => matchesDraftFilter(d, 'ready')).length,
+    changes: drafts.filter((d) => matchesDraftFilter(d, 'changes')).length,
     failed: drafts.filter((d) => matchesDraftFilter(d, 'failed')).length,
   }), [drafts]);
 

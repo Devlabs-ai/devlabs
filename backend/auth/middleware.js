@@ -59,7 +59,7 @@ async function requireSessionAccess(req, res, next) {
   if (candidateToken) {
     try {
       const invite = await invites.resolveInvite(candidateToken);
-      if (invite) {
+      if (invite && !invite.expired) {
         req.candidate = invite;
         return next();
       }

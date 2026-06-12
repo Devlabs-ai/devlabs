@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { markdownExcerpt } from '../utils/markdownText.js';
 
 function difficultyClass(d) {
@@ -8,14 +8,38 @@ function difficultyClass(d) {
   return 'medium';
 }
 
-export default function ChallengeLibrary({ challenges, onSelect }) {
+export default function ChallengeLibrary({
+  challenges,
+  onSelect,
+  showCardMenu = false,
+  onShareChallenge,
+  archiveMode = false,
+}) {
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!openMenuId) return undefined;
+    const handler = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener('pointerdown', handler);
+    return () => document.removeEventListener('pointerdown', handler);
+  }, [openMenuId]);
+
   if (!challenges || challenges.length === 0) {
     return <div className="alert info">No challenges loaded yet.</div>;
   }
+
   return (
     <div className="card-grid">
       {challenges.map((c) => {
-        const playable = c.finalized;
+        const playable = c.finalized && !c.archived;
+        const canShare = showCardMenu && playable && onShareChallenge && !archiveMode;
+        const menuOpen = openMenuId === c.id;
+
         return (
           <div
             key={c.id}
@@ -32,9 +56,46 @@ export default function ChallengeLibrary({ challenges, onSelect }) {
               }
             }}
           >
-            <div className="challenge-card-top">
-              <span className={`pill ${difficultyClass(c.difficulty)}`}>{c.difficulty}</span>
-              {c.category && <span className="challenge-card-category">{c.category}</span>}
+            <div className="challenge-card-top challenge-card-top-row">
+              <div className="challenge-card-top-meta">
+                <span className={`pill ${difficultyClass(c.difficulty)}`}>{c.difficulty}</span>
+                {c.category && <span className="challenge-card-category">{c.category}</span>}
+              </div>
+              {canShare && (
+                <div
+                  className="challenge-card-menu"
+                  ref={menuOpen ? menuRef : null}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    className="challenge-card-menu-btn"
+                    aria-label="Challenge options"
+                    aria-expanded={menuOpen}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpenMenuId((prev) => (prev === c.id ? null : c.id));
+                    }}
+                  >
+                    ⋯
+                  </button>
+                  {menuOpen && (
+                    <div className="challenge-card-dropdown" role="menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenMenuId(null);
+                          onShareChallenge(c);
+                        }}
+                      >
+                        Share
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <h3>{c.title}</h3>
             <p className="challenge-card-description">
@@ -45,7 +106,8 @@ export default function ChallengeLibrary({ challenges, onSelect }) {
                 {(c.tags || []).slice(0, 4).map((t) => (
                   <span key={t} className="tag">{t}</span>
                 ))}
-                {!playable && <span className="tag">Coming soon</span>}
+                {c.archived && <span className="tag">Archived</span>}
+                {!c.archived && !playable && <span className="tag">Coming soon</span>}
               </div>
               {playable && (
                 <span className="challenge-card-cta" aria-hidden>

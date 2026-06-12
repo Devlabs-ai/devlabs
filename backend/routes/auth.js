@@ -150,17 +150,41 @@ router.post('/login', (req, res) => {
 
 router.post('/invites', requireInterviewer, async (req, res, next) => {
   try {
-    const { challengeId, name } = req.body || {};
-    const invite = await invites.createInvite({ challengeId, name });
+    const { challengeId, name, email } = req.body || {};
+    const challenge = String(challengeId || '').trim();
+    const candidateName = String(name || '').trim();
+    const candidateEmail = String(email || '').toLowerCase().trim();
+
+    if (!challenge) {
+      return res.status(400).json({ error: 'challengeId is required' });
+    }
+    if (!candidateName) {
+      return res.status(400).json({ error: 'Candidate name is required' });
+    }
+    if (!candidateEmail || !candidateEmail.includes('@')) {
+      return res.status(400).json({ error: 'Valid candidate email is required' });
+    }
+
+    const createdBy = req.user?.sub || null;
+    const invite = await invites.createInvite({
+      challengeId: challenge,
+      name: candidateName,
+      email: candidateEmail,
+      createdBy,
+    });
     res.status(201).json({ invite });
   } catch (e) {
     next(e);
   }
 });
 
-router.get('/invites', requireInterviewer, async (_req, res, next) => {
+router.get('/invites', requireInterviewer, async (req, res, next) => {
   try {
-    const list = await invites.listInvites();
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ error: 'missing user id in token' });
+    }
+    const list = await invites.listInvitesForUser(userId);
     res.json({ invites: list });
   } catch (e) {
     next(e);
@@ -171,6 +195,9 @@ router.get('/invite/:token', async (req, res, next) => {
   try {
     const invite = await invites.resolveInvite(req.params.token);
     if (!invite) return res.status(404).json({ error: 'invite not found' });
+    if (invite.expired) {
+      return res.status(410).json({ error: 'This invite link has expired' });
+    }
     res.json({ name: invite.name, challengeId: invite.challengeId, used: invite.used });
   } catch (e) {
     next(e);

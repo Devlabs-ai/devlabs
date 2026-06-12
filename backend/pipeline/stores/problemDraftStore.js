@@ -41,6 +41,7 @@ function makeDraft({ id = uuidv4(), draft = null, shapePhase, designApproved, sc
     buildValidation: null,
     buildCurrentPhase: null,
     buildCurrentAttempt: 0,
+    reviewFeedback: null,
   };
 }
 
@@ -89,6 +90,7 @@ async function persist(d) {
         buildValidation: d.buildValidation,
         buildCurrentPhase: d.buildCurrentPhase,
         buildCurrentAttempt: d.buildCurrentAttempt,
+        reviewFeedback: d.reviewFeedback || null,
       }),
       d.createdAt,
       d.updatedAt,
@@ -130,6 +132,7 @@ async function restoreFromDB() {
       buildValidation: meta.buildValidation || null,
       buildCurrentPhase: meta.buildCurrentPhase || null,
       buildCurrentAttempt: meta.buildCurrentAttempt || 0,
+      reviewFeedback: meta.reviewFeedback || null,
     };
     // Use the raw on-disk phase (pre-normalization) so the diff at the bottom
     // re-persists drafts whose stored phase was the legacy 'description'.

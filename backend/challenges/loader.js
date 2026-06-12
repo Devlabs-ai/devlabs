@@ -17,6 +17,7 @@ function publicFields(row) {
     category: row.category,
     bucket: row.bucket || null,
     finalized: !!row.finalized,
+    archived: !!row.archived,
     sandboxType: row.sandbox_type || null,
   };
 }
@@ -60,10 +61,10 @@ async function seedChallengesFromDisk(verifiedRoot) {
 
     await pool.query(
       `INSERT INTO challenges
-        (id, title, description, difficulty, tags, category, bucket, finalized,
+        (id, title, description, difficulty, tags, category, bucket, finalized, archived,
          sandbox_type, verified_dir, problem_statement, validation_spec,
          created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false,$9,$10,$11,$12,$13,$13)
        ON CONFLICT (id) DO UPDATE SET
          title = EXCLUDED.title,
          description = EXCLUDED.description,
@@ -72,11 +73,13 @@ async function seedChallengesFromDisk(verifiedRoot) {
          category = EXCLUDED.category,
          bucket = EXCLUDED.bucket,
          finalized = EXCLUDED.finalized,
+         archived = CASE WHEN challenges.archived THEN challenges.archived ELSE EXCLUDED.archived END,
          sandbox_type = EXCLUDED.sandbox_type,
          verified_dir = EXCLUDED.verified_dir,
          problem_statement = EXCLUDED.problem_statement,
          validation_spec = EXCLUDED.validation_spec,
-         updated_at = EXCLUDED.updated_at`,
+         updated_at = EXCLUDED.updated_at
+       WHERE NOT challenges.archived`,
       [
         id,
         parsed.title || slug,
@@ -129,6 +132,7 @@ function listPublicChallenges() {
     sandboxType: c.sandboxType,
     authored_by: c.authored_by || null,
     visibility: c.visibility || 'private',
+    archived: !!c.archived,
   }));
 }
 
