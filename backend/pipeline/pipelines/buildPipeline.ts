@@ -1,0 +1,712 @@
+'use strict';
+
+// Build pipeline — runs up to MAX_ITERATIONS attempts of
+// CODE → SPIN → VALIDATE.
+
+import type { ChallengeDraft, BuildEventHandler, ValidationResult, PortMap, BuildAttempt, BuildPhase } from '../../types/domain';
+
+const fs = require('fs');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
+
+const { assertLlmConfigured } = require('../helpers/agentRuntime');
+const codeAgent = require('../agents/codeAgent');
+const spinAgent = require('../agents/spinAgent');
+const composeManager = require('../../sandbox/composeManager');
+const portAllocator = require('../../sandbox/portAllocator');
+const validationAgent = require('../agents/validationAgent');
+const lessonStore = require('../stores/lessonStore');
+const codeChunkStore = require('../stores/codeChunkStore');
+const { normalizeDraft, isDraftReady } = require('../draft/draftSchema');
+const { emitLog } = require('../build/buildLogger');
+const { buildIterationChecklist } = require('../validation/validationChecklist');
+const { BUILDS_ROOT } = require('../../sandbox/paths');
+const { createUsageAccumulator } = require('../../llm/usage');
+const { formatCostUsd } = require('../../llm/cost');
+
+const MAX_ITERATIONS = 3;
+
+function cap(s: unknown, max: number): string | null | undefined {
+  if (!s) return s as string | null | undefined;
+  const str = typeof s === 'string' ? s : String(s);
+  if (str.length <= max) return str;
+  return `${str.slice(0, max)}\n…[truncated ${str.length - max} chars]`;
+}
+
+function pickCategory(draft: ChallengeDraft): string | null {
+  const n = normalizeDraft(draft);
+  return n.meta?.category || n.category || (n.sandboxSpec as Record<string, unknown>)?.category as string || null;
+}
+
+interface FailureSnapshot {
+  attempt: number;
+  phase: string;
+  message: string | null;
+  composeSnippet?: string | null;
+  composeStderr?: string | null;
+  logs?: string | null;
+  feedback?: string | null;
+}
+
+function readComposeSnippet(buildDir: string | null): string | null {
+  if (!buildDir) return null;
+  try {
+    const p = path.join(buildDir, 'docker-compose.yml');
+    if (!fs.existsSync(p)) return null;
+    return cap(fs.readFileSync(p, 'utf8'), 1200) || null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+function captureFailureSnapshot({
+  attempt,
+  phase,
+  lastAttempt,
+  buildDir,
+}: {
+  attempt: number;
+  phase: string;
+  lastAttempt: BuildAttempt | null;
+  buildDir?: string | null;
+}): FailureSnapshot | null {
+  if (!lastAttempt) return null;
+  const d = lastAttempt.details as Record<string, unknown> | null | undefined;
+  return {
+    attempt,
+    phase,
+    message: cap(lastAttempt.message || '', 600) || null,
+    composeSnippet: readComposeSnippet(buildDir || null),
+    composeStderr: cap(d?.composeStderr, 600) || null,
+    logs: cap(d?.logs, 600) || null,
+    feedback: cap(d?.feedback, 400) || null,
+  };
+}
+
+interface IterationSummaryArgs {
+  attempt: number;
+  total: number;
+  failedPhase?: string | null;
+  validation?: Partial<ValidationResult> | null;
+  draft?: ChallengeDraft | null;
+  validationSpec?: unknown;
+  cost?: { totalUsd: number; inputTokens: number; outputTokens: number } | null;
+}
+
+function emitIterationSummary(onEvent: BuildEventHandler, args: IterationSummaryArgs): void {
+  const { attempt, total, failedPhase, validation, draft, validationSpec, cost = null } = args;
+  const checklist = buildIterationChecklist({
+    attempt,
+    total,
+    failedPhase,
+    validation,
+    draft,
+    validationSpec,
+    cost,
+  });
+  const phaseLines = (checklist.phases as Array<{ status: string; label: string }>).map((p) => {
+    const icon = p.status === 'pass' ? '✓' : p.status === 'fail' ? '✗' : '○';
+    return `${icon} ${p.label}`;
+  });
+  const checkLines = (checklist.items as Array<{ status: string; label: string }>).map((i) => {
+    const icon = i.status === 'pass' ? '✓' : i.status === 'fail' ? '✗' : i.status === 'skip' ? '–' : '○';
+    return `${icon} ${i.label}`;
+  });
+  const costLine = checklist.cost
+    ? `Est. LLM cost: ${formatCostUsd(checklist.cost.totalUsd)} (${checklist.cost.inputTokens.toLocaleString()} in / ${checklist.cost.outputTokens.toLocaleString()} out tokens)`
+    : null;
+  emitLog(onEvent, {
+    level: checklist.passed ? 'ok' : (failedPhase ? 'warn' : 'info'),
+    tag: 'build',
+    message: checklist.passed
+      ? `Iteration ${attempt}/${total} — validation passed`
+      : `Iteration ${attempt}/${total} — ${failedPhase || 'pipeline'} did not complete`,
+    detail: [
+      ...phaseLines,
+      ...(costLine ? ['', costLine] : []),
+      ...(checkLines.length ? ['', 'Validation checklist:', ...checkLines] : []),
+    ].join('\n'),
+  });
+  onEvent({ type: 'checklist', checklist } as never);
+}
+
+function seedBuildDir(sourceDir: string, destDir: string): void {
+  if (fs.existsSync(destDir)) {
+    fs.rmSync(destDir, { recursive: true, force: true });
+  }
+  fs.mkdirSync(path.dirname(destDir), { recursive: true });
+  fs.cpSync(sourceDir, destDir, { recursive: true });
+}
+
+function cleanupBuild(buildDir: string): void {
+  try {
+    fs.rmSync(buildDir, { recursive: true, force: true });
+  } catch (e) {
+    console.warn(`[build] cleanup failed for ${buildDir}: ${(e as Error).message}`);
+  }
+}
+
+function normalizeResumePhase(phase: string | null | undefined): string | null {
+  if (!phase) return null;
+  const upper = phase.toUpperCase();
+  if (upper === 'GENERATE' || upper === 'WRITE' || upper === 'CODE') return 'CODE';
+  return upper;
+}
+
+async function runBuildLoop({
+  draft,
+  draftSessionId,
+  onEvent,
+  terminalWsBase = null,
+  resumeBuildDir = null,
+  resumeFailurePhase = null,
+  resumeFailureMsg = null,
+}: {
+  draft: ChallengeDraft;
+  draftSessionId: string;
+  onEvent: BuildEventHandler;
+  terminalWsBase?: string | null;
+  resumeBuildDir?: string | null;
+  resumeFailurePhase?: string | null;
+  resumeFailureMsg?: unknown;
+}): Promise<{
+  buildSessionId: string;
+  buildDir: string;
+  builtChallenge: Record<string, unknown>;
+  buildValidation: ValidationResult;
+  draft: ChallengeDraft;
+  portMap: PortMap;
+  terminalService: string | null;
+  attempts: number;
+}> {
+  try {
+    assertLlmConfigured('code', { label: 'code agent (build pipeline)' });
+  } catch (e) {
+    onEvent({ type: 'error', message: (e as Error).message } as never);
+    throw e;
+  }
+
+  const normalized = normalizeDraft(draft);
+  if (!isDraftReady(normalized)) {
+    const e = new Error('draft is incomplete; need description, brokenState.rootCause, and infra.services') as Error;
+    onEvent({ type: 'error', message: e.message } as never);
+    throw e;
+  }
+
+  const serviceSummary = (normalized.infra?.services || [])
+    .map((s: unknown) => {
+      const svc = s as Record<string, string>;
+      return `${svc.name} (${svc.image_hint || 'no image'})`;
+    })
+    .join(', ');
+
+  const hasResumeDir = !!(resumeBuildDir && fs.existsSync(resumeBuildDir));
+  const normalizedResumePhase = normalizeResumePhase(resumeFailurePhase);
+
+  emitLog(onEvent, {
+    level: 'phase',
+    tag: 'build',
+    message: hasResumeDir
+      ? `Resuming build pipeline from prior ${normalizedResumePhase || 'VALIDATE'} failure (max ${MAX_ITERATIONS} iterations)`
+      : `Starting build pipeline (max ${MAX_ITERATIONS} iterations)`,
+    detail: {
+      title: normalized.meta?.name || normalized.title,
+      services: serviceSummary,
+      rootCause: cap(normalized.brokenState?.rootCause, 200),
+      ...(hasResumeDir ? { resumedFrom: resumeBuildDir } : {}),
+    },
+  });
+
+  fs.mkdirSync(BUILDS_ROOT, { recursive: true });
+
+  const buildSessionId = uuidv4();
+  const buildDir = path.join(BUILDS_ROOT, buildSessionId);
+
+  console.log(
+    `[build] started draftSessionId=${draftSessionId} buildSessionId=${buildSessionId} buildDir=${buildDir}`,
+  );
+  emitLog(onEvent, {
+    level: 'info',
+    tag: 'build',
+    message: 'Build session allocated',
+    detail: { draftSessionId, buildSessionId, buildDir },
+  });
+
+  let lastAttempt: BuildAttempt | null = null;
+  let assets: ReturnType<typeof codeAgent.loadAssetsFromBuildDir> = null;
+  let spinFailureMsg: Record<string, unknown> | null = (
+    hasResumeDir && normalizedResumePhase === 'SPIN'
+  ) ? resumeFailureMsg as Record<string, unknown> : null;
+  let validateFailureMsg: Record<string, unknown> | null = (
+    hasResumeDir && normalizedResumePhase === 'VALIDATE'
+  ) ? resumeFailureMsg as Record<string, unknown> : null;
+  const resumeCodeFailure: BuildAttempt | null = (
+    hasResumeDir && normalizedResumePhase === 'CODE' && resumeFailureMsg
+  ) ? {
+    phase: 'CODE',
+    message: String(resumeFailureMsg),
+    artifacts: null,
+    rawText: null,
+    details: { message: resumeFailureMsg },
+  } : null;
+  const buildCategory = pickCategory(normalized);
+  const spinFailureHistory: FailureSnapshot[] = [];
+  const validateFailureHistory: FailureSnapshot[] = [];
+
+  let warmLessons: { relatedLessons: unknown[] } = { relatedLessons: [] };
+  try {
+    warmLessons = await lessonStore.findByDraftContext(normalized);
+    if (warmLessons.relatedLessons.length) {
+      const best = warmLessons.relatedLessons[0] as Record<string, unknown>;
+      emitLog(onEvent, {
+        level: 'info',
+        tag: 'lessons',
+        message: `Warm-start: injecting ${warmLessons.relatedLessons.length} lesson(s) before iteration 1`,
+        detail: `Top match similarity ${best.similarity != null ? (best.similarity as number).toFixed(2) : 'n/a'} (${best.type || 'fix'})`,
+      });
+    }
+  } catch (e) {
+    console.warn(`[lessons] findByDraftContext failed: ${(e as Error).message}`);
+  }
+
+  for (let attempt = 1; attempt <= MAX_ITERATIONS; attempt++) {
+    const attemptCost = createUsageAccumulator();
+    onEvent({ type: 'phase', phase: 'CODE' as BuildPhase, attempt, total: MAX_ITERATIONS } as never);
+
+    const retryHint = spinFailureMsg
+      ? 'SPIN'
+      : (validateFailureMsg ? 'VALIDATE' : (lastAttempt ? lastAttempt.phase : null));
+    emitLog(onEvent, {
+      level: 'phase',
+      tag: 'build',
+      message: retryHint
+        ? `Iteration ${attempt}/${MAX_ITERATIONS} — retry after ${retryHint} failure`
+        : `Iteration ${attempt}/${MAX_ITERATIONS}`,
+    });
+
+    if (attempt === 1) {
+      if (hasResumeDir) {
+        seedBuildDir(resumeBuildDir!, buildDir);
+        emitLog(onEvent, {
+          level: 'info',
+          tag: 'code',
+          message: 'Seeded build dir from prior failed build',
+          detail: resumeBuildDir,
+        });
+      } else {
+        fs.mkdirSync(buildDir, { recursive: true });
+      }
+      onEvent({ type: 'buildDir', buildDir } as never);
+      emitLog(onEvent, {
+        level: 'info',
+        tag: 'code',
+        message: `Build workspace ready`,
+        detail: { buildDir, buildSessionId },
+      });
+      console.log(`[build] CODE workspace ${buildDir} (session ${buildSessionId})`);
+    }
+
+    const codeMode = (attempt === 1 && !hasResumeDir && !spinFailureMsg && !validateFailureMsg)
+      ? 'scaffold'
+      : 'repair';
+
+    try {
+      let lessonsBlock: { relatedLessons: unknown[] } = { relatedLessons: [] };
+      if (spinFailureMsg || validateFailureMsg) {
+        lessonsBlock = await lessonStore.findForRetry({
+          draft: normalized,
+          spinFailureMsg,
+          validateFailureMsg,
+        });
+        if (warmLessons.relatedLessons.length) {
+          const existingIds = new Set((lessonsBlock.relatedLessons as Array<Record<string, unknown>>).map((l) => l.text));
+          const extras = (warmLessons.relatedLessons as Array<Record<string, unknown>>).filter((l) => !existingIds.has(l.text));
+          if (extras.length) {
+            lessonsBlock = { relatedLessons: [...lessonsBlock.relatedLessons, ...extras] };
+          }
+        }
+        if (lessonsBlock.relatedLessons.length) {
+          const best = lessonsBlock.relatedLessons[0] as Record<string, unknown>;
+          emitLog(onEvent, {
+            level: 'info',
+            tag: 'lessons',
+            message: `Injecting ${lessonsBlock.relatedLessons.length} lesson(s) (retry)`,
+            detail: `Top match similarity ${best.similarity != null ? (best.similarity as number).toFixed(2) : 'n/a'} (${best.type || 'fix'})`,
+          });
+        }
+      } else if (attempt === 1 && warmLessons.relatedLessons.length) {
+        lessonsBlock = warmLessons;
+      }
+
+      const prevForCode: BuildAttempt | null = lastAttempt?.phase === 'CODE'
+        ? lastAttempt
+        : (attempt === 1 ? resumeCodeFailure : null);
+
+      emitLog(onEvent, {
+        level: 'info',
+        tag: 'code',
+        message: `Calling code agent (${codeMode} mode)`,
+        detail: codeAgent.summariseBuildDir(buildDir) || { services: serviceSummary },
+      });
+
+      const codeResult = await codeAgent.runCodePhase({
+        mode: codeMode,
+        draft: normalized,
+        buildDir,
+        buildSessionId,
+        draftSessionId,
+        attempt,
+        lessonsBlock,
+        spinFailureMsg,
+        validateFailureMsg,
+        previousAttempt: prevForCode,
+        onEvent,
+      });
+
+      assets = codeResult.assets;
+      if (codeResult.llmUsage) attemptCost.add(codeResult.llmUsage);
+
+      await codeChunkStore.indexBuildDir({
+        draftSessionId,
+        buildSessionId,
+        attempt,
+        buildDir,
+      });
+      emitLog(onEvent, {
+        level: 'info',
+        tag: 'code',
+        message: 'Code index updated for semantic search',
+      });
+
+      onEvent({ type: 'buildDir', buildDir } as never);
+      emitLog(onEvent, {
+        level: 'ok',
+        tag: 'code',
+        message: 'CODE phase complete — layout verified',
+        detail: {
+          ...codeAgent.summariseAssets(assets),
+          steps: codeResult.llmUsage.stepCount,
+          summary: cap(codeResult.summary, 400),
+        },
+      });
+    } catch (e) {
+      emitLog(onEvent, { level: 'error', tag: 'code', message: (e as Error).message });
+      lastAttempt = {
+        phase: 'CODE',
+        message: (e as Error).message,
+        artifacts: assets,
+        rawText: null,
+        details: { message: (e as Error).message },
+      };
+      emitIterationSummary(onEvent, {
+        attempt,
+        total: MAX_ITERATIONS,
+        failedPhase: 'CODE',
+        validation: null,
+        draft: normalized,
+        validationSpec: assets?.validationSpec,
+        cost: attemptCost.isEmpty() ? null : attemptCost.summary(),
+      });
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    onEvent({ type: 'phase', phase: 'SPIN' as BuildPhase, attempt, total: MAX_ITERATIONS } as never);
+    let portMap: PortMap | null = null;
+    try {
+      ({ portMap } = await spinAgent.spin({
+        buildDir,
+        buildSessionId,
+        onEvent,
+        readyServices: assets?.validationSpec?.readyServices as string[] | null || null,
+      }));
+
+      spinFailureMsg = null;
+      if (spinFailureHistory.length > 0) {
+        const lessonId = await lessonStore.record({
+          type: 'fix',
+          phase: 'spin',
+          draftSessionId,
+          buildSessionId,
+          category: buildCategory,
+          title: normalized.meta?.name || normalized.title || assets?.title,
+          draft: normalized,
+          failures: [...spinFailureHistory],
+          assets,
+        });
+        if (lessonId) {
+          emitLog(onEvent, {
+            level: 'info',
+            tag: 'lessons',
+            message: `Recorded SPIN fix-lesson #${lessonId as number}`,
+            detail: `${spinFailureHistory.length} prior failure(s) before this success`,
+          });
+        }
+        spinFailureHistory.length = 0;
+      }
+    } catch (e) {
+      const err = e as Record<string, unknown> & { message?: string };
+      spinFailureMsg = {
+        message: err.message,
+        composeStdout: err.composeStdout || null,
+        composeStderr: err.composeStderr || null,
+        logs: err.logs || null,
+      };
+      lastAttempt = {
+        phase: 'SPIN',
+        message: spinFailureMsg.message as string,
+        artifacts: assets,
+        rawText: null,
+        details: {
+          composeStdout: spinFailureMsg.composeStdout,
+          composeStderr: spinFailureMsg.composeStderr,
+          logs: spinFailureMsg.logs,
+        },
+      };
+      const snap = captureFailureSnapshot({ attempt, phase: 'SPIN', lastAttempt, buildDir });
+      if (snap) spinFailureHistory.push(snap);
+      emitIterationSummary(onEvent, {
+        attempt,
+        total: MAX_ITERATIONS,
+        failedPhase: 'SPIN',
+        validation: null,
+        draft: normalized,
+        validationSpec: assets?.validationSpec,
+        cost: attemptCost.isEmpty() ? null : attemptCost.summary(),
+      });
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    onEvent({ type: 'phase', phase: 'VALIDATE' as BuildPhase, attempt, total: MAX_ITERATIONS } as never);
+    let validation: (ValidationResult & { llmUsage?: unknown }) | null = null;
+    try {
+      const validationResult = await validationAgent.validate({
+        buildDir,
+        portMap: portMap!,
+        sandboxSpec: normalized.sandboxSpec,
+        draft: normalized,
+        validationSpec: assets!.validationSpec,
+        onLog: (payload: string | Record<string, unknown>) => {
+          if (typeof payload === 'string') {
+            emitLog(onEvent, { level: 'info', tag: 'validate', message: payload });
+          } else if ((payload as Record<string, unknown>)?.type) {
+            onEvent(payload as never);
+          } else {
+            emitLog(onEvent, { tag: 'validate', ...(payload as Record<string, unknown>) } as { level?: string; tag?: string; message: string; detail?: unknown });
+          }
+        },
+      });
+      validation = validationResult;
+      if (validationResult.llmUsage) attemptCost.add(validationResult.llmUsage);
+      onEvent({ type: 'validation', result: validationResult } as never);
+    } catch (e) {
+      emitLog(onEvent, { level: 'error', tag: 'validate', message: (e as Error).message });
+      await composeManager.down(buildDir).catch(() => {});
+      await portAllocator.releaseIn('build', buildSessionId).catch(() => {});
+      lastAttempt = {
+        phase: 'VALIDATE',
+        message: (e as Error).message,
+        artifacts: assets,
+        rawText: null,
+        details: null,
+      };
+      const snap = captureFailureSnapshot({ attempt, phase: 'VALIDATE', lastAttempt, buildDir });
+      if (snap) validateFailureHistory.push(snap);
+      emitIterationSummary(onEvent, {
+        attempt,
+        total: MAX_ITERATIONS,
+        failedPhase: 'VALIDATE',
+        validation: { passed: false, feedback: (e as Error).message, evidence: [], checklist: [] },
+        draft: normalized,
+        validationSpec: assets?.validationSpec,
+        cost: attemptCost.isEmpty() ? null : attemptCost.summary(),
+      });
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    if (!validation) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    emitIterationSummary(onEvent, {
+      attempt,
+      total: MAX_ITERATIONS,
+      failedPhase: validation.passed ? null : 'VALIDATE',
+      validation,
+      draft: normalized,
+      validationSpec: assets?.validationSpec,
+      cost: attemptCost.isEmpty() ? null : attemptCost.summary(),
+    });
+
+    if (validation.passed) {
+      const challengeRaw = JSON.parse(fs.readFileSync(path.join(buildDir, 'challenge.json'), 'utf8'));
+      const built: Record<string, unknown> = {
+        ...challengeRaw,
+        buildSessionId,
+        buildDir,
+        portMap: portMap!,
+      };
+      const terminalService: string | null = assets!.validationSpec?.terminalService as string | null
+        || (composeManager.extractServiceNames(fs.readFileSync(path.join(buildDir, 'docker-compose.yml'), 'utf8'))[0] || null);
+
+      const terminalWsUrl = terminalWsBase
+        ? `${terminalWsBase}/ws/terminal?sessionId=__build:${buildSessionId}&container=${encodeURIComponent(terminalService || '')}`
+        : null;
+      const metricsWsUrl = terminalWsBase
+        ? `${terminalWsBase}/ws/metrics?sessionId=__build:${buildSessionId}`
+        : null;
+
+      validateFailureMsg = null;
+      if (validateFailureHistory.length > 0) {
+        const lessonId = await lessonStore.record({
+          type: 'fix',
+          phase: 'validate',
+          draftSessionId,
+          buildSessionId,
+          category: buildCategory,
+          title: normalized.meta?.name || normalized.title || assets?.title,
+          draft: normalized,
+          failures: [...validateFailureHistory],
+          assets,
+          validationFeedback: validation.feedback,
+        });
+        if (lessonId) {
+          emitLog(onEvent, {
+            level: 'info',
+            tag: 'lessons',
+            message: `Recorded VALIDATE fix-lesson #${lessonId as number}`,
+            detail: `${validateFailureHistory.length} prior failure(s) before this success`,
+          });
+        }
+        validateFailureHistory.length = 0;
+      }
+
+      built.metrics = normalized.metrics;
+      built.description = normalized.description;
+      built.arch = normalized.arch;
+      built.meta = normalized.meta;
+
+      onEvent({
+        type: 'done',
+        buildSessionId,
+        builtChallenge: built,
+        buildValidation: validation,
+        terminalWsUrl,
+        metricsWsUrl,
+      } as never);
+      return {
+        buildSessionId,
+        buildDir,
+        builtChallenge: built,
+        buildValidation: validation,
+        draft: normalized,
+        portMap: portMap!,
+        terminalService,
+        attempts: attempt,
+      };
+    }
+
+    await composeManager.down(buildDir).catch(() => {});
+    await portAllocator.releaseIn('build', buildSessionId).catch(() => {});
+    validateFailureMsg = {
+      message: validation.feedback || 'validation rejected the build',
+      suggestions: validation.suggestions || [],
+      evidence: (validation.evidence || []).map((ev) => {
+        const e = ev as Record<string, unknown>;
+        return {
+          step: e.step,
+          ok: e.ok,
+          stdout: cap(e.stdout, 1500),
+          stderr: cap(e.stderr, 800),
+          error: e.error,
+        };
+      }),
+    };
+    lastAttempt = {
+      phase: 'VALIDATE',
+      message: validateFailureMsg.message as string,
+      artifacts: assets,
+      rawText: null,
+      details: {
+        feedback: validation.feedback,
+        suggestions: validation.suggestions || [],
+        evidence: validation.evidence || [],
+      },
+    };
+    const snap = captureFailureSnapshot({ attempt, phase: 'VALIDATE', lastAttempt, buildDir });
+    if (snap) validateFailureHistory.push(snap);
+  }
+
+  const lessonTitle = normalized.meta?.name || normalized.title || assets?.title;
+  if (spinFailureHistory.length > 0) {
+    lessonStore.record({
+      type: 'anti-pattern',
+      phase: 'spin',
+      draftSessionId,
+      buildSessionId,
+      category: buildCategory,
+      title: lessonTitle,
+      draft: normalized,
+      failures: [...spinFailureHistory],
+      assets,
+    }).then((id: number | null) => {
+      if (id) console.log(`[lessons] Recorded SPIN anti-pattern #${id} (${spinFailureHistory.length} failure(s))`);
+    }).catch((e: Error) => console.warn(`[lessons] anti-pattern record failed: ${e.message}`));
+  }
+  if (validateFailureHistory.length > 0) {
+    lessonStore.record({
+      type: 'anti-pattern',
+      phase: 'validate',
+      draftSessionId,
+      buildSessionId,
+      category: buildCategory,
+      title: lessonTitle,
+      draft: normalized,
+      failures: [...validateFailureHistory],
+      assets,
+    }).then((id: number | null) => {
+      if (id) console.log(`[lessons] Recorded VALIDATE anti-pattern #${id} (${validateFailureHistory.length} failure(s))`);
+    }).catch((e: Error) => console.warn(`[lessons] anti-pattern record failed: ${e.message}`));
+  }
+
+  const failedBuildDir = process.env.KEEP_FAILED_BUILDS === 'true' ? buildDir : null;
+  if (failedBuildDir) {
+    console.warn(`[build] KEEP_FAILED_BUILDS=true — preserving failed build at: ${buildDir}`);
+  } else {
+    cleanupBuild(buildDir);
+  }
+  const err = new Error(`build pipeline exhausted ${MAX_ITERATIONS} iterations without a passing build`) as Error & {
+    lastFailure?: string | null;
+    lastAttempt?: BuildAttempt | null;
+  };
+  err.lastFailure = lastAttempt
+    ? `${lastAttempt.phase}: ${lastAttempt.message}`
+    : null;
+  err.lastAttempt = lastAttempt;
+  onEvent({
+    type: 'error',
+    message: err.message,
+    lastAttempt,
+    failedBuildDir,
+    failedBuildSessionId: buildSessionId,
+  } as never);
+  throw err;
+}
+
+async function teardownBuild(buildSessionId: string, buildDir: string | null): Promise<void> {
+  if (buildDir) {
+    try { await composeManager.down(buildDir); } catch (_e) { /* noop */ }
+  }
+  try { await portAllocator.releaseIn('build', buildSessionId); } catch (_e) { /* noop */ }
+  if (buildDir) cleanupBuild(buildDir);
+}
+
+module.exports = {
+  MAX_ITERATIONS,
+  runBuildLoop,
+  teardownBuild,
+  loadAssetsFromBuildDir: codeAgent.loadAssetsFromBuildDir,
+};
