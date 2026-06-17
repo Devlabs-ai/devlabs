@@ -4,10 +4,12 @@
   "description": "Devlabs backend (Express + WebSocket + Postgres + Redis)",
   "private": true,
   "type": "commonjs",
-  "main": "server.js",
+  "main": "dist/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon --watch . --ext js,json --ignore node_modules --ignore sandbox/sessions --ignore sandbox/builds server.js",
+    "start": "node dist/server.js",
+    "dev": "tsx watch server.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "postinstall": "node -e \"const fs=require('fs'),p=require('path'); for (const d of ['darwin-arm64','darwin-x64','linux-arm64','linux-x64']) { const f=p.join('node_modules','node-pty','prebuilds',d,'spawn-helper'); if (fs.existsSync(f)) { try { fs.chmodSync(f,0o755); } catch(_) {} } }\""
   },
   "engines": {
@@ -24,12 +26,23 @@
     "ioredis": "^5.4.1",
     "jsonwebtoken": "^9.0.2",
     "node-pty": "^1.1.0",
+    "nodemailer": "^8.0.10",
     "openai": "^6.37.0",
     "pg": "^8.12.0",
     "uuid": "^9.0.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.4"
+    "@types/bcryptjs": "^2.4.6",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.10.2",
+    "@types/nodemailer": "^6.4.17",
+    "@types/pg": "^8.11.10",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.13",
+    "nodemon": "^3.1.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
   }
 }

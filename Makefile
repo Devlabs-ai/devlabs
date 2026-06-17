@@ -104,9 +104,11 @@ dev: infra-up
 # `pkill -f` is best-effort; ignore errors if no matching process exists.
 
 stop:
-	@echo "==> killing backend nodemon / server"
+	@echo "==> killing backend dev servers"
+	-@pkill -f "tsx watch server.ts"  2>/dev/null || true
 	-@pkill -f "nodemon .* server.js" 2>/dev/null || true
 	-@pkill -f "node .*server.js"     2>/dev/null || true
+	-@pkill -f "node .*server.ts"     2>/dev/null || true
 	@echo "==> killing frontend vite"
 	-@pkill -f "vite" 2>/dev/null || true
 	@$(MAKE) -s infra-down
