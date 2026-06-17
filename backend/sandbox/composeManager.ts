@@ -72,6 +72,16 @@ async function exec(buildDir: string, service: string, cmd: string[], { portMap 
   return runCompose(args, { cwd: buildDir, env: envWithPorts(portMap) });
 }
 
+async function logs(
+  buildDir: string,
+  service = '',
+  { tail = 100, portMap = {} }: { tail?: number; portMap?: PortMap } = {},
+): Promise<ComposeRunResult> {
+  const args = ['logs', '--no-color', '--tail', String(tail)];
+  if (service) args.push(service);
+  return runCompose(args, { cwd: buildDir, env: envWithPorts(portMap) });
+}
+
 async function ps(buildDir: string, service: string, { portMap = {} }: { portMap?: PortMap } = {}): Promise<string> {
   const { stdout } = await runCompose(['ps', '-q', service], {
     cwd: buildDir,
@@ -380,6 +390,7 @@ module.exports = {
   up,
   down,
   exec,
+  logs,
   ps,
   getPort,
   resolvePortMap,

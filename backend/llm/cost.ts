@@ -20,6 +20,7 @@ interface UsageLike {
 }
 
 const DEFAULT_PRICING: PricingTable = {
+  'gpt-5.4-mini': { input: 0.75, output: 4.5 },
   'gpt-4o': { input: 2.5, output: 10 },
   'gpt-4o-mini': { input: 0.15, output: 0.6 },
   'gpt-4.5': { input: 75, output: 150 },
@@ -29,6 +30,8 @@ const DEFAULT_PRICING: PricingTable = {
   'claude-sonnet-4-5-20250929': { input: 3, output: 15 },
   'claude-sonnet-4-6': { input: 3, output: 15 },
   'claude-3-5-sonnet-20241022': { input: 3, output: 15 },
+  'claude-haiku-4-5': { input: 1, output: 5 },
+  'claude-haiku-3-5': { input: 0.8, output: 4 },
   'text-embedding-3-small': { input: 0.02, output: 0 },
 };
 
@@ -57,6 +60,7 @@ function ratesForModel(modelId: string): ModelRates {
   if (PRICING[name]) return PRICING[name];
   if (name.includes('mini') || name.includes('4o-mini')) return PRICING['gpt-4o-mini'];
   if (name.includes('embedding')) return PRICING['text-embedding-3-small'];
+  if (name.includes('haiku')) return PRICING['claude-haiku-4-5'];
   if (name.includes('claude')) return PRICING['claude-sonnet-4-5-20250929'];
   return PRICING['gpt-4o'];
 }

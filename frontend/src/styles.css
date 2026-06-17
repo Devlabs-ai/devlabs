@@ -5170,6 +5170,68 @@ button.phase-tracker--clickable.phase-tracker--compact {
 .log-line.log-phase { color: var(--accent); font-weight: 500; }
 .log-empty { color: var(--text-dim); text-align: center; padding: 24px; }
 
+.pipeline-log-stream .log-entry { padding: 4px 0; line-height: 1.45; }
+.pipeline-log-stream .log-entry.log-text,
+.pipeline-log-stream .log-line { white-space: pre-wrap; word-break: break-word; }
+
+.log-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 6px 0;
+}
+.log-thinking-live { animation: log-thinking-pulse 1.6s ease-in-out infinite; }
+.log-thinking-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  box-shadow: 0 0 8px rgba(56,189,248,0.45);
+}
+.log-thinking-label { color: var(--accent); }
+.log-thinking-meta { font-size: 11px; color: var(--text-dim); margin-left: auto; }
+
+.log-code-step {
+  border-left: 2px solid rgba(56,189,248,0.35);
+  padding: 6px 0 6px 10px;
+  margin: 4px 0;
+}
+.log-code-step-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+.log-code-step-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(56,189,248,0.12);
+  color: var(--accent);
+  border: 1px solid rgba(56,189,248,0.25);
+}
+.log-code-step-tools { color: var(--text); flex: 1; min-width: 120px; }
+.log-code-step-meta { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.log-code-step-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; padding-left: 2px; }
+
+.log-separator {
+  color: var(--text-dim);
+  text-align: center;
+  padding: 8px 0;
+  border-top: 1px dashed var(--border);
+  margin-top: 6px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+@keyframes log-thinking-pulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
+
 .iteration-checklist {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);

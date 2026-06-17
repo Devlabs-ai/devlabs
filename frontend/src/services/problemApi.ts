@@ -168,11 +168,11 @@ export function generateSchema(
 export function streamBuild(
   sessionId: string,
   onEvent: (event: unknown) => void,
-  { signal }: { signal?: AbortSignal } = {},
+  { signal, mode }: { signal?: AbortSignal; mode?: 'retry' | 'fresh' } = {},
 ): Promise<void> {
   return streamSse({
     url: `/api/problems/${sessionId}/build`,
-    body: {},
+    body: mode ? { mode } : {},
     onEvent,
     signal,
   });

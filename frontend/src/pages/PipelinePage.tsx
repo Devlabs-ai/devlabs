@@ -5,6 +5,7 @@ import AuthorReviewFeedbackBanner from '../components/AuthorReviewFeedbackBanner
 import { streamBuild, getProblemSession } from '../services/problemApi';
 import { logsForAttempt } from '../utils/buildLogFilter';
 import { buildCostLabel } from '../utils/buildCost';
+import PipelineLogStream from '../components/PipelineLogStream';
 import type { ProblemSession } from '../types/domain';
 
 interface LlmConfig {
@@ -20,34 +21,6 @@ interface PipelinePageProps {
   onGoReview?: () => void;
   onCancelBuild?: () => void;
   cancelBuildBusy?: boolean;
-}
-
-function logLineClass(line: string): string {
-  if (line.includes('✗') || line.includes(' FAIL') || line.includes('failed')) return 'log-error';
-  if (line.includes('✓') || line.includes(' PASS') || line.includes('passed')) return 'log-ok';
-  if (line.includes('⚠')) return 'log-warn';
-  if (line.includes('►')) return 'log-phase';
-  return '';
-}
-
-interface LogStreamProps {
-  lines: string[];
-  scrollKey: number | null;
-}
-
-function LogStream({ lines, scrollKey }: LogStreamProps): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [lines.length, scrollKey]);
-  return (
-    <div id="pipeline-logs" className="log-stream" ref={ref}>
-      {lines.length === 0 && <div className="log-empty">Logs will appear here once the build starts.</div>}
-      {lines.map((l, i) => (
-        <div key={i} className={`log-line ${logLineClass(l)}`}>{l}</div>
-      ))}
-    </div>
-  );
 }
 
 type CheckStatus = 'pass' | 'fail' | 'skip' | 'pending' | string;
@@ -118,14 +91,13 @@ function IterationChecklist({ checklist }: IterationChecklistProps): JSX.Element
       </div>
       {(checklist.items || []).length > 0 && (
         <div className="checklist-section">
-          <div className="checklist-section-title">Validation checklist</div>
+          <div className="checklist-section-title">Validation checks</div>
           <ul className="checklist">
             {(checklist.items || []).map((item, i) => (
               <li key={item.id ?? i} className={`check-${item.status}`}>
                 <span className="check-icon">{statusIcon(item.status ?? 'pending')}</span>
                 <span className="check-label">
-                  {item.kind === 'symptom' && <span className="check-kind">symptom</span>}
-                  {item.kind === 'step' && <span className="check-kind">step</span>}
+                  {item.kind === 'step' && <span className="check-kind">check</span>}
                   {item.kind === 'judge' && <span className="check-kind">judge</span>}
                   {item.label}
                 </span>
@@ -183,6 +155,7 @@ type BuildEvent = {
   message?: string;
   phase?: string;
   attempt?: number;
+  label?: string;
   result?: ValidationResult;
   checklist?: ChecklistData;
   [key: string]: unknown;
@@ -202,6 +175,7 @@ export default function PipelinePage({
   const [checklistHistory, setChecklistHistory] = useState<ChecklistData[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [liveThinking, setLiveThinking] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [viewAttempt, setViewAttempt] = useState<number | null>(null);
 
@@ -268,18 +242,27 @@ export default function PipelinePage({
   );
   const llmReady = !!llmConfig?.llmConfigured;
   const maxAttempts = llmConfig?.maxIterations ?? 10;
+  const canRetry = effectiveStatus === 'failed'
+    && !running
+    && !!(draft.buildFailedDir || draft.buildDir);
   const startDisabled = running || !draftReady || !llmReady;
 
-  const start = async (): Promise<void> => {
+  const runBuild = async (mode?: 'retry' | 'fresh'): Promise<void> => {
+    const isRetry = mode === 'retry' || (mode !== 'fresh' && canRetry && effectiveStatus === 'failed');
     setRunning(true);
     setErr(null);
-    setLogs([]);
-    setPhase(null);
-    setAttempt(0);
-    setValidation(null);
-    setLatestChecklist(null);
-    setChecklistHistory([]);
+    if (!isRetry) {
+      setLogs([]);
+      setPhase(null);
+      setAttempt(0);
+      setValidation(null);
+      setLatestChecklist(null);
+      setChecklistHistory([]);
+    } else {
+      setLogs((prev) => [...prev, '--- Retrying build in same workspace ---']);
+    }
     setStatus('building');
+    setLiveThinking(null);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -288,22 +271,16 @@ export default function PipelinePage({
       await streamBuild(draft.id, (ev: unknown) => {
         const event = ev as BuildEvent;
         if (event.type === 'log' && event.message) {
+          setLiveThinking(null);
           setLogs((prev) => {
             const next = [...prev, event.message as string];
             return next.length > 1000 ? next.slice(next.length - 1000) : next;
           });
-        } else if (event.type === 'tool') {
-          const name = (event as { name?: string }).name || 'tool';
-          const preview = (event as { argsPreview?: string }).argsPreview;
-          const resultPreview = (event as { resultPreview?: string }).resultPreview;
-          const parts = [`Tool ${name}`];
-          if (preview) parts.push(preview);
-          if (resultPreview) parts.push(`→ ${resultPreview}`);
-          const line = parts.join(': ');
-          setLogs((prev) => {
-            const next = [...prev, line];
-            return next.length > 1000 ? next.slice(next.length - 1000) : next;
-          });
+        } else if (event.type === 'thinking') {
+          const label = typeof event.label === 'string' ? event.label : 'Thinking';
+          setLiveThinking(label);
+        } else if (event.type === 'codeStep') {
+          setLiveThinking(null);
         } else if (event.type === 'phase') {
           setPhase(event.phase ?? null);
           setAttempt(event.attempt ?? 0);
@@ -321,7 +298,7 @@ export default function PipelinePage({
           setErr(event.message ?? 'Unknown error');
           setStatus('failed');
         }
-      }, { signal: controller.signal });
+      }, { signal: controller.signal, mode: isRetry ? 'retry' : 'fresh' });
 
       try {
         const fresh = await getProblemSession(draft.id) as ProblemSession;
@@ -331,6 +308,7 @@ export default function PipelinePage({
       if ((e as Error).name !== 'AbortError') setErr((e as Error).message);
     } finally {
       setRunning(false);
+      setLiveThinking(null);
       abortRef.current = null;
     }
   };
@@ -359,12 +337,24 @@ export default function PipelinePage({
                 Stop
               </button>
             )}
+            {canRetry && (
+              <button
+                type="button"
+                onClick={() => runBuild('retry')}
+                disabled={startDisabled}
+                title={!draftReady ? 'Draft incomplete' : !llmReady ? 'LLM not configured' : 'Continue in the same build folder'}
+              >
+                {running ? 'Running…' : 'Retry build'}
+              </button>
+            )}
             <button
-              onClick={start}
+              type="button"
+              onClick={() => runBuild(canRetry ? 'fresh' : undefined)}
               disabled={startDisabled}
+              className={canRetry ? 'ghost sm' : undefined}
               title={!draftReady ? 'Draft incomplete (description, rootCause, infra.services)' : !llmReady ? 'LLM not configured' : ''}
             >
-              {running ? 'Running…' : buildSucceeded ? 'Rebuild' : (draft.buildFailedDir ? 'Resume build' : 'Start build')}
+              {running && !canRetry ? 'Running…' : buildSucceeded ? 'Rebuild' : canRetry ? 'Start fresh' : 'Start build'}
             </button>
           </div>
         </div>
@@ -399,12 +389,16 @@ export default function PipelinePage({
               <strong>Rebuild</strong>.
             </div>
           )}
-          {draft.buildFailedDir && !running && !buildSucceeded && (
+          {(draft.buildFailedDir || (effectiveStatus === 'failed' && draft.buildDir)) && !running && !buildSucceeded && (
             <div className="alert info">
-              Previous failed build preserved — clicking <strong>Resume build</strong> will reuse
-              its generated assets as a starting point for the new run.
+              Last build failed
               {draft.buildFailedPhase && (
-                <span style={{ marginLeft: 6 }}>Last failure: <code>{draft.buildFailedPhase}</code></span>
+                <span> at <code>{draft.buildFailedPhase}</code></span>
+              )}
+              . Use <strong>Retry build</strong> to continue in the same workspace, or{' '}
+              <strong>Start fresh</strong> to create a new build folder.
+              {draft.buildFailedMsg && (
+                <div className="dim" style={{ marginTop: 6 }}>{draft.buildFailedMsg}</div>
               )}
             </div>
           )}
@@ -438,7 +432,7 @@ export default function PipelinePage({
               </div>
             </details>
           )}
-          <LogStream lines={displayLogs} scrollKey={viewAttempt} />
+          <PipelineLogStream lines={displayLogs} scrollKey={viewAttempt} thinking={running ? liveThinking : null} />
         </div>
       </section>
     </div>

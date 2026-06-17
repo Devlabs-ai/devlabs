@@ -14,7 +14,7 @@
 // Embedding follows its own track: LLM_EMBEDDING_MODEL > baked default.
 //
 // Model id format: "<provider>:<model>", e.g. "openai:gpt-4o",
-// "anthropic:claude-sonnet-4-5-20250929". For the openai provider we route
+// "anthropic:claude-haiku-4-5". For the openai provider we route
 // through the Chat Completions API (not Responses) so OpenAI-compatible
 // gateways like OpenRouter / LiteLLM / Azure can be used by setting
 // OPENAI_BASE_URL — the Responses API isn't widely supported by those.
@@ -30,11 +30,29 @@ const DEFAULTS: Record<string, string> = {
   embedding:  'openai:text-embedding-3-small',
 };
 
+/** Default Anthropic model for all text agents (cost-efficient). */
+const ANTHROPIC_DEFAULT = 'anthropic:claude-haiku-4-5';
+
+/** Legacy Sonnet 4.6 IDs map to Haiku 4.5 automatically. */
+const SONNET_46_ALIASES = new Set([
+  'claude-sonnet-4-6',
+]);
+
+const PIPELINE_AGENTS = new Set(['schema', 'code', 'validation']);
+
 const TEXT_AGENTS: string[] = ['design', 'schema', 'code', 'validation'];
 
 /** @deprecated use `code` — LLM_MODEL_BUILD still honored in modelIdFor */
 const BUILD_AGENT_ALIAS = 'build';
 const EMBEDDING_DIM = 1536; // openai text-embedding-3-small dim; pgvector schema is fixed at this
+
+function normalizeAnthropicModelId(modelId: string): string {
+  const id = String(modelId || '');
+  if (!id.startsWith('anthropic:')) return id;
+  const model = id.slice('anthropic:'.length);
+  if (SONNET_46_ALIASES.has(model)) return ANTHROPIC_DEFAULT;
+  return id;
+}
 
 function legacyDefaultModelId(): string | null {
   // Back-compat for the previous LLM_PROVIDER + provider-specific env layout.
@@ -48,19 +66,45 @@ function legacyDefaultModelId(): string | null {
   return null;
 }
 
+function usesAnthropicTextModels(): boolean {
+  const provider = (process.env.LLM_PROVIDER || '').toLowerCase();
+  if (provider === 'anthropic') return true;
+  if (process.env.LLM_MODEL_DEFAULT?.startsWith('anthropic:')) return true;
+  if (process.env.ANTHROPIC_MODEL) return true;
+  for (const agent of TEXT_AGENTS) {
+    const id = process.env[`LLM_MODEL_${agent.toUpperCase()}`];
+    if (id?.startsWith('anthropic:')) return true;
+  }
+  if (process.env.LLM_MODEL_BUILD?.startsWith('anthropic:')) return true;
+  return false;
+}
+
+function anthropicDefaultFor(_agent: string): string | null {
+  if (!usesAnthropicTextModels()) return null;
+  if (process.env.ANTHROPIC_MODEL) {
+    return normalizeAnthropicModelId(`anthropic:${process.env.ANTHROPIC_MODEL}`);
+  }
+  return ANTHROPIC_DEFAULT;
+}
+
 function modelIdFor(agent: string): string {
   if (agent === 'embedding') {
     return process.env.LLM_EMBEDDING_MODEL || DEFAULTS.embedding;
   }
   const key = agent === BUILD_AGENT_ALIAS ? 'code' : agent;
   if (key === 'code' && process.env.LLM_MODEL_BUILD) {
-    return process.env.LLM_MODEL_BUILD;
+    return normalizeAnthropicModelId(process.env.LLM_MODEL_BUILD);
   }
   const specific = process.env[`LLM_MODEL_${key.toUpperCase()}`];
-  if (specific) return specific;
-  if (process.env.LLM_MODEL_DEFAULT) return process.env.LLM_MODEL_DEFAULT;
+  if (specific) return normalizeAnthropicModelId(specific);
+  const anthropicDefault = anthropicDefaultFor(key);
+  if (anthropicDefault && PIPELINE_AGENTS.has(key)) return anthropicDefault;
+  if (process.env.LLM_MODEL_DEFAULT) {
+    return normalizeAnthropicModelId(process.env.LLM_MODEL_DEFAULT);
+  }
+  if (anthropicDefault) return anthropicDefault;
   const legacy = legacyDefaultModelId();
-  if (legacy) return legacy;
+  if (legacy) return normalizeAnthropicModelId(legacy);
   return DEFAULTS[key] || DEFAULTS.design;
 }
 

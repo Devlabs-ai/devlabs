@@ -1,19 +1,64 @@
 'use strict';
 
-// Code Agent — CODE phase of the build pipeline (tools + layout verify).
+/**
+ * CODE agent — Phase 1 of the build pipeline.
+ *
+ * Runs an LLM tool loop to scaffold or repair files under sandbox/builds/<id>/,
+ * then verifies layout + validationSpec with buildVerification.
+ *
+ * Flow: prompt → runAgentWithTools → verifyBuildComplete → loadAssetsFromBuildDir
+ */
 
 import * as fs from 'fs';
 import * as path from 'path';
 
 import type { ChallengeDraft, BuildAttempt, BuildEventHandler } from '../../types/domain';
 
-const composeManager = require('../../sandbox/composeManager');
+const { modelIdFor, providerOf } = require('../../llm/models');
+const { estimateCostUsd } = require('../../llm/cost');
 const { runAgentWithTools } = require('../helpers/agentRuntime');
-const { SYSTEM_PROMPT, SCAFFOLD_USER_HINT, REPAIR_USER_HINT } = require('../prompts/codeAgent.prompt');
 const { createCodeAgentTools } = require('./codeAgentTools');
+const {
+  SYSTEM_PROMPT_STATIC,
+  SYSTEM_PROMPT_DYNAMIC,
+  SCAFFOLD_USER_HINT,
+  REPAIR_USER_HINT,
+} = require('../prompts/codeAgent.prompt');
+const { verifyBuildComplete } = require('../validation/buildVerification');
 
-const MAX_TOOL_STEPS_SCAFFOLD = 30;
-const MAX_TOOL_STEPS_REPAIR = 20;
+const MAX_STEPS_SCAFFOLD = 20;
+const MAX_STEPS_REPAIR = 25;
+
+const READ_ONLY_TOOLS = new Set(['read_file', 'grep', 'list_files']);
+const WRITE_TOOLS = new Set(['write_file', 'write_files', 'edit_file']);
+
+function scaffoldCoreFilesExist(buildDir: string): boolean {
+  return fs.existsSync(path.join(buildDir, 'docker-compose.yml'))
+    && fs.existsSync(path.join(buildDir, 'challenge.json'));
+}
+
+/** Stop scaffold loops that devolve into grep/read self-verification after files exist. */
+function createScaffoldEarlyStop(buildDir: string): {
+  shouldContinue: (step: { toolResults: Array<{ toolName: string }> }) => boolean;
+} {
+  let readOnlyStreak = 0;
+  return {
+    shouldContinue({ toolResults }) {
+      if (!scaffoldCoreFilesExist(buildDir)) return true;
+      const names = toolResults.map((t) => t.toolName);
+      if (names.some((n) => WRITE_TOOLS.has(n))) {
+        readOnlyStreak = 0;
+        return true;
+      }
+      if (names.length > 0 && names.every((n) => READ_ONLY_TOOLS.has(n))) {
+        readOnlyStreak += 1;
+      } else {
+        readOnlyStreak = 0;
+      }
+      return readOnlyStreak < 2;
+    },
+  };
+}
 
 export interface ChallengeAssets {
   title?: string;
@@ -29,15 +74,11 @@ export interface ChallengeAssets {
   id?: string | null;
 }
 
-interface LessonEntry {
-  text?: string;
-  [key: string]: unknown;
-}
-
 interface LessonsBlock {
-  relatedLessons: LessonEntry[];
+  relatedLessons: Array<{ text?: string; [key: string]: unknown }>;
 }
 
+/** Truncate long strings for repair payloads and logs. */
 function cap(s: unknown, max: number): string | null | undefined {
   if (!s) return s as string | null | undefined;
   const str = typeof s === 'string' ? s : String(s);
@@ -45,6 +86,7 @@ function cap(s: unknown, max: number): string | null | undefined {
   return `${str.slice(0, max)}\n…[truncated ${str.length - max} chars]`;
 }
 
+/** Strip bulky fields from a prior CODE attempt before sending to the LLM. */
 function sanitizePreviousAttempt(prev: BuildAttempt | null | undefined): BuildAttempt | null {
   if (!prev) return null;
   const out: BuildAttempt = {
@@ -61,23 +103,74 @@ function sanitizePreviousAttempt(prev: BuildAttempt | null | undefined): BuildAt
   return out;
 }
 
-function summariseAssets(assets: ChallengeAssets | null | undefined): Record<string, unknown> | null {
-  if (!assets) return null;
+/**
+ * Build the JSON user payload for the CODE agent.
+ * Scaffold sends a slim draft; repair includes SPIN/VALIDATE failure signals.
+ */
+function buildCodeUserPayload({
+  mode,
+  draft,
+  lessonsBlock,
+  spinFailureMsg,
+  validateFailureMsg,
+  previousAttempt,
+}: {
+  mode: 'scaffold' | 'repair';
+  draft: ChallengeDraft;
+  lessonsBlock: LessonsBlock;
+  spinFailureMsg?: Record<string, unknown> | null;
+  validateFailureMsg?: Record<string, unknown> | null;
+  previousAttempt?: BuildAttempt | null;
+}): Record<string, unknown> {
+  if (mode === 'scaffold') {
+    return {
+      mode,
+      draft: {
+        title: draft.meta?.name || draft.title,
+        category: draft.meta?.category || draft.category,
+        infra: draft.infra,
+        brokenState: {
+          rootCause: draft.brokenState?.rootCause,
+          validationSymptoms: draft.brokenState?.validationSymptoms,
+        },
+        sandboxSpec: draft.sandboxSpec,
+      },
+      lessonsBlock,
+    };
+  }
   return {
-    title: assets?.title,
-    services: Object.keys(assets?.services || {}),
-    initFiles: Object.keys(assets?.initFiles || {}),
-    composeBytes: (assets?.dockerCompose || '').length,
-    hasValidationSpec: !!assets?.validationSpec,
+    mode,
+    draft,
+    lessonsBlock,
+    spinFailureMsg,
+    validateFailureMsg,
+    previousAttempt: sanitizePreviousAttempt(previousAttempt),
   };
 }
 
-function summariseBuildDir(buildDir: string): Record<string, unknown> | null {
-  if (!fs.existsSync(buildDir)) return null;
-  const assets = loadAssetsFromBuildDir(buildDir);
-  return summariseAssets(assets);
+/** Compact summary of loaded assets for build logs. */
+function summariseAssets(assets: ChallengeAssets | null | undefined): Record<string, unknown> | null {
+  if (!assets) return null;
+  return {
+    title: assets.title,
+    services: Object.keys(assets.services || {}),
+    initFiles: Object.keys(assets.initFiles || {}),
+    composeBytes: (assets.dockerCompose || '').length,
+    stepCount: (assets.validationSpec as { steps?: unknown[] })?.steps?.length ?? 0,
+    hasValidationSpec: !!assets.validationSpec,
+  };
 }
 
+/** Summarise whatever is already on disk in the build workspace. */
+function summariseBuildDir(buildDir: string): Record<string, unknown> | null {
+  if (!fs.existsSync(buildDir)) return null;
+  return summariseAssets(loadAssetsFromBuildDir(buildDir));
+}
+
+/**
+ * Read challenge.json + docker-compose.yml and service files from a build directory.
+ * Used after CODE completes and by buildPipeline for resume/repair context.
+ */
 function loadAssetsFromBuildDir(buildDir: string): ChallengeAssets | null {
   if (!fs.existsSync(buildDir)) return null;
   try {
@@ -133,53 +226,91 @@ function loadAssetsFromBuildDir(buildDir: string): ChallengeAssets | null {
   }
 }
 
-function verifyBuildLayout(buildDir: string): void {
-  const issues: string[] = [];
-  const composePath = path.join(buildDir, 'docker-compose.yml');
-  const challengePath = path.join(buildDir, 'challenge.json');
-
-  if (!fs.existsSync(composePath)) {
-    issues.push('missing docker-compose.yml');
-  }
-  if (!fs.existsSync(challengePath)) {
-    issues.push('missing challenge.json');
-  }
-  if (issues.length) {
-    throw new Error(`build layout incomplete: ${issues.join('; ')}`);
-  }
-
-  const composeYaml = fs.readFileSync(composePath, 'utf8');
-  const buildCtxs: Array<{ service: string; contextPath: string }> = composeManager.extractBuildContexts(composeYaml);
-  for (const { service, contextPath } of buildCtxs) {
-    const ctxAbs = path.resolve(buildDir, contextPath);
-    if (!ctxAbs.startsWith(`${buildDir}${path.sep}`) && ctxAbs !== buildDir) {
-      issues.push(`service "${service}": build.context "${contextPath}" escapes the build dir`);
-      continue;
-    }
-    if (!fs.existsSync(ctxAbs) || !fs.statSync(ctxAbs).isDirectory()) {
-      issues.push(`service "${service}": build.context "${contextPath}" — directory does not exist`);
-      continue;
-    }
-    if (!fs.existsSync(path.join(ctxAbs, 'Dockerfile'))) {
-      issues.push(`service "${service}": build.context "${contextPath}" — Dockerfile missing`);
-    }
-  }
-
-  if (issues.length > 0) {
-    throw new Error(
-      `compose references build contexts that don't exist on disk: ${issues.join('; ')}. `
-      + 'Use build.context: ./services/<service-name> for each built service.',
-    );
-  }
+function emitCodeLog(onEvent: BuildEventHandler | undefined, message: string, detail?: unknown): void {
+  onEvent?.({ type: 'log', level: 'info', tag: 'code', message, detail } as never);
+  console.log(`[code] ${message}`);
 }
 
+/** Run the LLM + sandbox-tool loop for one CODE invocation. */
+async function runCodeAgentLoop({
+  mode,
+  prompt,
+  buildDir,
+  maxSteps,
+  onEvent,
+}: {
+  mode: 'scaffold' | 'repair';
+  prompt: string;
+  buildDir: string;
+  maxSteps: number;
+  onEvent?: BuildEventHandler;
+}): Promise<{ summary: string; usage: Record<string, unknown> }> {
+  const modelId = modelIdFor('code');
+  const provider = providerOf(modelId);
+  emitCodeLog(onEvent, `CODE agent (${mode}) — ${modelId}, cwd=${buildDir}`);
+
+  const earlyStop = mode === 'scaffold' ? createScaffoldEarlyStop(buildDir) : null;
+
+  const result = await runAgentWithTools({
+    agent: 'code',
+    system: `${SYSTEM_PROMPT_STATIC}\n\n${SYSTEM_PROMPT_DYNAMIC}`,
+    messages: [{ role: 'user', content: prompt }],
+    tools: createCodeAgentTools({ buildDir, onEvent }),
+    maxSteps,
+    maxTokens: 16384,
+    onEvent,
+    label: mode,
+    promptCache: provider === 'anthropic',
+    shouldContinue: earlyStop
+      ? (step: { stepIndex: number; toolResults: Array<{ toolName: string }>; text?: string }) => {
+          const cont = earlyStop.shouldContinue(step);
+          if (!cont) {
+            emitCodeLog(onEvent, 'Scaffold files present — stopping tool loop (server verification runs next)');
+          }
+          return cont;
+        }
+      : undefined,
+  });
+
+  const usage = result.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+  const inputTokens = usage?.inputTokens || 0;
+  const outputTokens = usage?.outputTokens || 0;
+  const costUsd = estimateCostUsd(modelId, usage);
+  let summary = (result.text || '').trim();
+  if (!summary) {
+    summary = mode === 'scaffold'
+      ? 'Scaffold files written — server verification runs next.'
+      : '';
+  }
+  if (!summary) throw new Error('CODE agent finished without a summary message');
+
+  emitCodeLog(onEvent, `CODE agent complete — ${result.stepCount} step(s), $${costUsd.toFixed(4)}`, {
+    modelId, inputTokens, outputTokens,
+  });
+
+  return {
+    summary,
+    usage: {
+      agent: 'code',
+      label: mode,
+      modelId,
+      usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+      stepCount: result.stepCount,
+      costUsd,
+    },
+  };
+}
+
+/**
+ * Entry point for the CODE phase — called by buildPipeline each iteration.
+ */
 async function runCodePhase({
   mode,
   draft,
   buildDir,
-  buildSessionId,
-  draftSessionId = null,
-  attempt,
+  buildSessionId: _buildSessionId,
+  draftSessionId: _draftSessionId = null,
+  attempt: _attempt,
   lessonsBlock = { relatedLessons: [] },
   spinFailureMsg = null,
   validateFailureMsg = null,
@@ -200,44 +331,32 @@ async function runCodePhase({
 }): Promise<{
   summary: string;
   assets: ChallengeAssets;
-  llmUsage: { agent: string; label: string; modelId?: string; usage?: unknown; stepCount?: number };
+  llmUsage: Record<string, unknown>;
+  llmUsages: Array<Record<string, unknown>>;
 }> {
   fs.mkdirSync(buildDir, { recursive: true });
 
-  const tools = createCodeAgentTools({
-    buildDir,
-    buildSessionId,
-    draftSessionId,
-    attempt,
-    onEvent,
-  });
-
-  const maxSteps = mode === 'scaffold' ? MAX_TOOL_STEPS_SCAFFOLD : MAX_TOOL_STEPS_REPAIR;
   const modeHint = mode === 'scaffold' ? SCAFFOLD_USER_HINT : REPAIR_USER_HINT;
-
-  const userPayload = JSON.stringify({
+  const prompt = `${modeHint}\n\n${JSON.stringify(buildCodeUserPayload({
     mode,
     draft,
     lessonsBlock,
     spinFailureMsg,
     validateFailureMsg,
-    previousAttempt: sanitizePreviousAttempt(previousAttempt),
-  }, null, 2);
+    previousAttempt,
+  }), null, 2)}`;
 
-  const llmResult = await runAgentWithTools({
-    agent: 'code',
-    system: SYSTEM_PROMPT,
-    messages: [
-      { role: 'user', content: `${modeHint}\n\n${userPayload}` },
-    ],
-    tools,
-    maxSteps,
-    maxTokens: 16384,
+  const agentResult = await runCodeAgentLoop({
+    mode,
+    prompt,
+    buildDir,
+    maxSteps: mode === 'scaffold' ? MAX_STEPS_SCAFFOLD : MAX_STEPS_REPAIR,
     onEvent,
-    label: mode,
   });
 
-  verifyBuildLayout(buildDir);
+  emitCodeLog(onEvent, 'CODE verify…');
+  verifyBuildComplete(buildDir, { scaffoldRules: true });
+  emitCodeLog(onEvent, 'CODE verify passed');
 
   const assets = loadAssetsFromBuildDir(buildDir);
   if (!assets) {
@@ -245,23 +364,17 @@ async function runCodePhase({
   }
 
   return {
-    summary: llmResult.text || '',
+    summary: agentResult.summary,
     assets,
-    llmUsage: {
-      agent: 'code',
-      label: mode,
-      modelId: llmResult.modelId,
-      usage: llmResult.usage,
-      stepCount: llmResult.stepCount,
-    },
+    llmUsage: agentResult.usage,
+    llmUsages: [agentResult.usage],
   };
 }
 
 module.exports = {
-  SYSTEM_PROMPT,
   runCodePhase,
   loadAssetsFromBuildDir,
-  verifyBuildLayout,
   summariseAssets,
   summariseBuildDir,
+  buildCodeUserPayload,
 };

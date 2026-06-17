@@ -3,6 +3,7 @@
 import type { ExpressRequest, ExpressResponse, ExpressNextFunction } from '../types/express';
 
 const express = require('express');
+const path = require('path');
 
 const { requireInterviewer } = require('../auth/middleware');
 const draftStore = require('../pipeline/stores/problemDraftStore');
@@ -10,6 +11,7 @@ const reviewStore = require('../pipeline/stores/reviewStore');
 const designAgent = require('../pipeline/agents/designAgent');
 const schemaAgent = require('../pipeline/agents/schemaAgent');
 const buildPipeline = require('../pipeline/pipelines/buildPipeline');
+const { loadLatestBuildFailure, recordBuildFailure } = require('../pipeline/build/buildFailureRecord');
 const { promote } = require('../pipeline/promoteToVerified');
 const llm = require('../llm/client');
 const shapeState = require('../pipeline/shape/shapeState');
@@ -86,6 +88,10 @@ function publicDraft(d: Record<string, unknown> | null | undefined): Record<stri
     buildCurrentPhase: d.buildCurrentPhase,
     buildCurrentAttempt: d.buildCurrentAttempt,
     reviewFeedback: d.reviewFeedback || null,
+    buildFailedDir: d.buildFailedDir || null,
+    buildFailedSessionId: d.buildFailedSessionId || null,
+    buildFailedPhase: d.buildFailedPhase || null,
+    buildFailedMsg: d.buildFailedMsg || null,
   };
 }
 
@@ -393,47 +399,72 @@ router.post('/:sessionId/build', async (req: import("express").Request, res: imp
 
   console.log(`[build] POST /api/problems/${req.params.sessionId}/build`);
 
-  // If the previous run failed and preserved its build dir, offer it as resume context
-  const prevFailedBuildDir = d.buildStatus === 'failed' && d.buildFailedDir ? d.buildFailedDir : null;
-  const prevFailurePhase = d.buildFailedPhase || null;
-  const prevFailureMsg = d.buildFailedMsg || null;
+  const buildMode = req.body?.mode === 'fresh' ? 'fresh' : (req.body?.mode === 'retry' ? 'retry' : null);
+  const failedWorkspace = d.buildFailedDir || d.buildDir || null;
+  const canRetry = d.buildStatus === 'failed' && !!failedWorkspace;
+  const isRetry = buildMode === 'retry' || (buildMode !== 'fresh' && canRetry);
+  const isFresh = buildMode === 'fresh' || !isRetry;
+
+  if (isFresh && d.buildFailedDir) {
+    const oldSessionId = d.buildFailedSessionId || path.basename(d.buildFailedDir);
+    await buildPipeline.teardownBuild(oldSessionId, d.buildFailedDir).catch(() => {});
+    d.buildFailedDir = null;
+    d.buildFailedSessionId = null;
+    d.buildFailedPhase = null;
+    d.buildFailedMsg = null;
+  }
+
+  const prevFailedBuildDir = isRetry ? failedWorkspace : null;
+  let prevFailurePhase = isRetry ? (d.buildFailedPhase || null) : null;
+  let prevFailureMsg = isRetry ? (d.buildFailedMsg || null) : null;
+
+  if (isRetry && prevFailedBuildDir && (!prevFailurePhase || !prevFailureMsg)) {
+    const diskFailure = loadLatestBuildFailure(prevFailedBuildDir);
+    if (diskFailure) {
+      prevFailurePhase = prevFailurePhase || diskFailure.phase || null;
+      prevFailureMsg = prevFailureMsg || diskFailure.message || null;
+    }
+  }
 
   d.buildStatus = 'building';
   d.buildAttempts = 0;
-  d.buildLogs = [];
-  d.buildChecklists = [];
+  if (isRetry) {
+    if (d.buildLogs?.length) {
+      d.buildLogs.push('--- Retrying build in same workspace ---');
+    }
+  } else {
+    d.buildLogs = [];
+  }
+  d.buildChecklists = isRetry ? (d.buildChecklists || []) : [];
   d.buildLatestChecklist = null;
   d.buildCurrentPhase = null;
   d.buildCurrentAttempt = 0;
   d.reviewFeedback = null;
-  // Keep buildFailedDir until the new run completes (it may need it)
   draftStore.set(d.id, d);
   await draftStore.snapshotBuildState(d);
   await draftStore.persist(d).catch(() => {});
 
+  const appendBuildLog = (line: string) => {
+    d.buildLogs.push(line);
+    if (d.buildLogs.length > 1000) d.buildLogs.splice(0, d.buildLogs.length - 1000);
+  };
+
   const onEvent = (ev: unknown) => {
-    if ((ev as Record<string, unknown>).type === 'log' && (ev as Record<string, unknown>).message) {
-      const msg = (ev as Record<string, unknown>).message as string;
-      const detail = (ev as Record<string, unknown>).detail;
+    const evRec = ev as Record<string, unknown>;
+    if (evRec.type === 'log' && evRec.message) {
+      const msg = evRec.message as string;
+      const detail = evRec.detail;
       const line = detail != null && detail !== ''
         ? `${msg} — ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`
         : msg;
-      d.buildLogs.push(line);
-      if (d.buildLogs.length > 1000) d.buildLogs.splice(0, d.buildLogs.length - 1000);
+      appendBuildLog(line);
     }
-    if ((ev as Record<string, unknown>).type === 'tool') {
-      const evTyped = ev as Record<string, unknown>;
-      const name = evTyped.name || 'tool';
-      const preview = evTyped.argsPreview;
-      const resultPreview = evTyped.resultPreview;
-      const parts = [`Tool ${name}`];
-      if (preview) parts.push(preview);
-      if (resultPreview) parts.push(`→ ${resultPreview}`);
-      const line = parts.join(': ');
-      d.buildLogs.push(line);
-      if (d.buildLogs.length > 1000) d.buildLogs.splice(0, d.buildLogs.length - 1000);
+    if (evRec.type === 'thinking') {
+      const step = typeof evRec.step === 'number' ? evRec.step : 0;
+      const label = typeof evRec.label === 'string' ? evRec.label : 'Thinking';
+      appendBuildLog(`💭 ${label} (step ${step + 1})`);
     }
-    if ((ev as Record<string, unknown>).type === 'checklist' && (ev as Record<string, unknown>).checklist) {
+    if (evRec.type === 'checklist' && evRec.checklist) {
       d.buildLatestChecklist = (ev as Record<string, unknown>).checklist;
       d.buildChecklists = d.buildChecklists || [];
       d.buildChecklists.push((ev as Record<string, unknown>).checklist);
@@ -495,9 +526,31 @@ router.post('/:sessionId/build', async (req: import("express").Request, res: imp
     });
   } catch (e) {
     d.buildStatus = 'failed';
+    const err = e as Error & { lastAttempt?: { phase?: string; message?: string } | null };
+    if (err.lastAttempt) {
+      d.buildFailedPhase = err.lastAttempt.phase || d.buildFailedPhase || null;
+      d.buildFailedMsg = err.lastAttempt.message || d.buildFailedMsg || null;
+    }
+    if (!d.buildFailedDir && d.buildDir) {
+      d.buildFailedDir = d.buildDir;
+      d.buildFailedSessionId = d.buildSessionId || null;
+    }
+    const failDir = d.buildFailedDir || d.buildDir;
+    if (failDir) {
+      recordBuildFailure(failDir, {
+        recordedAt: Date.now(),
+        draftSessionId: d.id,
+        buildSessionId: d.buildFailedSessionId || d.buildSessionId || null,
+        reason: 'error',
+        phase: d.buildFailedPhase,
+        message: d.buildFailedMsg,
+        buildStatus: 'failed',
+        lastLogs: Array.isArray(d.buildLogs) ? d.buildLogs.slice(-50) : [],
+      });
+    }
     draftStore.set(d.id, d);
     await draftStore.persist(d).catch(() => {});
-    send({ type: 'error', message: e.message, code: e.code || null, lastFailure: e.lastFailure || null });
+    send({ type: 'error', message: err.message, code: (err as { code?: string }).code || null, lastFailure: (err as { lastFailure?: string }).lastFailure || null });
   } finally {
     try { res.end(); } catch (_e) { /* noop */ }
   }
@@ -510,8 +563,32 @@ router.post('/:sessionId/cancel-build', async (req: import("express").Request, r
     if (d.buildStatus !== 'building') {
       return res.json({ ok: true, buildStatus: d.buildStatus });
     }
+    const cancelPhase = d.buildCurrentPhase || d.buildFailedPhase || 'cancelled';
     d.buildStatus = 'failed';
     d.buildCurrentPhase = null;
+    const failDir = d.buildFailedDir || d.buildDir;
+    if (failDir) {
+      if (!d.buildFailedDir) {
+        d.buildFailedDir = failDir;
+        d.buildFailedSessionId = d.buildSessionId || path.basename(failDir);
+      }
+      d.buildFailedPhase = cancelPhase;
+      d.buildFailedMsg = 'Build cancelled by user';
+      recordBuildFailure(failDir, {
+        recordedAt: Date.now(),
+        draftSessionId: d.id,
+        buildSessionId: d.buildFailedSessionId || d.buildSessionId || null,
+        reason: 'cancel',
+        phase: cancelPhase,
+        message: d.buildFailedMsg,
+        iteration: d.buildCurrentAttempt || d.buildAttempts || null,
+        buildStatus: 'failed',
+        lastLogs: Array.isArray(d.buildLogs) ? d.buildLogs.slice(-50) : [],
+      });
+    } else {
+      d.buildFailedPhase = cancelPhase;
+      d.buildFailedMsg = 'Build cancelled by user';
+    }
     draftStore.set(d.id, d);
     await draftStore.persist(d).catch(() => {});
     return res.json({ ok: true, buildStatus: 'failed' });

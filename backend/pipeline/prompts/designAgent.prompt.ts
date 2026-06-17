@@ -31,14 +31,18 @@ RULES:
 - Do NOT emit <challenge_draft> or full v1 schema JSON.
 - description is QUALITATIVE — no fake p99, RPS, or SLA numbers.
 - infra.services: NAMES ONLY — never include image_hint, limits, or env in Phase 1
-- validationSymptoms: a checklist of concrete, reproducible probes a candidate would run while
-  exploring the broken environment, each of which confirms the bug is present.
-  Every entry must describe an action (e.g. a request, a query, a command) and the
-  surprising/wrong result they observe — not a general description of the bug.
-  Example (Redis stale-cache): { "id": 1, "check": "GET /products/1 → note the price.
-  PUT /products/1 with a new price. GET /products/1 again → still returns the OLD price,
-  proving the cache was not invalidated on write." }
-  Do NOT include any symptom describing the fixed/healthy state.
+- validationSymptoms: one concrete, reproducible observation per entry — action + wrong result
+  that confirms the bug (NOT the fixed/healthy state). Each symptom becomes ONE executable
+  validation DAG at build time (validationSpec.graphs[] in challenge.json). Write each check
+  as a detailed recipe: what to run (GET, PUT, query, command) and what stale/broken outcome
+  the candidate should see.
+  Example (Redis stale-cache): { "id": 1, "check": "GET /products/2 and note name/price.
+  PUT /products/2 with a new sentinel name/price. GET /products/2 again — still returns the
+  OLD name/price, proving the cache was not invalidated on write." }
+  Example symptom 2 for same challenge: { "id": 2, "check": "After that PUT, run
+  redis-cli GET product:2 inside the redis container — value is still the pre-update JSON,
+  not the sentinel written to Postgres." }
+  Do NOT combine multiple observations into one symptom. Do NOT include fixed-state probes.
 - rootCause is setter-only; do not put it in description.
 - After emitting <shape_contract>, summarise and ask if the author wants changes or is ready to approve.`;
 }

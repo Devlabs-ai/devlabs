@@ -48,6 +48,10 @@ function makeDraft({
     buildCurrentPhase: null,
     buildCurrentAttempt: 0,
     reviewFeedback: null,
+    buildFailedDir: null,
+    buildFailedSessionId: null,
+    buildFailedPhase: null,
+    buildFailedMsg: null,
   };
 }
 
@@ -97,6 +101,10 @@ async function persist(d: DraftSession): Promise<void> {
         buildCurrentPhase: d.buildCurrentPhase,
         buildCurrentAttempt: d.buildCurrentAttempt,
         reviewFeedback: d.reviewFeedback || null,
+        buildFailedDir: d.buildFailedDir || null,
+        buildFailedSessionId: d.buildFailedSessionId || null,
+        buildFailedPhase: d.buildFailedPhase || null,
+        buildFailedMsg: d.buildFailedMsg || null,
       }),
       d.createdAt,
       d.updatedAt,
@@ -136,6 +144,10 @@ async function restoreFromDB(): Promise<void> {
       buildCurrentPhase: (meta.buildCurrentPhase as string) || null,
       buildCurrentAttempt: (meta.buildCurrentAttempt as number) || 0,
       reviewFeedback: meta.reviewFeedback || null,
+      buildFailedDir: (meta.buildFailedDir as string) || null,
+      buildFailedSessionId: (meta.buildFailedSessionId as string) || null,
+      buildFailedPhase: (meta.buildFailedPhase as string) || null,
+      buildFailedMsg: (meta.buildFailedMsg as string) || null,
     };
     const persistedPhase = legacyPhase;
     if (d.draft?.infra && !d.schemaMaterialized) {

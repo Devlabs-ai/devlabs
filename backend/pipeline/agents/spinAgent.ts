@@ -1,6 +1,11 @@
 'use strict';
 
-// Spin Agent — SPIN step of the build pipeline.
+/**
+ * SPIN agent — Phase 2 of the build pipeline.
+ *
+ * Allocates host ports, runs docker compose up --build, and waits for
+ * validationSpec.readyServices to reach running state.
+ */
 
 import type { BuildEventHandler, PortMap } from '../../types/domain';
 
@@ -15,17 +20,10 @@ function cap(s: unknown, max: number): string | null | undefined {
   return `${str.slice(0, max)}\n…[truncated ${str.length - max} chars]`;
 }
 
+/** Fetch recent compose logs after a failed spin for diagnostics. */
 async function captureComposeLogs(buildDir: string, portMap: PortMap | null | undefined): Promise<string> {
   try {
-    const { stdout, stderr } = await composeManager.runCompose(
-      ['logs', '--no-color', '--tail=200'],
-      {
-        cwd: buildDir,
-        env: portMap
-          ? Object.fromEntries(Object.entries(portMap).map(([k, v]) => [k, String(v)]))
-          : {},
-      },
-    );
+    const { stdout, stderr } = await composeManager.logs(buildDir, '', { tail: 200, portMap: portMap || undefined });
     return [stdout, stderr].filter(Boolean).join('\n');
   } catch (e) {
     const err = e as Record<string, unknown>;
@@ -33,6 +31,7 @@ async function captureComposeLogs(buildDir: string, portMap: PortMap | null | un
   }
 }
 
+/** Structured error thrown when compose up or service gating fails. */
 class SpinError extends Error {
   composeStdout: string | null;
   composeStderr: string | null;
@@ -55,9 +54,9 @@ class SpinError extends Error {
 }
 
 /**
- * Run the SPIN phase for one build iteration.
- * @returns {{ portMap: PortMap }} — resolved host-port environment map
- * @throws {SpinError} — structured failure
+ * Run SPIN for one build iteration.
+ * @returns Resolved HOST_PORT_* map for validation HTTP checks
+ * @throws SpinError with compose stdout/stderr and container logs
  */
 async function spin({
   buildDir,
@@ -84,7 +83,7 @@ async function spin({
       detail: portMap,
     });
 
-    if (readyServices && readyServices.length > 0) {
+    if (readyServices?.length) {
       emitLog(onEvent, {
         level: 'info',
         tag: 'spin',
@@ -123,12 +122,11 @@ async function spin({
     const rawLogs = await captureComposeLogs(buildDir, portMap).catch((): null => null);
     const logs = rawLogs ? composeManager.stripDockerNoise(rawLogs) : null;
     if (logs) {
-      const head = logs.split('\n').slice(0, 40).join('\n');
       emitLog(onEvent, {
         level: 'detail',
         tag: 'spin',
-        message: `Container logs (${logs.length} bytes captured)`,
-        detail: head,
+        message: `Container logs (${logs.length} bytes)`,
+        detail: logs.split('\n').slice(0, 40).join('\n'),
       });
     }
 

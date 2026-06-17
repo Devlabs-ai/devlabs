@@ -1,5 +1,10 @@
 'use strict';
 
+/**
+ * Sandbox file tools for the CODE agent (list / read / write / edit / grep).
+ * All paths are confined to the build workspace under sandbox/builds/<id>/.
+ */
+
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -7,13 +12,13 @@ import type { BuildEventHandler } from '../../types/domain';
 
 const { tool } = require('ai');
 const { z } = require('zod');
-const codeChunkStore = require('../stores/codeChunkStore');
 
 const MAX_LIST_ENTRIES = 200;
 const MAX_READ_CHARS = 8000;
 const MAX_WRITE_CHARS = 65536;
 const MAX_GREP_MATCHES = 50;
 
+/** Reject path traversal and absolute paths; return a normalized relative path. */
 export function safeRel(rel: unknown): string | null {
   if (!rel || typeof rel !== 'string') return null;
   if (rel.includes('..')) return null;
@@ -21,6 +26,7 @@ export function safeRel(rel: unknown): string | null {
   return rel.replace(/^\/+/, '');
 }
 
+/** Resolve a relative tool path to an absolute path inside buildDir, or null if outside. */
 function resolveInWorkspace(buildDir: string, relPath: string): string | null {
   const rel = safeRel(relPath);
   if (!rel) return null;
@@ -30,6 +36,7 @@ function resolveInWorkspace(buildDir: string, relPath: string): string | null {
   return abs;
 }
 
+/** Allowed write targets: compose, challenge manifest, services/*, flat init/* files. */
 function isWritablePath(relPath: string): boolean {
   const rel = safeRel(relPath);
   if (!rel) return false;
@@ -37,113 +44,47 @@ function isWritablePath(relPath: string): boolean {
   if (rel.startsWith('services/')) return true;
   if (rel.startsWith('init/')) {
     const inside = rel.slice('init/'.length);
-    if (!inside || inside.includes('/')) return false;
-    return true;
+    return !!inside && !inside.includes('/');
   }
   return false;
 }
 
+/** Truncate long tool output returned to the LLM. */
 function capOutput(s: string, max = MAX_READ_CHARS): string {
   if (s.length <= max) return s;
   return `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]`;
 }
 
+/** Walk a directory tree and collect file paths with byte sizes (capped). */
 function listFilesRecursive(dir: string, prefix: string, out: Array<{ path: string; bytes: number }>): void {
-  if (out.length >= MAX_LIST_ENTRIES) return;
-  if (!fs.existsSync(dir)) return;
+  if (out.length >= MAX_LIST_ENTRIES || !fs.existsSync(dir)) return;
   for (const name of fs.readdirSync(dir)) {
     if (out.length >= MAX_LIST_ENTRIES) break;
     const abs = path.join(dir, name);
     const rel = prefix ? `${prefix}/${name}` : name;
     const st = fs.statSync(abs);
-    if (st.isDirectory()) {
-      listFilesRecursive(abs, rel, out);
-    } else if (st.isFile()) {
-      out.push({ path: rel, bytes: st.size });
-    }
+    if (st.isDirectory()) listFilesRecursive(abs, rel, out);
+    else if (st.isFile()) out.push({ path: rel, bytes: st.size });
   }
 }
 
 export interface ToolContext {
   buildDir: string;
-  buildSessionId: string;
-  draftSessionId?: string | null;
-  attempt: number;
   onEvent?: BuildEventHandler;
-  onPathsChanged?: (paths: string[]) => void;
 }
 
-function emitToolEvent(ctx: ToolContext, payload: Record<string, unknown>): void {
-  ctx.onEvent?.({ type: 'tool', ...payload } as never);
-}
-
-function formatToolArgSummary(toolName: string, input: unknown): string {
-  if (!input || typeof input !== 'object') return '';
-  const a = input as Record<string, unknown>;
-  if (toolName === 'write_file') return `path=${a.path}, bytes=${String(a.content || '').length}`;
-  if (toolName === 'edit_file') return `path=${a.path}`;
-  if (toolName === 'read_file') return `path=${a.path}`;
-  if (toolName === 'grep') return `pattern=${JSON.stringify(a.pattern)}`;
-  if (toolName === 'search_code') return `query=${JSON.stringify(String(a.query || '').slice(0, 80))}`;
-  if (toolName === 'list_files') return a.subpath ? `subpath=${a.subpath}` : '(root)';
-  return '';
-}
-
-function logToolActivity(ctx: ToolContext, message: string): void {
-  ctx.onEvent?.({ type: 'log', level: 'info', tag: 'code', message } as never);
-  console.log(`[code] ${message}`);
-}
-
-function wrapToolExecute<T>(
-  ctx: ToolContext,
-  toolName: string,
-  fn: (input: T) => Promise<unknown>,
-): (input: T) => Promise<unknown> {
-  return async (input: T) => {
-    const t0 = Date.now();
-    const argSummary = formatToolArgSummary(toolName, input);
-    logToolActivity(ctx, `→ ${toolName}${argSummary ? `(${argSummary})` : ''}`);
-    try {
-      const result = await fn(input);
-      const ms = Date.now() - t0;
-      const out = result as Record<string, unknown> | null;
-      const extra = out?.error
-        ? `error=${out.error}`
-        : (out?.bytes != null ? `bytes=${out.bytes}` : (Array.isArray(out?.files) ? `files=${out.files.length}` : (Array.isArray(out?.matches) ? `matches=${out.matches.length}` : (Array.isArray(out?.hits) ? `hits=${out.hits.length}` : ''))));
-      logToolActivity(ctx, `← ${toolName} ${ms}ms${extra ? ` — ${extra}` : ''}`);
-      return result;
-    } catch (e) {
-      logToolActivity(ctx, `← ${toolName} failed ${Date.now() - t0}ms — ${(e as Error).message}`);
-      throw e;
-    }
-  };
-}
-
-async function afterMutation(ctx: ToolContext, relPath: string): Promise<void> {
-  const rel = safeRel(relPath);
-  if (!rel) return;
-  try {
-    await codeChunkStore.indexPaths({
-      buildSessionId: ctx.buildSessionId,
-      draftSessionId: ctx.draftSessionId,
-      attempt: ctx.attempt,
-      buildDir: ctx.buildDir,
-      paths: [rel],
-    });
-  } catch (e) {
-    console.warn(`[codeTools] re-index ${rel} failed: ${(e as Error).message}`);
-  }
-  ctx.onPathsChanged?.([rel]);
-}
-
+/**
+ * Build the tool set passed to the CODE agent LLM loop.
+ * Tool I/O logging is handled by agentRuntime.runAgentWithTools — not here.
+ */
 export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnType<typeof tool>> {
   return {
     list_files: tool({
-      description: 'List all files under the build workspace with byte sizes.',
+      description: 'List files under the build workspace with byte sizes.',
       inputSchema: z.object({
-        subpath: z.string().optional().describe('Optional subdirectory to list, e.g. services/order-worker'),
+        subpath: z.string().optional().describe('Optional subdirectory, e.g. services/order-service'),
       }),
-      execute: wrapToolExecute(ctx, 'list_files', async ({ subpath }: { subpath?: string }) => {
+      execute: async ({ subpath }: { subpath?: string }) => {
         const root = subpath ? resolveInWorkspace(ctx.buildDir, subpath) : ctx.buildDir;
         if (!root || !fs.existsSync(root)) {
           return { ok: false, error: 'path not found or not allowed' };
@@ -155,19 +96,18 @@ export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnTyp
         } else {
           listFilesRecursive(root, prefix, entries);
         }
-        emitToolEvent(ctx, { name: 'list_files', subpath: subpath || '.', ok: true });
         return { ok: true, files: entries };
-      }),
+      },
     }),
 
     read_file: tool({
-      description: 'Read a file from the build workspace. Optionally limit to line range.',
+      description: 'Read a file from the build workspace. Optionally limit to a line range.',
       inputSchema: z.object({
-        path: z.string().describe('Relative path, e.g. services/api/app.py'),
+        path: z.string(),
         startLine: z.number().int().positive().optional(),
         endLine: z.number().int().positive().optional(),
       }),
-      execute: wrapToolExecute(ctx, 'read_file', async ({ path: relPath, startLine, endLine }: {
+      execute: async ({ path: relPath, startLine, endLine }: {
         path: string;
         startLine?: number;
         endLine?: number;
@@ -183,18 +123,17 @@ export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnTyp
           const end = Math.min(lines.length, endLine || lines.length);
           content = lines.slice(start - 1, end).join('\n');
         }
-        emitToolEvent(ctx, { name: 'read_file', path: relPath, ok: true });
         return { ok: true, path: relPath, content: capOutput(content) };
-      }),
+      },
     }),
 
     write_file: tool({
       description: 'Create or fully replace a file in the build workspace.',
       inputSchema: z.object({
-        path: z.string().describe('Relative path to write'),
-        content: z.string().describe('Full file content'),
+        path: z.string(),
+        content: z.string(),
       }),
-      execute: wrapToolExecute(ctx, 'write_file', async ({ path: relPath, content }: { path: string; content: string }) => {
+      execute: async ({ path: relPath, content }: { path: string; content: string }) => {
         if (!isWritablePath(relPath)) {
           return { ok: false, error: 'path not writable — use services/*, init/*, docker-compose.yml, or challenge.json' };
         }
@@ -205,61 +144,97 @@ export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnTyp
         if (!abs) return { ok: false, error: 'invalid path' };
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         fs.writeFileSync(abs, content);
-        await afterMutation(ctx, relPath);
-        emitToolEvent(ctx, { name: 'write_file', path: relPath, ok: true });
         return { ok: true, path: relPath, bytes: content.length };
+      },
+    }),
+
+    write_files: tool({
+      description:
+        'Create or replace multiple files in one call. Preferred for scaffold — pass docker-compose.yml, challenge.json, service Dockerfiles/code, and init scripts together.',
+      inputSchema: z.object({
+        files: z
+          .array(z.object({ path: z.string(), content: z.string() }))
+          .min(1)
+          .max(24)
+          .describe('Files to write, each with path and full content'),
       }),
+      execute: async ({ files }: { files: Array<{ path: string; content: string }> }) => {
+        const written: Array<{ path: string; bytes: number }> = [];
+        const errors: string[] = [];
+        let totalChars = 0;
+        for (const file of files) {
+          totalChars += file.content.length;
+          if (totalChars > MAX_WRITE_CHARS * 24) {
+            errors.push('batch exceeds total size limit');
+            break;
+          }
+          if (!isWritablePath(file.path)) {
+            errors.push(`${file.path}: not writable`);
+            continue;
+          }
+          if (file.content.length > MAX_WRITE_CHARS) {
+            errors.push(`${file.path}: exceeds ${MAX_WRITE_CHARS} char limit`);
+            continue;
+          }
+          const abs = resolveInWorkspace(ctx.buildDir, file.path);
+          if (!abs) {
+            errors.push(`${file.path}: invalid path`);
+            continue;
+          }
+          fs.mkdirSync(path.dirname(abs), { recursive: true });
+          fs.writeFileSync(abs, file.content);
+          written.push({ path: file.path, bytes: file.content.length });
+        }
+        return {
+          ok: errors.length === 0,
+          written,
+          errors: errors.length ? errors : undefined,
+          count: written.length,
+        };
+      },
     }),
 
     edit_file: tool({
-      description: 'Replace a single unique occurrence in a file (surgical patch).',
+      description: 'Replace one unique occurrence in a file (surgical patch).',
       inputSchema: z.object({
         path: z.string(),
         old_string: z.string(),
         new_string: z.string(),
       }),
-      execute: wrapToolExecute(ctx, 'edit_file', async ({ path: relPath, old_string, new_string }: {
+      execute: async ({ path: relPath, old_string, new_string }: {
         path: string;
         old_string: string;
         new_string: string;
       }) => {
-        if (!isWritablePath(relPath)) {
-          return { ok: false, error: 'path not writable' };
-        }
+        if (!isWritablePath(relPath)) return { ok: false, error: 'path not writable' };
         const abs = resolveInWorkspace(ctx.buildDir, relPath);
-        if (!abs || !fs.existsSync(abs)) {
-          return { ok: false, error: 'file not found' };
-        }
+        if (!abs || !fs.existsSync(abs)) return { ok: false, error: 'file not found' };
         const content = fs.readFileSync(abs, 'utf8');
         const count = content.split(old_string).length - 1;
         if (count === 0) {
-          return { ok: false, error: 'old_string not found — use read_file to verify content, or use write_file for full replace' };
+          return { ok: false, error: 'old_string not found — use read_file first, or write_file for full replace' };
         }
         if (count > 1) {
-          return { ok: false, error: `old_string matches ${count} times — provide more context for a unique match` };
+          return { ok: false, error: `old_string matches ${count} times — provide more context` };
         }
         const updated = content.replace(old_string, new_string);
         if (updated.length > MAX_WRITE_CHARS) {
           return { ok: false, error: `result exceeds ${MAX_WRITE_CHARS} char limit — use write_file` };
         }
         fs.writeFileSync(abs, updated);
-        await afterMutation(ctx, relPath);
-        emitToolEvent(ctx, { name: 'edit_file', path: relPath, ok: true });
         return { ok: true, path: relPath, bytes: updated.length };
-      }),
+      },
     }),
 
     grep: tool({
-      description: 'Search for a pattern (literal string) in workspace files.',
+      description: 'Search for a literal string pattern in workspace files.',
       inputSchema: z.object({
         pattern: z.string(),
         path: z.string().optional().describe('Optional subdirectory or file to search'),
       }),
-      execute: wrapToolExecute(ctx, 'grep', async ({ pattern, path: subpath }: { pattern: string; path?: string }) => {
+      execute: async ({ pattern, path: subpath }: { pattern: string; path?: string }) => {
         const root = subpath ? resolveInWorkspace(ctx.buildDir, subpath) : ctx.buildDir;
-        if (!root || !fs.existsSync(root)) {
-          return { ok: false, error: 'path not found' };
-        }
+        if (!root || !fs.existsSync(root)) return { ok: false, error: 'path not found' };
         const matches: Array<{ path: string; line: number; text: string }> = [];
         const walk = (dir: string, prefix: string): void => {
           if (matches.length >= MAX_GREP_MATCHES) return;
@@ -291,35 +266,39 @@ export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnTyp
         } else {
           walk(root, subpath ? safeRel(subpath) || '' : '');
         }
-        emitToolEvent(ctx, { name: 'grep', pattern, matchCount: matches.length, ok: true });
         return { ok: true, matches };
-      }),
-    }),
-
-    search_code: tool({
-      description: 'Semantic search over indexed code chunks in this build (use when logs are ambiguous).',
-      inputSchema: z.object({
-        query: z.string().describe('Natural language or error-focused search query'),
-      }),
-      execute: wrapToolExecute(ctx, 'search_code', async ({ query }: { query: string }) => {
-        const hits = await codeChunkStore.search({
-          draftSessionId: ctx.draftSessionId,
-          buildSessionId: ctx.buildSessionId,
-          query,
-        });
-        emitToolEvent(ctx, { name: 'search_code', query, hitCount: hits.length, ok: true });
-        return {
-          ok: true,
-          hits: hits.map((h: { path: string; chunkIndex: number; content: string; distance: number }) => ({
-            path: h.path,
-            chunkIndex: h.chunkIndex,
-            distance: h.distance,
-            content: capOutput(h.content, 2000),
-          })),
-        };
-      }),
+      },
     }),
   };
+
+  /*
+   * Code-chunk tools disabled for now (repair-time semantic index + search_code).
+   *
+   * const codeChunkStore = require('../stores/codeChunkStore');
+   *
+   * async function afterMutation(ctx: ToolContext, relPath: string): Promise<void> {
+   *   await codeChunkStore.indexPaths({
+   *     buildSessionId: ctx.buildSessionId,
+   *     draftSessionId: ctx.draftSessionId,
+   *     attempt: ctx.attempt,
+   *     buildDir: ctx.buildDir,
+   *     paths: [relPath],
+   *   });
+   * }
+   *
+   * search_code: tool({
+   *   description: 'Semantic search over indexed code chunks in this build.',
+   *   inputSchema: z.object({ query: z.string() }),
+   *   execute: async ({ query }) => {
+   *     const hits = await codeChunkStore.search({
+   *       draftSessionId: ctx.draftSessionId,
+   *       buildSessionId: ctx.buildSessionId,
+   *       query,
+   *     });
+   *     return { ok: true, hits };
+   *   },
+   * }),
+   */
 }
 
 module.exports = {

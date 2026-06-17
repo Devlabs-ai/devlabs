@@ -267,6 +267,7 @@ export interface ProblemSession {
   buildDir?: string | null;
   buildFailedDir?: string | null;
   buildFailedPhase?: string | null;
+  buildFailedMsg?: string | null;
   buildSessionId?: string | null;
   builtChallenge?: ChallengeFull | null;
   draftReady?: boolean;

@@ -92,6 +92,10 @@ async function upsertChunks({
   relPath: string;
   content: string;
 }): Promise<void> {
+  // Code-chunk embedding + insert disabled for now (repair-time semantic index).
+  return;
+
+  /* eslint-disable no-unreachable */
   const contentHash = hashContent(content);
   const { rows } = await pool.query(
     `SELECT content_hash FROM build_code_chunks
@@ -129,6 +133,7 @@ async function upsertChunks({
       ],
     );
   }
+  /* eslint-enable no-unreachable */
 }
 
 async function indexBuildDir({
@@ -142,6 +147,10 @@ async function indexBuildDir({
   attempt: number;
   buildDir: string;
 }): Promise<void> {
+  // Code-chunk indexing disabled for now — see upsertChunks().
+  return;
+
+  /* eslint-disable no-unreachable */
   const files = collectIndexableFiles(buildDir);
   console.log(`[codeChunks] indexing ${files.length} file(s) for build ${buildSessionId}`);
   for (const f of files) {
@@ -157,6 +166,7 @@ async function indexBuildDir({
       console.warn(`[codeChunks] index ${f.relPath} failed: ${(e as Error).message}`);
     }
   }
+  /* eslint-enable no-unreachable */
 }
 
 async function indexPaths({
@@ -172,6 +182,10 @@ async function indexPaths({
   buildDir: string;
   paths: string[];
 }): Promise<void> {
+  // Code-chunk indexing disabled for now — see upsertChunks().
+  return;
+
+  /* eslint-disable no-unreachable */
   const files = collectIndexableFiles(buildDir);
   const wanted = new Set(paths.map((p) => p.replace(/^\/+/, '')));
   for (const f of files) {
@@ -188,6 +202,7 @@ async function indexPaths({
       console.warn(`[codeChunks] indexPaths ${f.relPath} failed: ${(e as Error).message}`);
     }
   }
+  /* eslint-enable no-unreachable */
 }
 
 interface SearchHit {
@@ -216,6 +231,10 @@ async function search({
   k?: number;
   maxDistance?: number;
 }): Promise<SearchHit[]> {
+  // Semantic code-chunk retrieval disabled for now (search_code during repair).
+  return [];
+
+  /* eslint-disable no-unreachable */
   if (!query?.trim()) return [];
   const vec = await llm.embed(query);
   if (!vec) return [];
@@ -266,6 +285,7 @@ async function search({
     console.warn(`[codeChunks] search failed: ${(e as Error).message}`);
     return [];
   }
+  /* eslint-enable no-unreachable */
 }
 
 /** Explicit cleanup only — chunks are retained by default after builds complete. */

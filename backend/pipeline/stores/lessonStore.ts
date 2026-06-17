@@ -327,6 +327,7 @@ interface SpinFailure {
   message?: string;
   composeStderr?: string | null;
   logs?: string | null;
+  extractedErrors?: string[];
 }
 
 interface ValidateFailure {
@@ -349,7 +350,11 @@ async function findForRetry({
   if (spinFailureMsg) {
     parts.push(spinFailureMsg.message || '');
     parts.push(spinFailureMsg.composeStderr || '');
-    parts.push(spinFailureMsg.logs || '');
+    if (Array.isArray(spinFailureMsg.extractedErrors) && spinFailureMsg.extractedErrors.length) {
+      parts.push(spinFailureMsg.extractedErrors.join('\n'));
+    } else {
+      parts.push(spinFailureMsg.logs || '');
+    }
   }
   if (validateFailureMsg) {
     parts.push(validateFailureMsg.message || '');
@@ -367,7 +372,10 @@ async function findForRetry({
 
   if (spinFailureMsg && validateFailureMsg) {
     const startHits = await findSimilar({
-      text: [spinFailureMsg.message, spinFailureMsg.logs].filter(Boolean).join('\n'),
+      text: [
+        spinFailureMsg.message,
+        (spinFailureMsg.extractedErrors || []).join('\n') || spinFailureMsg.logs,
+      ].filter(Boolean).join('\n'),
       k: Math.ceil(k / 2),
       phase: 'spin',
       category: category as string | null,

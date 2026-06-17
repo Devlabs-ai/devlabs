@@ -1,9 +1,18 @@
 'use strict';
 
+/**
+ * Build UI checklist — maps validationSpec.steps + judge result
+ * into pass/fail items shown after each pipeline iteration.
+ */
+
 import type { ChallengeDraft, ChecklistItem, ValidationStep, ValidationResult } from '../../types/domain';
+import type { ValidationGraphSpec, ValidationGraphNode, ValidationGraphNodeSnapshot, ValidationGraphEntry } from './validationGraphTypes';
 
 interface ValidationSpecLocal {
   steps?: ValidationStep[];
+  graph?: ValidationGraphSpec;
+  graphs?: ValidationGraphEntry[];
+  version?: number;
   [key: string]: unknown;
 }
 
@@ -26,26 +35,66 @@ function formatStepLabel(step: ValidationStep | null | undefined): string {
   return `${step.type || 'step'} ${step.service || ''}`.trim();
 }
 
-function buildValidationChecklist(
-  draft: ChallengeDraft | null | undefined,
-  validationSpec: ValidationSpecLocal | null | undefined,
+function formatGraphNodeLabel(nodeId: string, node: ValidationGraphNode): string {
+  if (node.type === 'http') {
+    return `${node.method || 'GET'} ${node.service}${node.path || '/'}`;
+  }
+  if (node.type === 'exec' || node.type === 'background') {
+    const cmd = Array.isArray(node.cmd) ? node.cmd.join(' ') : String(node.cmd || '');
+    return `${node.type} ${node.service}: ${cmd.slice(0, 100)}`;
+  }
+  return nodeId;
+}
+
+const GRAPH_CONTROL_TYPES = new Set(['fork', 'join', 'wait', 'stop']);
+
+function buildValidationChecklistFromGraphs(
+  graphs: ValidationGraphEntry[] | null | undefined,
 ): ChecklistItem[] {
   const items: ChecklistItem[] = [];
-  const symptoms = draft?.brokenState?.validationSymptoms || [];
-  for (const s of symptoms) {
-    const sym = s as Record<string, unknown>;
-    const label = String(sym.check || '').trim();
-    if (!label) continue;
-    items.push({
-      id: `symptom-${(sym.id as number) ?? items.length + 1}`,
-      kind: 'symptom',
-      order: (sym.id as number) ?? items.length + 1,
-      label,
-      status: 'pending',
-      detail: null,
-    });
+  if (!graphs?.length) return items;
+  for (const entry of graphs) {
+    for (const [nodeId, node] of Object.entries(entry.graph?.nodes || {})) {
+      if (GRAPH_CONTROL_TYPES.has(node.type)) continue;
+      items.push({
+        id: `graph-${entry.symptomId}-${nodeId}`,
+        kind: 'step',
+        label: `Symptom ${entry.symptomId}: ${formatGraphNodeLabel(nodeId, node)}`,
+        status: 'pending',
+        detail: entry.symptomCheck.slice(0, 240) || null,
+      });
+    }
   }
+  items.push({
+    id: 'judge',
+    kind: 'judge',
+    label: 'Broken state is reproducible (validation judge)',
+    status: 'pending',
+    detail: null,
+  });
+  return items;
+}
 
+function buildValidationChecklistFromGraph(
+  graph: ValidationGraphSpec | null | undefined,
+): ChecklistItem[] {
+  return buildValidationChecklistFromGraphs([{
+    symptomId: 0,
+    symptomCheck: '',
+    graph: graph!,
+  }]);
+}
+
+function buildValidationChecklist(
+  validationSpec: ValidationSpecLocal | null | undefined,
+): ChecklistItem[] {
+  if (validationSpec?.graphs?.length) {
+    return buildValidationChecklistFromGraphs(validationSpec.graphs);
+  }
+  if (validationSpec?.graph?.entry && validationSpec.graph.nodes) {
+    return buildValidationChecklistFromGraph(validationSpec.graph);
+  }
+  const items: ChecklistItem[] = [];
   const steps = validationSpec?.steps || [];
   steps.forEach((step: ValidationStep, i: number) => {
     items.push({
@@ -66,22 +115,6 @@ function buildValidationChecklist(
   });
 
   return items;
-}
-
-function applySymptomStatuses(items: ChecklistItem[], passed: boolean): void {
-  for (const item of items) {
-    if (item.kind !== 'symptom') continue;
-    const lower = item.label.toLowerCase();
-    if (lower.startsWith('fixed:')) {
-      item.status = 'skip';
-      item.detail = 'Verified after candidate fix (not checked at build time)';
-    } else if (lower.startsWith('broken:')) {
-      item.status = passed ? 'pass' : 'fail';
-      item.detail = passed ? 'Observed in sandbox' : 'Not confirmed';
-    } else {
-      item.status = passed ? 'pass' : 'fail';
-    }
-  }
 }
 
 function applyValidationResults(
@@ -106,21 +139,49 @@ function applyValidationResults(
       item.status = ev.ok ? 'pass' : 'fail';
       if (ev.error) item.detail = String(ev.error);
       else if (ev.statusCode) item.detail = `HTTP ${ev.statusCode as number}`;
-      else item.detail = ev.ok ? 'Step passed' : 'Check failed';
+      else item.detail = ev.ok ? 'Check passed' : 'Check failed';
     }
     if (item.kind === 'judge') {
       item.status = passed ? 'pass' : 'fail';
       item.detail = feedback || null;
     }
   }
-  applySymptomStatuses(next, !!passed);
+  return next;
+}
+
+function applyGraphValidationResults(
+  checklist: ChecklistItem[],
+  {
+    snapshots = [],
+    passed,
+    feedback,
+  }: {
+    snapshots?: ValidationGraphNodeSnapshot[];
+    passed?: boolean;
+    feedback?: string | null;
+  },
+): ChecklistItem[] {
+  const next = checklist.map((item) => ({ ...item }));
+  for (const item of next) {
+    if (item.kind === 'step' && item.id.startsWith('graph-')) {
+      const snap = snapshots.find((s) => item.id === `graph-${s.symptomId}-${s.nodeId}`);
+      if (!snap) continue;
+      item.status = snap.ok ? 'pass' : 'fail';
+      item.detail = snap.error || (snap.statusCode ? `HTTP ${snap.statusCode}` : null)
+        || (snap.ok ? 'Completed' : 'Failed');
+    }
+    if (item.kind === 'judge') {
+      item.status = passed ? 'pass' : 'fail';
+      item.detail = feedback || null;
+    }
+  }
   return next;
 }
 
 const PIPELINE_PHASES = [
   { id: 'code', phase: 'CODE', label: 'Code — scaffold & edit files' },
   { id: 'spin', phase: 'SPIN', label: 'Docker compose up & services running' },
-  { id: 'validate', phase: 'VALIDATE', label: 'Validation checklist & judge' },
+  { id: 'validate', phase: 'VALIDATE', label: 'Validation checks & judge' },
 ];
 
 function buildPhaseChecklist(failedPhase: string | null | undefined): Array<{ id: string; label: string; status: string }> {
@@ -170,7 +231,7 @@ function buildIterationChecklist({
   if (validation?.checklist?.length) {
     items = validation.checklist as ChecklistItem[];
   } else if (validationSpec && (failedPhase === 'VALIDATE' || !failedPhase)) {
-    items = buildValidationChecklist(draft, validationSpec);
+    items = buildValidationChecklist(validationSpec);
     if (validation?.evidence) {
       items = applyValidationResults(items, validation as { evidence: Array<Record<string, unknown>>; passed?: boolean; feedback?: string });
     }
@@ -192,7 +253,9 @@ function buildIterationChecklist({
 module.exports = {
   formatStepLabel,
   buildValidationChecklist,
+  buildValidationChecklistFromGraphs,
   applyValidationResults,
+  applyGraphValidationResults,
   buildPhaseChecklist,
   buildIterationChecklist,
   PIPELINE_PHASES,

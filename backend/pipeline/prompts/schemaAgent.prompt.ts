@@ -37,7 +37,9 @@ RULES:
      "readyServices": ["kafka", "zookeeper", "kafka-ui"]
    Example for a Postgres slow-query challenge:
      "readyServices": ["postgres", "api"]
-9. Emit strictly valid JSON inside <challenge_draft> tags only.
+9. At build time each validationSymptoms[] entry becomes one validationSpec.graphs[] DAG in challenge.json
+   (CODE agent). Preserve symptom id and check text; do not merge symptoms into one graph.
+10. Emit strictly valid JSON inside <challenge_draft> tags only.
 
 ${V1_SCHEMA_PROMPT}`;
 
