@@ -376,13 +376,54 @@ function readComposeFile(buildDir: string): { path: string; content: string } {
   throw new Error(`no compose file found in ${buildDir}`);
 }
 
+/** Extract the YAML block for a top-level compose service (2-space indent). */
+function serviceComposeBlock(composeYaml: string, serviceName: string): string {
+  if (!composeYaml || !serviceName) return '';
+  const esc = serviceName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const svcBlockRe = new RegExp(
+    `(?:^|\\n)[ \\t]{2}${esc}:[\\s\\S]*?(?=\\n[ \\t]{2}[a-zA-Z0-9_.-]+:|$)`,
+  );
+  return composeYaml.match(svcBlockRe)?.[0] || '';
+}
+
+/** HOST_PORT_* fields published by a compose service (from its ports: mappings). */
+function hostPortFieldsForComposeService(composeYaml: string, serviceName: string): string[] {
+  return placeholderFields(serviceComposeBlock(composeYaml, serviceName));
+}
+
+/**
+ * Resolve the allocated host port for HTTP validation against a compose service.
+ * Prefers the placeholder declared in that service's compose block (what CODE wrote),
+ * then falls back to HOST_PORT_<SERVICE_NAME> derived from the service name.
+ */
+function resolveHostPortForService(
+  composeYaml: string,
+  serviceName: string,
+  portMap: PortMap,
+): number | null {
+  if (!serviceName) return null;
+
+  for (const field of hostPortFieldsForComposeService(composeYaml, serviceName)) {
+    const port = portMap[field];
+    if (port != null) return Number(port);
+  }
+
+  const canonical = `HOST_PORT_${serviceName.toUpperCase().replace(/-/g, '_')}`;
+  if (portMap[canonical] != null) return Number(portMap[canonical]);
+
+  return null;
+}
+
 /** Container port from `ports: - "${HOST_PORT_X}:8080"` for a compose service. */
 function containerPortForService(composeYaml: string, serviceName: string): number {
   if (!composeYaml || !serviceName) return 80;
+  const block = serviceComposeBlock(composeYaml, serviceName);
+  const m = block.match(/\$\{HOST_PORT_[^}]+\}:(\d+)/);
+  if (m) return parseInt(m[1], 10);
   const esc = serviceName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`^  ${esc}:[\\s\\S]*?\\$\\{HOST_PORT_[^}]+\\}:(\\d+)`, 'm');
-  const m = composeYaml.match(re);
-  return m ? parseInt(m[1], 10) : 80;
+  const legacy = composeYaml.match(re);
+  return legacy ? parseInt(legacy[1], 10) : 80;
 }
 
 module.exports = {
@@ -397,6 +438,9 @@ module.exports = {
   waitForServices,
   readComposeFile,
   containerPortForService,
+  serviceComposeBlock,
+  hostPortFieldsForComposeService,
+  resolveHostPortForService,
   placeholderFields,
   extractServiceNames,
   extractBuildContexts,

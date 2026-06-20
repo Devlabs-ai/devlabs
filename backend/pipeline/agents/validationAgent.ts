@@ -36,6 +36,7 @@ interface EvidenceItem {
 /** Execute one legacy validationSpec step. */
 async function runStep(
   buildDir: string,
+  composeYaml: string,
   portMap: PortMap,
   step: ValidationStep,
   ctx: { metricsService?: string | null } = {},
@@ -44,8 +45,11 @@ async function runStep(
 
   try {
     if (step.type === 'http') {
-      const portField = `HOST_PORT_${(step.service || '').toUpperCase().replace(/-/g, '_')}`;
-      const externalPort = portMap[portField] || step.port;
+      const externalPort = composeManager.resolveHostPortForService(composeYaml, step.service || '', portMap);
+      if (externalPort == null) {
+        out.error = `no allocated host port for service "${step.service}"`;
+        return out;
+      }
       const url = `http://localhost:${externalPort}${step.path || '/'}`;
       const res = await fetch(url, { method: step.method || 'GET' }).catch((e: Error) => ({
         ok: false,
@@ -127,11 +131,13 @@ type OnLog = (payload: string | Record<string, unknown>) => void;
 
 async function runLegacySteps({
   buildDir,
+  composeYaml,
   portMap,
   validationSpec,
   log,
 }: {
   buildDir: string;
+  composeYaml: string;
   portMap: PortMap;
   validationSpec: { steps?: ValidationStep[]; metricsService?: string | null; [key: string]: unknown };
   log: (opts: string | Record<string, unknown>) => void;
@@ -162,7 +168,7 @@ async function runLegacySteps({
         : `${step.service}: ${(Array.isArray(step.cmd) ? step.cmd : [step.cmd]).join(' ')}`;
     log({ level: 'info', tag: 'validate', message: `Step: ${step.type} → ${label}` });
     // eslint-disable-next-line no-await-in-loop
-    const result = await runStep(buildDir, portMap, step, { metricsService });
+    const result = await runStep(buildDir, composeYaml, portMap, step, { metricsService });
     evidence.push(result);
     log({
       level: result.ok ? 'ok' : 'error',
@@ -258,6 +264,7 @@ async function validate({
   const spec = sandboxSpec || normalized?.sandboxSpec || {};
   const broken = normalized?.brokenState || {};
   const useGraph = hasValidationGraph(validationSpec);
+  const { content: composeYaml } = composeManager.readComposeFile(buildDir);
 
   let checklist: ChecklistItem[] = buildValidationChecklist(validationSpec);
   let evidence: EvidenceItem[] = [];
@@ -280,6 +287,7 @@ async function validate({
   } else {
     evidence = await runLegacySteps({
       buildDir,
+      composeYaml,
       portMap,
       validationSpec: validationSpec || {},
       log,

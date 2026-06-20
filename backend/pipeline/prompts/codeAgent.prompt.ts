@@ -143,7 +143,9 @@ WRONG — Docker default-value syntax (verification regex does NOT match this):
     - "\${HOST_PORT_KAFKA:-19091}:9092"
 
 Rules:
-  - Name: HOST_PORT_<UPPER_SNAKE> derived from the service (kafka-1 → HOST_PORT_KAFKA_1).
+  - Name: HOST_PORT_<UPPER_SNAKE> — typically derived from the service (order-api → HOST_PORT_ORDER_API;
+    api-service may use HOST_PORT_API or HOST_PORT_API_SERVICE). Validation resolves the placeholder
+    from each service's compose ports: block, not from the service name alone.
   - Format: "\${HOST_PORT_<NAME>}:<containerPort>" — closing brace immediately after the name.
   - At least one \${HOST_PORT_*} must appear in docker-compose.yml.
   - http validation steps hit localhost via these placeholders; expose ports for services
@@ -223,6 +225,7 @@ Ensure while writing files (from draft + rules below):
 
 ============================= DEVLABS INVARIANTS (summary) ==================
   - Host ports: "\${HOST_PORT_<UPPER_SNAKE>}:<containerPort>" only (see above)
+  - HTTP validation resolves host ports from each service's compose ports mapping (name need not equal service name)
   - build.context: ./services/<service-name> for every built service + Dockerfile required
   - image: from draft.infra image_hint for off-the-shelf infra (Kafka, Postgres, Prometheus, Redis)
   - devlabs.role on every service: infra | worker | one-shot
