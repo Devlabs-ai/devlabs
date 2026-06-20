@@ -1,6 +1,8 @@
 node_modules/
 dist/
 build/
+!backend/pipeline/build/
+!backend/pipeline/build/**
 .env
 .env.local
 *.log
