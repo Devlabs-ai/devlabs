@@ -42,12 +42,20 @@ Open <http://localhost:5173>.
 
 ## Logging In
 
-The MVP ships with a single hardcoded interviewer account:
+Dev uses OTP login with shared seed tenants in `backend/auth/seeds/devTenants.ts`. On first boot when the `companies` table is empty, the backend auto-seeds a Devlabs company and two users.
 
-| Field    | Value      |
-|----------|------------|
-| Username | `admin`    |
-| Password | `admin123` |
+Set a fixed OTP in `backend/.env` (see `.env.example`):
+
+```bash
+DEV_OTP=123456
+```
+
+| Field | Value |
+|-------|-------|
+| Email | `admin@devlabs.app` (admin) or `interviewer@devlabs.app` |
+| OTP | `123456` (when `DEV_OTP` is set) |
+
+Request a code from the sign-in modal, then enter the OTP. Without `DEV_OTP`, the code is printed to the backend console (SMTP is optional in dev).
 
 Interviewers can create one-time candidate invites from the **Invites** panel. A candidate visits `http://localhost:5173/?candidate=<token>` to play without a JWT.
 

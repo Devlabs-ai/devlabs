@@ -19,6 +19,7 @@ SHELL := /bin/bash
 
 .PHONY: help install infra-up infra-down infra-reset backend frontend dev stop \
         build clean reset seed-catalogue seed-catalogue-if-empty seed-catalogue-dry \
+        seed-dev-tenants seed-dev-tenants-dry \
         backfill-buckets \
         prod-build prod-pull prod-up prod-deploy prod-restart prod-down prod-logs
 
@@ -40,7 +41,8 @@ help:
 	@printf "  %-14s %s\n" "prod-restart"  "pull latest images + recreate containers"
 	@printf "  %-14s %s\n" "prod-down"     "stop production compose stack"
 	@printf "  %-14s %s\n" "prod-logs"     "tail production compose logs"
-	@printf "  %-14s %s\n" "seed-catalogue"   "seed catalogue table from seeds/catalogue.js (insert-only)"
+	@printf "  %-22s %s\n" "seed-catalogue"   "seed catalogue table from seeds/catalogue.js (insert-only)"
+	@printf "  %-22s %s\n" "seed-dev-tenants" "seed dev company/users when companies is empty"
 	@printf "  %-14s %s\n" "backfill-buckets" "audit / repair NULL bucket on challenges (see scripts/backfillBuckets.js)"
 	@printf "  %-14s %s\n" "clean"       "remove node_modules, dist, ephemeral sandbox dirs"
 	@printf "  %-14s %s\n" "reset"       "clean + infra-reset (full wipe)"
@@ -159,6 +161,16 @@ seed-catalogue-if-empty:
 
 seed-catalogue-dry:
 	cd backend && node scripts/seedCatalogue.js --dry-run $(ARGS)
+
+# ---------------------------------------------------------------------------
+# dev tenant seeding (companies + users for local OTP login)
+# ---------------------------------------------------------------------------
+
+seed-dev-tenants:
+	cd backend && npx tsx scripts/seedDevTenants.ts $(ARGS)
+
+seed-dev-tenants-dry:
+	cd backend && npx tsx scripts/seedDevTenants.ts --dry-run $(ARGS)
 
 # ---------------------------------------------------------------------------
 # bucket backfill

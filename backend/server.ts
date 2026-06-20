@@ -13,6 +13,7 @@ const { WebSocketServer } = require('ws');
 
 const { runMigrations } = require('./db/migrate');
 const { seedCatalogueIfEmpty } = require('./pipeline/catalogue/seeds/runCatalogueSeed');
+const { seedDevTenantsIfEmpty } = require('./auth/seeds/runDevTenantSeed');
 const sessionStore = require('./db/sessionStore');
 const draftStore = require('./pipeline/stores/problemDraftStore');
 const { loadChallengesFromDB, seedChallengesFromDisk } = require('./challenges/loader');
@@ -95,6 +96,9 @@ async function start(): Promise<void> {
 
   const catalogueSeeded = await seedCatalogueIfEmpty({ onLog: (msg: string) => console.log(`[boot] ${msg}`) });
   if (catalogueSeeded > 0) console.log(`[boot] catalogue seeded ${catalogueSeeded} entries`);
+
+  const tenantsSeeded = await seedDevTenantsIfEmpty({ onLog: (msg: string) => console.log(`[boot] ${msg}`) });
+  if (tenantsSeeded > 0) console.log(`[boot] dev tenants seeded ${tenantsSeeded} company(ies)`);
 
   console.log('[boot] restoring active sessions from db...');
   await sessionStore.restoreFromDB();
