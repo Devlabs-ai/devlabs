@@ -94,11 +94,23 @@ function buildSnapshotPayload(
 
 async function runHttpNode(
   buildDir: string,
+  composeYaml: string,
   portMap: PortMap,
   node: ValidationGraphNode,
 ): Promise<{ ok: boolean; error?: string | null; statusCode: number; body: string }> {
-  const portField = `HOST_PORT_${(node.service || '').toUpperCase().replace(/-/g, '_')}`;
-  const externalPort = portMap[portField] || node.port;
+  const externalPort = composeManager.resolveHostPortForService(composeYaml, node.service || '', portMap);
+  if (externalPort == null) {
+    const composeFields = composeManager.hostPortFieldsForComposeService(composeYaml, node.service || '');
+    const hint = composeFields.length
+      ? `compose publishes ${composeFields.map((f: string) => `\${${f}}`).join(', ')}`
+      : 'no ${HOST_PORT_*} placeholder found for this service in docker-compose.yml';
+    return {
+      ok: false,
+      error: `no allocated host port for service "${node.service}" (${hint})`,
+      statusCode: 0,
+      body: '',
+    };
+  }
   const url = `http://localhost:${externalPort}${node.path || '/'}`;
   const method = node.method || 'GET';
   const headers: Record<string, string> = { ...(node.headers || {}) };
@@ -215,6 +227,7 @@ export async function runValidationGraphSuite({
   onNodeComplete?: (snap: ValidationGraphNodeSnapshot) => void;
   onGraphStart?: (entry: ValidationGraphEntry, index: number, total: number) => void;
 }): Promise<ValidationGraphSuiteResult> {
+  const { content: composeYaml } = composeManager.readComposeFile(buildDir);
   const graphResults: ValidationGraphSuiteResult['graphs'] = [];
   const allSnapshots: ValidationGraphNodeSnapshot[] = [];
   const coverageGoals: string[] = [];
@@ -231,6 +244,7 @@ export async function runValidationGraphSuite({
     // eslint-disable-next-line no-await-in-loop
     const result = await runValidationGraph({
       buildDir,
+      composeYaml,
       portMap,
       graph: entry.graph,
       onNodeStart: onNodeStart
@@ -278,17 +292,20 @@ export async function runValidationGraphSuite({
  */
 export async function runValidationGraph({
   buildDir,
+  composeYaml,
   portMap,
   graph,
   onNodeStart,
   onNodeComplete,
 }: {
   buildDir: string;
+  composeYaml?: string;
   portMap: PortMap;
   graph: ValidationGraphSpec;
   onNodeStart?: (nodeId: string, label: string) => void;
   onNodeComplete?: (snap: ValidationGraphNodeSnapshot) => void;
 }): Promise<ValidationGraphRunResult> {
+  const compose = composeYaml || composeManager.readComposeFile(buildDir).content;
   const snapshots: ValidationGraphNodeSnapshot[] = [];
   const nodeOutcomes: ValidationGraphRunResult['nodeOutcomes'] = {};
   const backgroundJobs = new Map<string, BackgroundJob>();
@@ -306,7 +323,7 @@ export async function runValidationGraph({
     const start = Date.now();
 
     if (node.type === 'http') {
-      const result = await runHttpNode(buildDir, portMap, node);
+      const result = await runHttpNode(buildDir, compose, portMap, node);
       const snap = buildSnapshotPayload(nodeId, node, { ...result, ms: Date.now() - start });
       record(snap);
       if (!result.ok && !node.optional) {

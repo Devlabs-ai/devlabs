@@ -10,7 +10,6 @@ import * as path from 'path';
 
 const composeManager = require('../../sandbox/composeManager');
 
-const HOST_PORT_RE = /\$\{HOST_PORT_[A-Z0-9_]+\}/;
 const METRIC_RE = /METRIC\s+latency=/;
 
 function readUtf8(filePath: string): string | null {
