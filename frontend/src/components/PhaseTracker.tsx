@@ -8,7 +8,6 @@ const PHASE_META: Record<string, { title: string; subtitle: string }> = {
   GENERATE: { title: 'Code', subtitle: 'Scaffold & edit files' },
   WRITE: { title: 'Code', subtitle: 'Scaffold & edit files' },
   SPIN: { title: 'Spin', subtitle: 'Compose & services' },
-  START: { title: 'Spin', subtitle: 'Compose & services' },
   VALIDATE: { title: 'Validate', subtitle: 'Checklist & judge' },
 };
 
@@ -17,13 +16,11 @@ const PHASE_ID_TO_KEY: Record<string, string> = {
   generate: 'CODE',
   write: 'CODE',
   spin: 'SPIN',
-  start: 'SPIN',
   validate: 'VALIDATE',
 };
 
 function normalizePipelinePhase(phase: string | null | undefined): string {
   const upper = String(phase || '').toUpperCase();
-  if (upper === 'START') return 'SPIN';
   if (upper === 'GENERATE' || upper === 'WRITE') return 'CODE';
   return upper;
 }

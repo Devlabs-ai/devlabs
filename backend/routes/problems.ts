@@ -67,6 +67,7 @@ function healMaterializedDraft(session: Record<string, unknown>): boolean {
 
 function publicDraft(d: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
   if (!d) return null;
+  draftStore.hydrateBuildLogsIfNeeded(d);
   shapeState.syncShapePhase(d);
   return {
     id: d.id,

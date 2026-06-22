@@ -43,7 +43,6 @@ const STATEMENTS: string[] = [
      id          TEXT PRIMARY KEY,
      draft       JSONB,
      build_dir   TEXT,
-     build_logs  JSONB,
      created_at  BIGINT NOT NULL,
      updated_at  BIGINT NOT NULL
    )`,
@@ -67,7 +66,7 @@ const STATEMENTS: string[] = [
   `DROP TABLE IF EXISTS specialists`,
   `CREATE TABLE IF NOT EXISTS lessons (
      id               SERIAL PRIMARY KEY,
-     phase            TEXT NOT NULL CHECK (phase IN ('start', 'validate')),
+     phase            TEXT NOT NULL CHECK (phase IN ('spin', 'validate')),
      draft_session_id TEXT,
      build_session_id TEXT NOT NULL,
      category         TEXT,
@@ -100,11 +99,22 @@ const STATEMENTS: string[] = [
      created_at      BIGINT NOT NULL,
      updated_at      BIGINT NOT NULL
    )`,
-  // Add lesson type: 'fix' (phase failed then succeeded within a run) or
-  // 'anti-pattern' (build exhausted all iterations without ever passing).
-  `ALTER TABLE lessons ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'fix'
-     CHECK (type IN ('fix', 'anti-pattern'))`,
-  `CREATE INDEX IF NOT EXISTS idx_lessons_type ON lessons (phase, type)`,
+  // Lesson type column (fix vs anti-pattern) removed — only successful phase recoveries are stored.
+  `DO $$ BEGIN
+     IF EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'lessons' AND column_name = 'type'
+     ) THEN
+       DELETE FROM lessons WHERE type = 'anti-pattern';
+     END IF;
+   END $$`,
+  `DROP INDEX IF EXISTS idx_lessons_type`,
+  `ALTER TABLE lessons DROP CONSTRAINT IF EXISTS lessons_type_check`,
+  `ALTER TABLE lessons DROP COLUMN IF EXISTS type`,
+  // Rename legacy `start` phase label to `spin` (same pipeline phase as SPIN).
+  `ALTER TABLE lessons DROP CONSTRAINT IF EXISTS lessons_phase_check`,
+  `UPDATE lessons SET phase = 'spin' WHERE phase = 'start'`,
+  `ALTER TABLE lessons ADD CONSTRAINT lessons_phase_check CHECK (phase IN ('spin', 'validate'))`,
 
   // Persistent per-draft code chunks for semantic search during CODE repair
   // and future work on the same challenge draft.
@@ -179,6 +189,94 @@ const STATEMENTS: string[] = [
   `ALTER TABLE draft_sessions ADD COLUMN IF NOT EXISTS authored_by TEXT REFERENCES users(id)`,
   `CREATE INDEX IF NOT EXISTS idx_draft_sessions_authored_by ON draft_sessions (authored_by)`,
 
+  // Build pipeline state — first-class columns (retry/resume + status). Previously buried in build_logs JSONB.
+  `ALTER TABLE draft_sessions ADD COLUMN IF NOT EXISTS build_status TEXT`,
+  `ALTER TABLE draft_sessions ADD COLUMN IF NOT EXISTS build_session_id TEXT`,
+  `ALTER TABLE draft_sessions ADD COLUMN IF NOT EXISTS build_failed_dir TEXT`,
+  `ALTER TABLE draft_sessions ADD COLUMN IF NOT EXISTS build_failed_session_id TEXT`,
+  `ALTER TABLE draft_sessions ADD COLUMN IF NOT EXISTS build_failed_phase TEXT`,
+  `ALTER TABLE draft_sessions ADD COLUMN IF NOT EXISTS build_failed_msg TEXT`,
+  `ALTER TABLE draft_sessions ADD COLUMN IF NOT EXISTS build_current_phase TEXT`,
+  `ALTER TABLE draft_sessions ADD COLUMN IF NOT EXISTS build_current_attempt INT NOT NULL DEFAULT 0`,
+  `ALTER TABLE draft_sessions ADD COLUMN IF NOT EXISTS build_attempts INT NOT NULL DEFAULT 0`,
+  // One-time backfill from legacy build_logs JSONB (column removed after migration).
+  `DO $$ BEGIN
+     IF EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'draft_sessions' AND column_name = 'build_logs'
+     ) THEN
+       UPDATE draft_sessions SET
+         build_status = COALESCE(build_status, build_logs->>'buildStatus'),
+         build_session_id = COALESCE(build_session_id, build_logs->>'buildSessionId'),
+         build_failed_dir = COALESCE(build_failed_dir, build_logs->>'buildFailedDir'),
+         build_failed_session_id = COALESCE(build_failed_session_id, build_logs->>'buildFailedSessionId'),
+         build_failed_phase = COALESCE(build_failed_phase, build_logs->>'buildFailedPhase'),
+         build_failed_msg = COALESCE(build_failed_msg, build_logs->>'buildFailedMsg'),
+         build_current_phase = COALESCE(build_current_phase, build_logs->>'buildCurrentPhase'),
+         build_current_attempt = COALESCE(NULLIF(build_current_attempt, 0),
+           NULLIF((build_logs->>'buildCurrentAttempt')::int, 0), 0),
+         build_attempts = COALESCE(NULLIF(build_attempts, 0),
+           NULLIF((build_logs->>'buildAttempts')::int, 0), 0)
+       WHERE build_logs IS NOT NULL;
+     END IF;
+   END $$`,
+
+  // Authoring workflow state — shape chat, checklists, validation (was build_logs JSONB on draft_sessions).
+  `CREATE TABLE IF NOT EXISTS draft_session_meta (
+     session_id             TEXT PRIMARY KEY REFERENCES draft_sessions(id) ON DELETE CASCADE,
+     messages               JSONB NOT NULL DEFAULT '[]'::jsonb,
+     shape_phase            TEXT NOT NULL DEFAULT 'design',
+     design_approved        BOOLEAN NOT NULL DEFAULT false,
+     schema_materialized    BOOLEAN NOT NULL DEFAULT false,
+     build_checklists       JSONB NOT NULL DEFAULT '[]'::jsonb,
+     build_latest_checklist JSONB,
+     built_challenge        JSONB,
+     build_validation       JSONB,
+     review_feedback        JSONB,
+     pipeline_logs          JSONB NOT NULL DEFAULT '[]'::jsonb
+   )`,
+  `ALTER TABLE draft_session_meta ADD COLUMN IF NOT EXISTS pipeline_logs JSONB NOT NULL DEFAULT '[]'::jsonb`,
+  `DO $$ BEGIN
+     IF EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'draft_sessions' AND column_name = 'build_logs'
+     ) THEN
+       INSERT INTO draft_session_meta (
+         session_id, messages, shape_phase, design_approved, schema_materialized,
+         build_checklists, build_latest_checklist, built_challenge, build_validation, review_feedback,
+         pipeline_logs
+       )
+       SELECT
+         ds.id,
+         COALESCE(ds.build_logs->'messages', '[]'::jsonb),
+         CASE
+           WHEN ds.build_logs->>'shapePhase' = 'description' THEN 'design'
+           ELSE COALESCE(ds.build_logs->>'shapePhase', 'design')
+         END,
+         COALESCE(
+           (ds.build_logs->>'designApproved')::boolean,
+           (ds.build_logs->>'descriptionApproved')::boolean,
+           false
+         ),
+         COALESCE((ds.build_logs->>'schemaMaterialized')::boolean, false),
+         COALESCE(ds.build_logs->'buildChecklists', '[]'::jsonb),
+         ds.build_logs->'buildLatestChecklist',
+         ds.build_logs->'builtChallenge',
+         ds.build_logs->'buildValidation',
+         ds.build_logs->'reviewFeedback',
+         COALESCE(ds.build_logs->'buildLogs', '[]'::jsonb)
+       FROM draft_sessions ds
+       WHERE ds.build_logs IS NOT NULL
+       ON CONFLICT (session_id) DO UPDATE SET
+         pipeline_logs = CASE
+           WHEN draft_session_meta.pipeline_logs = '[]'::jsonb
+             THEN COALESCE(EXCLUDED.pipeline_logs, '[]'::jsonb)
+           ELSE draft_session_meta.pipeline_logs
+         END;
+     END IF;
+   END $$`,
+  `ALTER TABLE draft_sessions DROP COLUMN IF EXISTS build_logs`,
+
   // Backfill existing rows to the dev admin user when present
   `UPDATE challenges SET authored_by = (SELECT id FROM users WHERE email = 'admin@devlabs.app' LIMIT 1)
      WHERE authored_by IS NULL
@@ -205,8 +303,11 @@ const STATEMENTS: string[] = [
   `DELETE FROM draft_sessions ds
      WHERE ds.build_dir IS NULL
        AND NOT EXISTS (SELECT 1 FROM reviews r WHERE r.session_id = ds.id)
-       AND (ds.build_logs->>'builtChallenge') IS NOT NULL
-       AND COALESCE(ds.build_logs->>'buildStatus', '') NOT IN ('building', 'review_ready', 'failed')`,
+       AND EXISTS (
+         SELECT 1 FROM draft_session_meta m
+         WHERE m.session_id = ds.id AND m.built_challenge IS NOT NULL
+       )
+       AND COALESCE(ds.build_status, '') NOT IN ('building', 'review_ready', 'failed')`,
 
   // Play sessions: drop automated scoring artifacts (interviewer evaluates manually).
   `DROP TABLE IF EXISTS session_events`,

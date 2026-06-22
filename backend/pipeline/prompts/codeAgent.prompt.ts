@@ -10,7 +10,7 @@ The user message includes a JSON payload. Treat these as authoritative:
   - draft.infra.services[] — service names, image_hint, roles (from Shape)
   - draft.brokenState — root cause and validationSymptoms (what must be observable)
   - draft.sandboxSpec — optional layout hints when present
-  - lessonsBlock — past fix/anti-pattern lessons on retry
+  - lessonsBlock — past fix lessons on retry
   - spinFailureMsg / validateFailureMsg — on repair iterations
 
 Derive the file layout from the draft — do not assume a fixed stack.

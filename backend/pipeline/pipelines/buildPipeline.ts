@@ -74,7 +74,7 @@ function readComposeSnippet(buildDir: string | null): string | null {
   }
 }
 
-/** Capture a compact record of a failed phase for lesson anti-patterns. */
+/** Capture a compact record of a failed phase for fix-lesson recording. */
 function captureFailureSnapshot({
   attempt,
   phase,
@@ -242,12 +242,22 @@ async function runBuildLoop({
 
   fs.mkdirSync(BUILDS_ROOT, { recursive: true });
 
+  // --- Build workspace: fresh folder vs resume after a prior failed POST /build ---
+  //
+  // resumeBuildDir is set by routes/problems when the user retries (buildFailedDir from
+  // the draft session). It points at sandbox/builds/<buildSessionId>/ with docker-compose,
+  // services/, etc. still on disk from the last run.
+  //
+  // hasResumeDir is true only when that path exists — if the folder was deleted we fall
+  // back to a new UUID workspace. This is separate from in-loop retries (attempts 2–5
+  // inside one HTTP request), which reuse buildDir without touching resumeBuildDir again.
   const hasResumeDir = !!(resumeBuildDir && fs.existsSync(resumeBuildDir));
   const normalizedResumePhase = normalizeResumePhase(resumeFailurePhase);
 
   let buildSessionId: string;
   let buildDir: string;
   if (hasResumeDir) {
+    // Cross-request retry: keep the same buildSessionId (folder basename) and files.
     buildDir = resumeBuildDir!;
     buildSessionId = path.basename(buildDir);
   } else {
@@ -264,32 +274,22 @@ async function runBuildLoop({
     fs.mkdirSync(buildDir, { recursive: true });
   }
 
-  emitLog(onEvent, {
-    level: 'phase',
-    tag: 'build',
-    message: hasResumeDir
-      ? `Retrying build in same workspace after ${normalizedResumePhase || 'pipeline'} failure (max ${MAX_ITERATIONS} iterations)`
-      : `Starting build pipeline (max ${MAX_ITERATIONS} iterations)`,
-    detail: {
-      title: normalized.meta?.name || normalized.title,
-      services: serviceSummary,
-      rootCause: cap(normalized.brokenState?.rootCause, 200),
-      ...(hasResumeDir ? { buildDir, buildSessionId } : {}),
-    },
-  });
-
   console.log(
     `[build] started draftSessionId=${draftSessionId} buildSessionId=${buildSessionId} buildDir=${buildDir}`,
   );
   emitLog(onEvent, {
     level: 'info',
     tag: 'build',
-    message: 'Build session allocated',
-    detail: { draftSessionId, buildSessionId, buildDir },
+    message: hasResumeDir
+      ? `Retrying build in same workspace after ${normalizedResumePhase || 'pipeline'} failure (max ${MAX_ITERATIONS} iterations)`
+      : `Starting build pipeline (max ${MAX_ITERATIONS} iterations)`,
+    detail: buildDir,
   });
 
   let lastAttempt: BuildAttempt | null = null;
   let assets: ReturnType<typeof codeAgent.loadAssetsFromBuildDir> = null;
+  // When resuming, seed iteration 1 with the last failure so CODE starts in repair mode
+  // (spinFailureMsg / validateFailureMsg / resumeCodeFailure from draft session fields).
   let spinFailureMsg: Record<string, unknown> | null = (
     hasResumeDir && normalizedResumePhase === 'SPIN'
   ) ? resumeFailureMsg as Record<string, unknown> : null;
@@ -318,7 +318,7 @@ async function runBuildLoop({
         level: 'info',
         tag: 'lessons',
         message: `Warm-start: injecting ${warmLessons.relatedLessons.length} lesson(s) before iteration 1`,
-        detail: `Top match similarity ${best.similarity != null ? (best.similarity as number).toFixed(2) : 'n/a'} (${best.type || 'fix'})`,
+        detail: `Top match similarity ${best.similarity != null ? (best.similarity as number).toFixed(2) : 'n/a'} (${best.phase || 'unknown'})`,
       });
     }
   } catch (e) {
@@ -359,6 +359,10 @@ async function runBuildLoop({
       console.log(`[build] CODE workspace ${buildDir} (session ${buildSessionId})`);
     }
 
+    // Heuristic: docker-compose.yml means CODE already ran. Iteration 2+ switches to repair.
+    // Longer term this may be too narrow — other scaffold files (challenge.json, services/*,
+    // init/*) can be missing or corrupt while compose still exists; we may need richer checks
+    // or fall back to scaffold when the workspace is incomplete.
     const hasScaffoldArtifacts = fs.existsSync(path.join(buildDir, 'docker-compose.yml'));
 
     let codeMode: 'scaffold' | 'repair' = 'scaffold';
@@ -389,7 +393,7 @@ async function runBuildLoop({
             level: 'info',
             tag: 'lessons',
             message: `Injecting ${lessonsBlock.relatedLessons.length} lesson(s) (retry)`,
-            detail: `Top match similarity ${best.similarity != null ? (best.similarity as number).toFixed(2) : 'n/a'} (${best.type || 'fix'})`,
+            detail: `Top match similarity ${best.similarity != null ? (best.similarity as number).toFixed(2) : 'n/a'} (${best.phase || 'unknown'})`,
           });
         }
       } else if (attempt === 1 && warmLessons.relatedLessons.length) {
@@ -426,14 +430,7 @@ async function runBuildLoop({
         if (usage) attemptCost.add(usage);
       }
 
-      // Code-chunk indexing disabled for now (embedding + pgvector insert after CODE).
-      // const codeChunkStore = require('../stores/codeChunkStore');
-      // await codeChunkStore.indexBuildDir({
-      //   draftSessionId,
-      //   buildSessionId,
-      //   attempt,
-      //   buildDir,
-      // });
+      // Code-chunk indexing after CODE used to run here; removed.
 
       onEvent({ type: 'buildDir', buildDir } as never);
       emitLog(onEvent, {
@@ -488,7 +485,6 @@ async function runBuildLoop({
       spinFailureMsg = null;
       if (spinFailureHistory.length > 0) {
         const lessonId = await lessonStore.record({
-          type: 'fix',
           phase: 'spin',
           draftSessionId,
           buildSessionId,
@@ -655,7 +651,6 @@ async function runBuildLoop({
       validateFailureMsg = null;
       if (validateFailureHistory.length > 0) {
         const lessonId = await lessonStore.record({
-          type: 'fix',
           phase: 'validate',
           draftSessionId,
           buildSessionId,
@@ -746,38 +741,6 @@ async function runBuildLoop({
       lastAttempt,
       attempt,
     });
-  }
-
-  const lessonTitle = normalized.meta?.name || normalized.title || assets?.title;
-  if (spinFailureHistory.length > 0) {
-    lessonStore.record({
-      type: 'anti-pattern',
-      phase: 'spin',
-      draftSessionId,
-      buildSessionId,
-      category: buildCategory,
-      title: lessonTitle,
-      draft: normalized,
-      failures: [...spinFailureHistory],
-      assets,
-    }).then((id: number | null) => {
-      if (id) console.log(`[lessons] Recorded SPIN anti-pattern #${id} (${spinFailureHistory.length} failure(s))`);
-    }).catch((e: Error) => console.warn(`[lessons] anti-pattern record failed: ${e.message}`));
-  }
-  if (validateFailureHistory.length > 0) {
-    lessonStore.record({
-      type: 'anti-pattern',
-      phase: 'validate',
-      draftSessionId,
-      buildSessionId,
-      category: buildCategory,
-      title: lessonTitle,
-      draft: normalized,
-      failures: [...validateFailureHistory],
-      assets,
-    }).then((id: number | null) => {
-      if (id) console.log(`[lessons] Recorded VALIDATE anti-pattern #${id} (${validateFailureHistory.length} failure(s))`);
-    }).catch((e: Error) => console.warn(`[lessons] anti-pattern record failed: ${e.message}`));
   }
 
   await composeManager.down(buildDir).catch(() => {});

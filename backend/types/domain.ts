@@ -187,7 +187,7 @@ export interface HttpError extends Error {
   logs?: unknown;
 }
 
-export type BuildPhase = 'CODE' | 'SPIN' | 'VALIDATE' | 'START';
+export type BuildPhase = 'CODE' | 'SPIN' | 'VALIDATE';
 
 export interface BuildAttempt {
   phase: BuildPhase | string;
@@ -322,12 +322,10 @@ export interface ServiceSpec {
 // Lessons
 // ---------------------------------------------------------------------------
 
-export type LessonType = 'fix' | 'anti-pattern';
 export type LessonPhase = 'spin' | 'validate';
 
 export interface LessonRecord {
   id: number;
-  type: LessonType;
   phase: LessonPhase;
   text: string;
   failureSummary: string;
