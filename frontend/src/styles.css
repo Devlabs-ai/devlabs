@@ -4827,6 +4827,71 @@ button.primary { background: linear-gradient(180deg, var(--brand-bright), var(--
 .pipeline-grid { flex: 1; display: flex; min-height: 0; }
 .pipeline-grid .panel { flex: 1; }
 
+.pipeline-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pipeline-panel-body--live {
+  overflow: hidden;
+  gap: 10px;
+}
+
+.pipeline-panel--live .pipeline-live-chrome {
+  flex-shrink: 0;
+}
+
+.pipeline-panel--live .pipeline-live-chrome .phase-tracker {
+  padding: 10px 12px;
+}
+
+.pipeline-panel--live .pipeline-log-stream {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+.pipeline-panel--live .pipeline-live-alert {
+  flex-shrink: 0;
+}
+
+.pipeline-live-checklist {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.pipeline-live-checklist summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  list-style: none;
+  user-select: none;
+}
+
+.pipeline-live-checklist summary::-webkit-details-marker { display: none; }
+
+.pipeline-live-checklist summary:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.pipeline-live-checklist[open] summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.pipeline-live-checklist .iteration-checklist {
+  border: none;
+  border-radius: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
 .phase-tracker {
   display: flex; flex-direction: column; gap: 8px;
   padding: 14px;
