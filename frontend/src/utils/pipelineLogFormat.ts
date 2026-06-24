@@ -4,10 +4,28 @@ export type PipelineLogEntry =
   | { kind: 'text'; text: string; level: 'info' | 'ok' | 'warn' | 'error' | 'phase' }
   | { kind: 'thinking'; label: string; step: number }
   | { kind: 'codeStep'; step: number; summary: string; tools: string; ms: number; cost: string; tokens: string }
+  | { kind: 'codeDiff'; tool: string; path: string; body: string; summary?: boolean }
   | { kind: 'separator'; text: string };
 
 const THINKING_PREFIX = '💭 ';
 const CODE_STEP_PREFIX = '⚡ ';
+const CODE_DIFF_HEADER = /^📋 CODE diff · ([^·]+) · (.+)$/;
+const CODE_DIFF_CONT = /^📋  /;
+const CODE_DIFF_SUMMARY = '📋 CODE repair summary';
+
+export function formatCodeDiffLines(args: {
+  tool?: string;
+  path?: string;
+  diff: string;
+  summary?: boolean;
+}): string[] {
+  const tool = args.tool || 'code';
+  const filePath = args.path || 'unknown';
+  const header = args.summary
+    ? CODE_DIFF_SUMMARY
+    : `📋 CODE diff · ${tool} · ${filePath}`;
+  return [header, ...args.diff.split('\n').map((line) => `📋  ${line}`)];
+}
 
 export function formatThinkingLog(label: string, step: number): string {
   return `${THINKING_PREFIX}${label} (step ${step + 1})`;
@@ -65,6 +83,43 @@ export function parseLogLine(line: string): PipelineLogEntry {
   return { kind: 'text', text: line, level };
 }
 
+/** Parse log lines, grouping multi-line CODE repair diffs into single entries. */
 export function parseLogLines(lines: string[]): PipelineLogEntry[] {
-  return lines.map(parseLogLine);
+  const out: PipelineLogEntry[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line === CODE_DIFF_SUMMARY) {
+      i += 1;
+      const bodyLines: string[] = [];
+      while (i < lines.length && CODE_DIFF_CONT.test(lines[i])) {
+        bodyLines.push(lines[i].slice(4));
+        i += 1;
+      }
+      out.push({
+        kind: 'codeDiff',
+        tool: 'repair_summary',
+        path: '(all changes)',
+        body: bodyLines.join('\n'),
+        summary: true,
+      });
+      continue;
+    }
+    const headerMatch = line.match(CODE_DIFF_HEADER);
+    if (headerMatch) {
+      const tool = headerMatch[1].trim();
+      const path = headerMatch[2].trim();
+      i += 1;
+      const bodyLines: string[] = [];
+      while (i < lines.length && CODE_DIFF_CONT.test(lines[i])) {
+        bodyLines.push(lines[i].slice(4));
+        i += 1;
+      }
+      out.push({ kind: 'codeDiff', tool, path, body: bodyLines.join('\n') });
+      continue;
+    }
+    out.push(parseLogLine(line));
+    i += 1;
+  }
+  return out;
 }

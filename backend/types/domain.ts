@@ -201,6 +201,7 @@ export type BuildEvent =
   | { type: 'log'; level?: string; tag?: string; message: string; detail?: unknown }
   | { type: 'thinking'; step: number; label: string }
   | { type: 'codeStep'; step: number; tools: string; hint?: string; ms: number; cost: string; tokens: string; toolCount?: number; summary?: string | null }
+  | { type: 'codeDiff'; tool: string; path: string; diff: string; summary?: boolean }
   | { type: 'phase'; phase: BuildPhase | string; attempt: number; total: number }
   | { type: 'buildDir'; buildDir: string }
   | { type: 'validation'; result: ValidationResult }
