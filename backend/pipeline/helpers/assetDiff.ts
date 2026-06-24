@@ -54,22 +54,29 @@ export function flattenAssetsForDiff(assets: ChallengeAssets | null | undefined)
   return out;
 }
 
-function formatFileChange(path: string, before: string | undefined, after: string | undefined): string {
+export function formatFileChange(
+  filePath: string,
+  before: string | undefined,
+  after: string | undefined,
+  opts?: { beforeLabel?: string; afterLabel?: string },
+): string {
   if (before === after) return '';
+  const beforeLabel = opts?.beforeLabel ?? 'baseline';
+  const afterLabel = opts?.afterLabel ?? 'current';
   if (before == null && after != null) {
-    return `=== ${path} (added) ===\n${capText(after, MAX_PER_FILE)}`;
+    return `=== ${filePath} (added) ===\n${capText(after, MAX_PER_FILE)}`;
   }
   if (before != null && after == null) {
-    return `=== ${path} (removed) ===\n${capText(before, MAX_PER_FILE)}`;
+    return `=== ${filePath} (removed) ===\n${capText(before, MAX_PER_FILE)}`;
   }
   const b = before!;
   const a = after!;
   if (b === a) return '';
   return [
-    `=== ${path} (changed) ===`,
-    '--- baseline ---',
+    `=== ${filePath} (changed) ===`,
+    `--- ${beforeLabel} ---`,
     capText(b, MAX_PER_FILE),
-    '+++ current +++',
+    `+++ ${afterLabel} +++`,
     capText(a, MAX_PER_FILE),
   ].join('\n');
 }
@@ -109,5 +116,9 @@ export function diffAssets(
 module.exports = {
   cloneAssets,
   flattenAssetsForDiff,
+  formatFileChange,
   diffAssets,
+  MAX_DIFF_PATHS: MAX_PATHS,
+  MAX_DIFF_PER_FILE: MAX_PER_FILE,
+  MAX_DIFF_TOTAL: MAX_TOTAL,
 };

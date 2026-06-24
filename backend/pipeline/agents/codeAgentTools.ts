@@ -12,6 +12,7 @@ import type { BuildEventHandler } from '../../types/domain';
 
 const { tool } = require('ai');
 const { z } = require('zod');
+const { formatFileChange, MAX_DIFF_TOTAL } = require('../helpers/assetDiff');
 
 const MAX_LIST_ENTRIES = 200;
 const MAX_READ_CHARS = 8000;
@@ -70,7 +71,53 @@ function listFilesRecursive(dir: string, prefix: string, out: Array<{ path: stri
 
 export interface ToolContext {
   buildDir: string;
+  mode?: 'scaffold' | 'repair';
   onEvent?: BuildEventHandler;
+}
+
+function readWorkspaceText(buildDir: string, relPath: string): string | undefined {
+  const abs = resolveInWorkspace(buildDir, relPath);
+  if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) return undefined;
+  return fs.readFileSync(abs, 'utf8');
+}
+
+/** Emit a capped before/after diff into build logs (repair mode only). */
+function emitRepairFileDiff(
+  ctx: ToolContext,
+  tool: string,
+  relPath: string,
+  before: string | undefined,
+  after: string,
+): void {
+  if (ctx.mode !== 'repair' || !ctx.onEvent) return;
+  const diff = formatFileChange(relPath, before, after, { beforeLabel: 'before', afterLabel: 'after' });
+  if (!diff) return;
+  ctx.onEvent({ type: 'codeDiff', tool, path: relPath, diff } as never);
+}
+
+/** Batch diff emission with a shared total char cap across files. */
+function emitRepairBatchDiffs(
+  ctx: ToolContext,
+  tool: string,
+  changes: Array<{ path: string; before: string | undefined; after: string }>,
+): void {
+  if (ctx.mode !== 'repair' || !ctx.onEvent || !changes.length) return;
+  let total = 0;
+  for (const { path: relPath, before, after } of changes) {
+    const diff = formatFileChange(relPath, before, after, { beforeLabel: 'before', afterLabel: 'after' });
+    if (!diff) continue;
+    if (total + diff.length > MAX_DIFF_TOTAL) {
+      ctx.onEvent({
+        type: 'codeDiff',
+        tool,
+        path: relPath,
+        diff: '…[remaining diffs truncated at total size limit]',
+      } as never);
+      break;
+    }
+    ctx.onEvent({ type: 'codeDiff', tool, path: relPath, diff } as never);
+    total += diff.length;
+  }
 }
 
 /**
@@ -142,8 +189,10 @@ export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnTyp
         }
         const abs = resolveInWorkspace(ctx.buildDir, relPath);
         if (!abs) return { ok: false, error: 'invalid path' };
+        const before = readWorkspaceText(ctx.buildDir, relPath);
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         fs.writeFileSync(abs, content);
+        emitRepairFileDiff(ctx, 'write_file', relPath, before, content);
         return { ok: true, path: relPath, bytes: content.length };
       },
     }),
@@ -161,6 +210,7 @@ export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnTyp
       execute: async ({ files }: { files: Array<{ path: string; content: string }> }) => {
         const written: Array<{ path: string; bytes: number }> = [];
         const errors: string[] = [];
+        const pendingDiffs: Array<{ path: string; before: string | undefined; after: string }> = [];
         let totalChars = 0;
         for (const file of files) {
           totalChars += file.content.length;
@@ -181,10 +231,13 @@ export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnTyp
             errors.push(`${file.path}: invalid path`);
             continue;
           }
+          const before = readWorkspaceText(ctx.buildDir, file.path);
           fs.mkdirSync(path.dirname(abs), { recursive: true });
           fs.writeFileSync(abs, file.content);
           written.push({ path: file.path, bytes: file.content.length });
+          pendingDiffs.push({ path: file.path, before, after: file.content });
         }
+        if (written.length) emitRepairBatchDiffs(ctx, 'write_files', pendingDiffs);
         return {
           ok: errors.length === 0,
           written,
@@ -222,6 +275,7 @@ export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnTyp
           return { ok: false, error: `result exceeds ${MAX_WRITE_CHARS} char limit — use write_file` };
         }
         fs.writeFileSync(abs, updated);
+        emitRepairFileDiff(ctx, 'edit_file', relPath, content, updated);
         return { ok: true, path: relPath, bytes: updated.length };
       },
     }),

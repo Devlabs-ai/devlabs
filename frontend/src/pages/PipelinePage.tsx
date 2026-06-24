@@ -5,6 +5,7 @@ import AuthorReviewFeedbackBanner from '../components/AuthorReviewFeedbackBanner
 import { streamBuild, getProblemSession } from '../services/problemApi';
 import { logsForAttempt } from '../utils/buildLogFilter';
 import { buildCostLabel } from '../utils/buildCost';
+import { formatCodeDiffLines } from '../utils/pipelineLogFormat';
 import PipelineLogStream from '../components/PipelineLogStream';
 import type { ProblemSession } from '../types/domain';
 
@@ -281,6 +282,18 @@ export default function PipelinePage({
           setLiveThinking(label);
         } else if (event.type === 'codeStep') {
           setLiveThinking(null);
+        } else if (event.type === 'codeDiff' && typeof event.diff === 'string') {
+          setLiveThinking(null);
+          const diffLines = formatCodeDiffLines({
+            tool: typeof event.tool === 'string' ? event.tool : undefined,
+            path: typeof event.path === 'string' ? event.path : undefined,
+            diff: event.diff,
+            summary: !!event.summary,
+          });
+          setLogs((prev) => {
+            const next = [...prev, ...diffLines];
+            return next.length > 1000 ? next.slice(next.length - 1000) : next;
+          });
         } else if (event.type === 'phase') {
           setPhase(event.phase ?? null);
           setAttempt(event.attempt ?? 0);

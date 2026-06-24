@@ -25,6 +25,7 @@ const {
   REPAIR_USER_HINT,
 } = require('../prompts/codeAgent.prompt');
 const { verifyBuildComplete } = require('../validation/buildVerification');
+const { cloneAssets, diffAssets } = require('../helpers/assetDiff');
 
 const MAX_STEPS_SCAFFOLD = 20;
 const MAX_STEPS_REPAIR = 25;
@@ -245,13 +246,15 @@ async function runCodeAgentLoop({
   const provider = providerOf(modelId);
   emitCodeLog(onEvent, `CODE agent (${mode}) — ${modelId}, cwd=${buildDir}`);
 
+  const repairBaseline = mode === 'repair' ? cloneAssets(loadAssetsFromBuildDir(buildDir) || {}) : null;
+
   const earlyStop = mode === 'scaffold' ? createScaffoldEarlyStop(buildDir) : null;
 
   const result = await runAgentWithTools({
     agent: 'code',
     system: `${SYSTEM_PROMPT_STATIC}\n\n${SYSTEM_PROMPT_DYNAMIC}`,
     messages: [{ role: 'user', content: prompt }],
-    tools: createCodeAgentTools({ buildDir, onEvent }),
+    tools: createCodeAgentTools({ buildDir, mode, onEvent }),
     maxSteps,
     maxTokens: 16384,
     onEvent,
@@ -267,6 +270,14 @@ async function runCodeAgentLoop({
         }
       : undefined,
   });
+
+  if (mode === 'repair' && repairBaseline && onEvent) {
+    const afterAssets = loadAssetsFromBuildDir(buildDir);
+    const summary = diffAssets(repairBaseline, afterAssets);
+    if (summary) {
+      onEvent({ type: 'codeDiff', tool: 'repair_summary', path: '(all changes)', diff: summary, summary: true } as never);
+    }
+  }
 
   const usage = result.usage as { inputTokens?: number; outputTokens?: number } | undefined;
   const inputTokens = usage?.inputTokens || 0;

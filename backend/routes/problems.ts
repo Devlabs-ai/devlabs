@@ -465,6 +465,17 @@ router.post('/:sessionId/build', async (req: import("express").Request, res: imp
       const label = typeof evRec.label === 'string' ? evRec.label : 'Thinking';
       appendBuildLog(`💭 ${label} (step ${step + 1})`);
     }
+    if (evRec.type === 'codeDiff' && typeof evRec.diff === 'string') {
+      const tool = typeof evRec.tool === 'string' ? evRec.tool : 'code';
+      const filePath = typeof evRec.path === 'string' ? evRec.path : 'unknown';
+      const header = evRec.summary
+        ? '📋 CODE repair summary'
+        : `📋 CODE diff · ${tool} · ${filePath}`;
+      appendBuildLog(header);
+      for (const diffLine of (evRec.diff as string).split('\n')) {
+        appendBuildLog(`📋  ${diffLine}`);
+      }
+    }
     if (evRec.type === 'checklist' && evRec.checklist) {
       d.buildLatestChecklist = (ev as Record<string, unknown>).checklist;
       d.buildChecklists = d.buildChecklists || [];

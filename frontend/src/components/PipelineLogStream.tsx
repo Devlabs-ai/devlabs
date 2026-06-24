@@ -10,9 +10,25 @@ interface PipelineLogStreamProps {
 function entryClass(entry: PipelineLogEntry): string {
   if (entry.kind === 'thinking') return 'log-thinking';
   if (entry.kind === 'codeStep') return 'log-code-step';
+  if (entry.kind === 'codeDiff') return 'log-code-diff';
   if (entry.kind === 'separator') return 'log-separator';
   if (entry.kind === 'text') return `log-line log-${entry.level}`;
   return 'log-line';
+}
+
+function CodeDiffView({ entry }: { entry: Extract<PipelineLogEntry, { kind: 'codeDiff' }> }): JSX.Element {
+  const title = entry.summary
+    ? 'Repair summary — all file changes'
+    : `${entry.tool} · ${entry.path}`;
+  return (
+    <details className="log-entry log-code-diff" open={!entry.summary}>
+      <summary className="log-code-diff-summary">
+        <span className="log-code-diff-badge">{entry.summary ? 'Summary' : 'Diff'}</span>
+        <span className="log-code-diff-title">{title}</span>
+      </summary>
+      <pre className="log-code-diff-body">{entry.body}</pre>
+    </details>
+  );
 }
 
 function LogEntryView({ entry }: { entry: PipelineLogEntry }): JSX.Element {
@@ -41,6 +57,9 @@ function LogEntryView({ entry }: { entry: PipelineLogEntry }): JSX.Element {
         {hint && <div className="log-code-step-hint">{hint}</div>}
       </div>
     );
+  }
+  if (entry.kind === 'codeDiff') {
+    return <CodeDiffView entry={entry} />;
   }
   if (entry.kind === 'separator') {
     return <div className="log-entry log-separator">{entry.text}</div>;
