@@ -347,6 +347,18 @@ export interface LessonsBlock {
   relatedLessons: RelatedLesson[];
 }
 
+/** First failure in a SPIN/VALIDATE window — anchor for failure_summary at record time. */
+export interface LessonAnchorFailure {
+  attempt: number;
+  phase: string;
+  message: string | null;
+  composeStderr?: string | null;
+  logs?: string | null;
+  feedback?: string | null;
+  suggestions?: string[];
+  extractedErrors?: string[];
+}
+
 // ---------------------------------------------------------------------------
 // Draft sessions
 // ---------------------------------------------------------------------------

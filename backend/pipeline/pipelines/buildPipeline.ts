@@ -11,7 +11,7 @@
  * Helpers: lessonStore (retry hints), spinFailureLogs (compact SPIN errors for repair)
  */
 
-import type { ChallengeDraft, BuildEventHandler, ValidationResult, PortMap, BuildAttempt, BuildPhase, LessonsBlock } from '../../types/domain';
+import type { ChallengeDraft, BuildEventHandler, ValidationResult, PortMap, BuildAttempt, BuildPhase, LessonsBlock, LessonAnchorFailure } from '../../types/domain';
 
 const fs = require('fs');
 const path = require('path');
@@ -35,6 +35,7 @@ const {
   prepareSpinFailureContext,
   spinFailureForRepair,
 } = require('../helpers/spinFailureLogs');
+const { cloneAssets, diffAssets } = require('../helpers/assetDiff');
 
 const MAX_ITERATIONS = 5;
 
@@ -60,6 +61,15 @@ interface FailureSnapshot {
   composeStderr?: string | null;
   logs?: string | null;
   feedback?: string | null;
+  suggestions?: string[];
+  extractedErrors?: string[];
+}
+
+type BuildAssets = ReturnType<typeof codeAgent.loadAssetsFromBuildDir>;
+
+interface PhaseLessonWindow {
+  anchorFailure: LessonAnchorFailure | null;
+  baselineAssets: BuildAssets;
 }
 
 /** Read a short docker-compose snippet for failure snapshots. */
@@ -88,6 +98,12 @@ function captureFailureSnapshot({
 }): FailureSnapshot | null {
   if (!lastAttempt) return null;
   const d = lastAttempt.details as Record<string, unknown> | null | undefined;
+  const suggestions = Array.isArray(d?.suggestions)
+    ? (d.suggestions as string[]).slice(0, 8)
+    : undefined;
+  const extractedErrors = Array.isArray(d?.extractedErrors)
+    ? (d.extractedErrors as string[]).slice(0, 12)
+    : undefined;
   return {
     attempt,
     phase,
@@ -96,7 +112,79 @@ function captureFailureSnapshot({
     composeStderr: cap(d?.composeStderr, 600) || null,
     logs: cap(d?.logs, 600) || null,
     feedback: cap(d?.feedback, 400) || null,
+    suggestions,
+    extractedErrors,
   };
+}
+
+/** Set anchor + baseline on first failure in a SPIN/VALIDATE lesson window. */
+function ensurePhaseLessonAnchor(
+  window: PhaseLessonWindow,
+  snap: FailureSnapshot,
+  assets: BuildAssets,
+): void {
+  if (window.anchorFailure) return;
+  window.anchorFailure = {
+    attempt: snap.attempt,
+    phase: snap.phase,
+    message: snap.message,
+    composeStderr: snap.composeStderr,
+    logs: snap.logs,
+    feedback: snap.feedback,
+    suggestions: snap.suggestions,
+    extractedErrors: snap.extractedErrors,
+  };
+  window.baselineAssets = assets ? cloneAssets(assets) : null;
+}
+
+function clearPhaseLessonWindow(window: PhaseLessonWindow): void {
+  window.anchorFailure = null;
+  window.baselineAssets = null;
+}
+
+/** Record a fix-lesson after phase success when an anchor failure exists in the window. */
+async function recordPhaseLesson({
+  window,
+  phase,
+  assets,
+  draftSessionId,
+  buildSessionId,
+  category,
+  title,
+  onEvent,
+}: {
+  window: PhaseLessonWindow;
+  phase: 'spin' | 'validate';
+  assets: BuildAssets;
+  draftSessionId: string;
+  buildSessionId: string;
+  category: string | null;
+  title: string | null | undefined;
+  onEvent: BuildEventHandler;
+}): Promise<number | null> {
+  if (!window.anchorFailure) return null;
+  const anchorAttempt = window.anchorFailure.attempt;
+  const cumulativeDiff = diffAssets(window.baselineAssets, assets);
+  const lessonId = await lessonStore.record({
+    phase,
+    draftSessionId,
+    buildSessionId,
+    category,
+    title: title || null,
+    anchorFailure: window.anchorFailure,
+    cumulativeDiff: cumulativeDiff || null,
+  });
+  clearPhaseLessonWindow(window);
+  if (lessonId) {
+    const label = phase === 'spin' ? 'SPIN' : 'VALIDATE';
+    emitLog(onEvent, {
+      level: 'info',
+      tag: 'lessons',
+      message: `Recorded ${label} fix-lesson #${lessonId as number}`,
+      detail: `Anchor attempt ${anchorAttempt}; diff ${cumulativeDiff.length} chars`,
+    });
+  }
+  return lessonId;
 }
 
 interface IterationSummaryArgs {
@@ -346,9 +434,8 @@ async function runBuildLoop({
   const resumeCodeFailure = resumeRepair.resumeCodeFailure;
 
   const buildCategory = pickCategory(normalized);
-  // These are for the current iteration of runBuildPipeline.
-  const spinFailureHistory: FailureSnapshot[] = [];
-  const validateFailureHistory: FailureSnapshot[] = [];
+  const spinLessonWindow: PhaseLessonWindow = { anchorFailure: null, baselineAssets: null };
+  const validateLessonWindow: PhaseLessonWindow = { anchorFailure: null, baselineAssets: null };
 
   for (let attempt = 1; attempt <= MAX_ITERATIONS; attempt++) {
     const attemptCost = createUsageAccumulator();
@@ -497,27 +584,16 @@ async function runBuildLoop({
       }));
 
       spinFailureMsg = null;
-      if (spinFailureHistory.length > 0) {
-        const lessonId = await lessonStore.record({
-          phase: 'spin',
-          draftSessionId,
-          buildSessionId,
-          category: buildCategory,
-          title: normalized.meta?.name || normalized.title || assets?.title,
-          draft: normalized,
-          failures: [...spinFailureHistory],
-          assets,
-        });
-        if (lessonId) {
-          emitLog(onEvent, {
-            level: 'info',
-            tag: 'lessons',
-            message: `Recorded SPIN fix-lesson #${lessonId as number}`,
-            detail: `${spinFailureHistory.length} prior failure(s) before this success`,
-          });
-        }
-        spinFailureHistory.length = 0;
-      }
+      await recordPhaseLesson({
+        window: spinLessonWindow,
+        phase: 'spin',
+        assets,
+        draftSessionId,
+        buildSessionId,
+        category: buildCategory,
+        title: normalized.meta?.name || normalized.title || assets?.title,
+        onEvent,
+      });
     } catch (e) {
       const err = e as Record<string, unknown> & { message?: string };
       const failureCtx = prepareSpinFailureContext(buildDir, {
@@ -553,7 +629,7 @@ async function runBuildLoop({
         },
       };
       const snap = captureFailureSnapshot({ attempt, phase: 'SPIN', lastAttempt, buildDir });
-      if (snap) spinFailureHistory.push(snap);
+      if (snap) ensurePhaseLessonAnchor(spinLessonWindow, snap, assets);
       emitIterationSummary(onEvent, {
         attempt,
         total: MAX_ITERATIONS,
@@ -608,7 +684,7 @@ async function runBuildLoop({
         details: null,
       };
       const snap = captureFailureSnapshot({ attempt, phase: 'VALIDATE', lastAttempt, buildDir });
-      if (snap) validateFailureHistory.push(snap);
+      if (snap) ensurePhaseLessonAnchor(validateLessonWindow, snap, assets);
       emitIterationSummary(onEvent, {
         attempt,
         total: MAX_ITERATIONS,
@@ -663,28 +739,16 @@ async function runBuildLoop({
         : null;
 
       validateFailureMsg = null;
-      if (validateFailureHistory.length > 0) {
-        const lessonId = await lessonStore.record({
-          phase: 'validate',
-          draftSessionId,
-          buildSessionId,
-          category: buildCategory,
-          title: normalized.meta?.name || normalized.title || assets?.title,
-          draft: normalized,
-          failures: [...validateFailureHistory],
-          assets,
-          validationFeedback: validation.feedback,
-        });
-        if (lessonId) {
-          emitLog(onEvent, {
-            level: 'info',
-            tag: 'lessons',
-            message: `Recorded VALIDATE fix-lesson #${lessonId as number}`,
-            detail: `${validateFailureHistory.length} prior failure(s) before this success`,
-          });
-        }
-        validateFailureHistory.length = 0;
-      }
+      await recordPhaseLesson({
+        window: validateLessonWindow,
+        phase: 'validate',
+        assets,
+        draftSessionId,
+        buildSessionId,
+        category: buildCategory,
+        title: normalized.meta?.name || normalized.title || assets?.title,
+        onEvent,
+      });
 
       built.metrics = normalized.metrics;
       built.description = normalized.description;
@@ -747,7 +811,7 @@ async function runBuildLoop({
       },
     };
     const snap = captureFailureSnapshot({ attempt, phase: 'VALIDATE', lastAttempt, buildDir });
-    if (snap) validateFailureHistory.push(snap);
+    if (snap) ensurePhaseLessonAnchor(validateLessonWindow, snap, assets);
     persistBuildFailure(buildDir, {
       draftSessionId,
       buildSessionId,
