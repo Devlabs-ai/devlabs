@@ -12,7 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import type { ChallengeDraft, BuildAttempt, BuildEventHandler } from '../../types/domain';
+import type { ChallengeDraft, BuildAttempt, BuildEventHandler, LessonsBlock } from '../../types/domain';
 
 const { modelIdFor, providerOf } = require('../../llm/models');
 const { estimateCostUsd } = require('../../llm/cost');
@@ -72,10 +72,6 @@ export interface ChallengeAssets {
   validationSpec?: Record<string, unknown>;
   problemStatement?: Record<string, unknown> | string | null;
   id?: string | null;
-}
-
-interface LessonsBlock {
-  relatedLessons: Array<{ text?: string; [key: string]: unknown }>;
 }
 
 /** Truncate long strings for repair payloads and logs. */

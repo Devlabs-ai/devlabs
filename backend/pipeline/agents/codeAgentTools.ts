@@ -271,34 +271,7 @@ export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnTyp
     }),
   };
 
-  /*
-   * Code-chunk tools disabled for now (repair-time semantic index + search_code).
-   *
-   * const codeChunkStore = require('../stores/codeChunkStore');
-   *
-   * async function afterMutation(ctx: ToolContext, relPath: string): Promise<void> {
-   *   await codeChunkStore.indexPaths({
-   *     buildSessionId: ctx.buildSessionId,
-   *     draftSessionId: ctx.draftSessionId,
-   *     attempt: ctx.attempt,
-   *     buildDir: ctx.buildDir,
-   *     paths: [relPath],
-   *   });
-   * }
-   *
-   * search_code: tool({
-   *   description: 'Semantic search over indexed code chunks in this build.',
-   *   inputSchema: z.object({ query: z.string() }),
-   *   execute: async ({ query }) => {
-   *     const hits = await codeChunkStore.search({
-   *       draftSessionId: ctx.draftSessionId,
-   *       buildSessionId: ctx.buildSessionId,
-   *       query,
-   *     });
-   *     return { ok: true, hits };
-   *   },
-   * }),
-   */
+  // Repair-time code-chunk indexing and search_code tools used to be registered here; removed.
 }
 
 module.exports = {

@@ -1,24 +1,28 @@
 'use strict';
 
-import type { ChallengeDraft, LessonRecord, LessonType, LessonPhase } from '../../types/domain';
+/**
+ * Persistent store for build-pipeline lessons — structured memories of SPIN/VALIDATE
+ * failures and fixes. `failure_summary` is embedded (pgvector) at write time and matched
+ * via cosine similarity when repairing after a phase failure.
+ */
+
+import type {
+  LessonAnchorFailure,
+  LessonRecord,
+  LessonPhase,
+  LessonsBlock,
+  RelatedLesson,
+} from '../../types/domain';
 
 const pool = require('../../db/pool');
 const llm = require('../../llm/client');
 
 const LESSONS_K = 8;
 const LESSONS_MAX_DISTANCE = 0.45;
-
-/** DB stores SPIN phase as `start`; app code uses `spin`. */
-function phaseToDb(phase: LessonPhase | string | null | undefined): string | null {
-  if (!phase) return null;
-  if (phase === 'spin' || phase === 'start') return 'start';
-  return 'validate';
-}
-
-function phaseFromDb(phase: string | null | undefined): LessonPhase {
-  if (phase === 'start') return 'spin';
-  return 'validate';
-}
+const FAILURE_SUMMARY_MAX = 2000;
+const FIX_SUMMARY_MAX = 4000;
+const ANCHOR_INPUT_MAX = 8000;
+const DIFF_INPUT_MAX = 24000;
 
 function toPgVector(arr: number[]): string {
   return `[${arr.join(',')}]`;
@@ -31,177 +35,137 @@ function cap(s: unknown, max: number): string | null | undefined {
   return `${str.slice(0, max)}\n…[truncated]`;
 }
 
-interface FailureSnapshot {
-  attempt: number;
-  phase: string;
-  message: string;
-  [key: string]: unknown;
-}
+const DISTILL_FAILURE_SYSTEM = `You compress build pipeline failure signals into 2-3 lines for a searchable lesson database.
 
-interface LessonAssets {
-  dockerCompose?: string;
-  [key: string]: unknown;
-}
+Rules:
+- Output plain text only (no markdown, no bullet prefixes).
+- Exactly 2-3 lines, each a complete sentence or clause.
+- Include phase context (SPIN or VALIDATE), service or component names, exit codes, and the key error message.
+- Preserve enough detail that a similar future failure could match this text.
+- Do NOT suggest fixes or file changes.`;
 
-function buildProblemContext(draft: ChallengeDraft | null | undefined): string {
-  const parts: string[] = [];
-  const title = draft?.meta?.name || draft?.title;
-  if (title) parts.push(`Title: ${title}`);
-  const category = draft?.meta?.category || draft?.category;
-  if (category) parts.push(`Category: ${category}`);
-  const rootCause = draft?.brokenState?.rootCause;
-  if (rootCause) parts.push(`Root cause: ${cap(rootCause, 400)}`);
-  const desc = draft?.description;
-  if (desc) parts.push(`Description: ${cap(desc, 400)}`);
-  return parts.join('\n') || 'Interview sandbox challenge';
-}
+const SUMMARIZE_DIFF_SYSTEM = `You summarize workspace file changes from a build repair diff.
 
-const SYNTHESIS_SYSTEM = `You are a build-pipeline analyst. Given information about a failed (and possibly later fixed) Docker compose build, produce a concise structured lesson for future LLM build agents.
+Rules:
+- Output plain text only (no markdown).
+- 2-6 short lines maximum.
+- Only describe changes explicitly present in the diff — cite file paths.
+- Do NOT invent edits, paths, or root causes not shown in the diff.`;
 
-Output ONLY the following four lines, each prefixed exactly as shown (no extra lines, no markdown):
-Error pattern: <one line — service name, exit code, and the key error message>
-Root cause: <one line — the technical root cause>
-Fix applied: <one line — the specific change that resolved it, or "unresolved" if it never passed>
-Avoid: <one line — what future builds should not do>
-
-Be specific and concrete. Do not repeat the same information across fields.`;
-
-function buildSynthesisUserMessage({
-  type,
-  phase,
-  failures,
-  assets,
-}: {
-  type: LessonType;
-  phase: LessonPhase;
-  failures: FailureSnapshot[];
-  assets?: LessonAssets | null;
-}): string {
-  const phaseLabel = phase === 'spin' ? 'START/SPIN' : 'VALIDATE';
-  const lines: string[] = [`Phase: ${phaseLabel}`, `Outcome: ${type === 'fix' ? 'eventually succeeded' : 'exhausted all retries — never passed'}`];
-
-  lines.push('\nFailure history:');
-  for (const f of failures) {
-    lines.push(`  Attempt ${f.attempt}: ${cap(f.message, 300)}`);
-    const d = f.details as Record<string, unknown> | null | undefined;
-    if (d?.composeStderr) lines.push(`  stderr: ${cap(d.composeStderr, 200)}`);
+function buildAnchorFailureInput(anchor: LessonAnchorFailure, phase: LessonPhase): string {
+  const phaseLabel = phase === 'spin' ? 'SPIN' : 'VALIDATE';
+  const lines: string[] = [
+    `Phase: ${phaseLabel}`,
+    `Attempt: ${anchor.attempt}`,
+    `Message: ${anchor.message || '(none)'}`,
+  ];
+  if (anchor.composeStderr) lines.push(`Stderr: ${cap(anchor.composeStderr, 1500)}`);
+  if (anchor.extractedErrors?.length) {
+    lines.push(`Extracted errors:\n${anchor.extractedErrors.slice(0, 12).join('\n')}`);
+  } else if (anchor.logs) {
+    lines.push(`Logs: ${cap(anchor.logs, 1500)}`);
   }
-
-  if (assets?.dockerCompose) {
-    const envLines = assets.dockerCompose
-      .split('\n')
-      .filter((l: string) => /image:|environment:|REDIS_|POSTGRES_|HOST|PORT|_HOST|_URL/i.test(l))
-      .slice(0, 20)
-      .join('\n');
-    if (envLines) lines.push(`\nRelevant compose lines:\n${envLines}`);
+  if (anchor.feedback) lines.push(`Validation feedback: ${cap(anchor.feedback, 800)}`);
+  if (anchor.suggestions?.length) {
+    lines.push(`Suggestions: ${anchor.suggestions.slice(0, 6).join('; ')}`);
   }
-
-  return lines.join('\n');
+  return cap(lines.join('\n'), ANCHOR_INPUT_MAX) as string;
 }
 
-async function synthesizeLesson({
-  type,
-  phase,
-  failures,
-  assets,
-}: {
-  type: LessonType;
-  phase: LessonPhase;
-  failures: FailureSnapshot[];
-  assets?: LessonAssets | null;
-}): Promise<string | null> {
-  if (!llm.isConfigured()) return null;
+function fallbackFailureSummary(anchor: LessonAnchorFailure, phase: LessonPhase): string {
+  const parts: string[] = [
+    `${phase.toUpperCase()} failure (attempt ${anchor.attempt}): ${anchor.message || 'unknown error'}`,
+  ];
+  const extra = anchor.extractedErrors?.[0]
+    || (anchor.composeStderr ? String(anchor.composeStderr).split('\n').find((l) => l.trim()) : null)
+    || anchor.suggestions?.[0]
+    || null;
+  if (extra) parts.push(String(extra).trim());
+  return cap(parts.join('\n'), FAILURE_SUMMARY_MAX) as string;
+}
+
+async function llmDistillFailure(
+  anchor: LessonAnchorFailure,
+  phase: LessonPhase,
+): Promise<string> {
+  const input = buildAnchorFailureInput(anchor, phase);
+  if (!llm.isConfigured()) return fallbackFailureSummary(anchor, phase);
   try {
     const { text } = await llm.completeMessage({
-      system: SYNTHESIS_SYSTEM,
-      messages: [{ role: 'user', content: buildSynthesisUserMessage({ type, phase, failures, assets }) }],
-      maxTokens: 200,
+      system: DISTILL_FAILURE_SYSTEM,
+      messages: [{ role: 'user', content: input }],
+      maxTokens: 180,
       agent: 'validation',
     });
-    if (text.includes('Error pattern:') && text.includes('Root cause:')) {
-      return text.trim();
-    }
-    return null;
+    const trimmed = (text || '').trim();
+    if (trimmed.length >= 20) return cap(trimmed, FAILURE_SUMMARY_MAX) as string;
   } catch (e) {
-    console.warn(`[lessons] synthesizeLesson failed: ${(e as Error).message}`);
-    return null;
+    console.warn(`[lessons] llmDistillFailure failed: ${(e as Error).message}`);
   }
+  return fallbackFailureSummary(anchor, phase);
 }
 
-function buildRawLessonText({
-  type,
-  phase,
-  category,
-  failures,
-  assets,
-}: {
-  type: LessonType;
-  phase: LessonPhase;
-  category?: string | null;
-  failures: FailureSnapshot[];
-  assets?: LessonAssets | null;
-}): string {
-  const phaseLabel = phase === 'spin' ? 'SPIN' : 'VALIDATE';
-  const outcome = type === 'anti-pattern' ? 'never passed (anti-pattern)' : 'succeeded after failures';
-  const lines: string[] = [
-    `${phaseLabel} phase ${outcome}${category ? ` for category ${category}` : ''}.`,
-    `Failures (${failures.length}):`,
-    ...failures.map((f) => `- Attempt ${f.attempt}: ${cap(f.message, 300)}`),
-  ];
-  if (type === 'fix' && assets?.dockerCompose) {
-    lines.push('Working compose (excerpt):');
-    lines.push(cap(assets.dockerCompose, 800) as string);
-  }
-  return lines.join('\n');
+function fallbackFixSummary(phase: LessonPhase): string {
+  return phase === 'spin'
+    ? 'Stack reached healthy running state after compose/runtime file changes.'
+    : 'Validation confirmed the broken state is observable after spec/check file changes.';
 }
 
+async function llmSummarizeDiff(
+  cumulativeDiff: string | null | undefined,
+  phase: LessonPhase,
+): Promise<string> {
+  const diff = (cumulativeDiff || '').trim();
+  if (!diff) return fallbackFixSummary(phase);
+  if (!llm.isConfigured()) return cap(diff, FIX_SUMMARY_MAX) as string;
+  try {
+    const { text } = await llm.completeMessage({
+      system: SUMMARIZE_DIFF_SYSTEM,
+      messages: [{
+        role: 'user',
+        content: `Phase: ${phase.toUpperCase()}\n\nFile diff (baseline → success):\n${cap(diff, DIFF_INPUT_MAX)}`,
+      }],
+      maxTokens: 280,
+      agent: 'validation',
+    });
+    const trimmed = (text || '').trim();
+    if (trimmed.length >= 10) return cap(trimmed, FIX_SUMMARY_MAX) as string;
+  } catch (e) {
+    console.warn(`[lessons] llmSummarizeDiff failed: ${(e as Error).message}`);
+  }
+  return cap(diff, FIX_SUMMARY_MAX) as string;
+}
+
+/**
+ * Persist a lesson after a phase succeeds following an earlier failure in the same window.
+ * failure_summary ← LLM distill of anchor (e1); fix_summary ← LLM compress of asset diff.
+ */
 async function record({
-  type = 'fix',
   phase,
   draftSessionId,
   buildSessionId,
   category,
   title,
-  draft,
-  failures,
-  assets,
-  validationFeedback = null,
+  anchorFailure,
+  cumulativeDiff,
 }: {
-  type?: LessonType;
   phase: LessonPhase;
   draftSessionId?: string | null;
   buildSessionId: string;
   category?: string | null;
   title?: string | null;
-  draft?: ChallengeDraft | null;
-  failures: FailureSnapshot[];
-  assets?: LessonAssets | null;
-  validationFeedback?: string | null;
+  anchorFailure: LessonAnchorFailure | null | undefined;
+  cumulativeDiff?: string | null;
 }): Promise<number | null> {
-  if (!failures || failures.length === 0) return null;
+  if (!anchorFailure) return null;
   if (phase !== 'spin' && phase !== 'validate') return null;
-  if (type !== 'fix' && type !== 'anti-pattern') return null;
 
-  const problem_context = buildProblemContext(draft);
-
-  const failure_summary = failures
-    .map((f) => `Attempt ${f.attempt} (${f.phase || phase}): ${f.message || '(no message)'}`)
-    .join('\n');
-
-  const fix_summary = type === 'anti-pattern'
-    ? `${phase === 'spin' ? 'START' : 'VALIDATE'} phase never passed — anti-pattern recorded.`
-    : phase === 'spin'
-      ? 'Docker compose stack reached a healthy running state.'
-      : 'Validation confirmed the broken state is observable in the sandbox.';
-
-  const synthesized = type === 'anti-pattern'
-    ? null
-    : await synthesizeLesson({ type, phase, failures, assets });
-  const lesson_text = synthesized || buildRawLessonText({ type, phase, category, failures, assets });
+  const failure_summary = await llmDistillFailure(anchorFailure, phase);
+  const fix_summary = await llmSummarizeDiff(cumulativeDiff, phase);
 
   let embedding: number[] | null = null;
   try {
-    embedding = await llm.embed(lesson_text);
+    embedding = await llm.embed(failure_summary);
   } catch (e) {
     console.warn(`[lessons] embed failed: ${(e as Error).message}`);
   }
@@ -210,28 +174,18 @@ async function record({
   try {
     const { rows } = await pool.query(
       `INSERT INTO lessons
-         (type, phase, draft_session_id, build_session_id, category, title,
-          problem_context, failure_summary, fix_summary, lesson_text, details,
-          embedding, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::vector,$13)
+         (phase, draft_session_id, build_session_id, category, title,
+          failure_summary, fix_summary, embedding, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector,$9)
        RETURNING id`,
       [
-        type,
-        phaseToDb(phase),
+        phase,
         draftSessionId || null,
         buildSessionId,
         category,
         title,
-        problem_context,
         failure_summary,
         fix_summary,
-        lesson_text,
-        JSON.stringify({
-          failureHistory: failures,
-          workingCompose: type === 'fix' ? cap(assets?.dockerCompose, 3500) : null,
-          validationFeedback,
-          synthesized: !!synthesized,
-        }),
         embedding ? toPgVector(embedding) : null,
         now,
       ],
@@ -249,14 +203,12 @@ async function findSimilar({
   maxDistance = LESSONS_MAX_DISTANCE,
   phase = null,
   category = null,
-  type = null,
 }: {
   text: string;
   k?: number;
   maxDistance?: number;
   phase?: string | null;
   category?: string | null;
-  type?: string | null;
 }): Promise<LessonRecord[]> {
   if (!text) return [];
   const vec: number[] | null = await llm.embed(text);
@@ -264,16 +216,14 @@ async function findSimilar({
   const pgVec = toPgVector(vec);
   try {
     const params: unknown[] = [pgVec, maxDistance, k];
-    let sql = `SELECT id, type, phase, lesson_text, failure_summary, fix_summary, details, category,
-                      title, problem_context,
+    let sql = `SELECT id, phase, failure_summary, fix_summary, category, title,
                       (embedding <=> $1::vector) AS distance
                  FROM lessons
                 WHERE embedding IS NOT NULL
                   AND (embedding <=> $1::vector) <= $2`;
     let n = 4;
-    if (phase) { sql += ` AND phase = $${n}`; params.push(phaseToDb(phase)); n += 1; }
+    if (phase) { sql += ` AND phase = $${n}`; params.push(phase); n += 1; }
     if (category) { sql += ` AND (category = $${n} OR category IS NULL)`; params.push(category); n += 1; }
-    if (type) { sql += ` AND type = $${n}`; params.push(type); n += 1; }
     sql += ` ORDER BY embedding <=> $1::vector LIMIT $3`;
     const { rows } = await pool.query(sql, params);
     return rows.map(rowToLesson);
@@ -283,44 +233,16 @@ async function findSimilar({
   }
 }
 
-function shapeLessonForPrompt(lesson: LessonRecord): Record<string, unknown> {
+function shapeLessonForPrompt(lesson: LessonRecord): RelatedLesson {
   return {
-    type: lesson.type || 'fix',
     phase: lesson.phase,
-    text: cap(lesson.text, 2000),
-    failureSummary: cap(lesson.failureSummary, 800),
-    fixSummary: cap(lesson.fixSummary, 400),
+    failureSummary: cap(lesson.failureSummary, 2000),
+    fixSummary: cap(lesson.fixSummary, 800),
     category: lesson.category,
     similarity: lesson.distance != null
       ? Math.max(0, Math.min(1, 1 - lesson.distance))
       : null,
-    details: lesson.details || null,
   };
-}
-
-async function findByDraftContext(
-  draft: ChallengeDraft | null | undefined,
-  { k = 4 }: { k?: number } = {},
-): Promise<{ relatedLessons: ReturnType<typeof shapeLessonForPrompt>[] }> {
-  const category = draft?.meta?.category || draft?.category || null;
-  const parts: string[] = [];
-  const desc = draft?.description;
-  if (desc) parts.push(cap(desc, 400) as string);
-  const rootCause = draft?.brokenState?.rootCause;
-  if (rootCause) parts.push(rootCause);
-  const title = draft?.meta?.name || draft?.title;
-  if (title) parts.push(title as string);
-  if (category) parts.push(category as string);
-
-  const text = parts.filter(Boolean).join('\n').trim();
-  if (!text) return { relatedLessons: [] };
-
-  const hits = await findSimilar({ text, k, category: category as string | null });
-  const sorted = hits
-    .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999))
-    .slice(0, k);
-
-  return { relatedLessons: sorted.map(shapeLessonForPrompt) };
 }
 
 interface SpinFailure {
@@ -341,11 +263,11 @@ async function findForRetry({
   validateFailureMsg,
   k = LESSONS_K,
 }: {
-  draft?: ChallengeDraft | null;
+  draft?: { meta?: { category?: string }; category?: string } | null;
   spinFailureMsg?: SpinFailure | null;
   validateFailureMsg?: ValidateFailure | null;
   k?: number;
-}): Promise<{ relatedLessons: ReturnType<typeof shapeLessonForPrompt>[] }> {
+}): Promise<LessonsBlock> {
   const parts: string[] = [];
   if (spinFailureMsg) {
     parts.push(spinFailureMsg.message || '');
@@ -371,7 +293,7 @@ async function findForRetry({
   for (const h of hits) byId.set(h.id, h);
 
   if (spinFailureMsg && validateFailureMsg) {
-    const startHits = await findSimilar({
+    const spinHits = await findSimilar({
       text: [
         spinFailureMsg.message,
         (spinFailureMsg.extractedErrors || []).join('\n') || spinFailureMsg.logs,
@@ -386,7 +308,7 @@ async function findForRetry({
       phase: 'validate',
       category: category as string | null,
     });
-    for (const h of [...startHits, ...valHits]) byId.set(h.id, h);
+    for (const h of [...spinHits, ...valHits]) byId.set(h.id, h);
   }
 
   const merged = [...byId.values()]
@@ -399,15 +321,11 @@ async function findForRetry({
 function rowToLesson(r: Record<string, unknown>): LessonRecord {
   return {
     id: r.id as number,
-    type: (r.type as LessonType) || 'fix',
-    phase: phaseFromDb(r.phase as string),
-    text: r.lesson_text as string,
+    phase: r.phase as LessonPhase,
     failureSummary: r.failure_summary as string,
     fixSummary: r.fix_summary as string,
     category: r.category as string | null,
     title: r.title as string | null,
-    problemContext: r.problem_context as string | null,
-    details: r.details as Record<string, unknown> | null,
     distance: r.distance != null ? Number(r.distance) : null,
   };
 }
@@ -443,7 +361,7 @@ async function listPaginated({
   let n = 1;
 
   if (phase === 'spin' || phase === 'validate') {
-    where.push(`phase = $${n}`); params.push(phaseToDb(phase)); n += 1;
+    where.push(`phase = $${n}`); params.push(phase); n += 1;
   }
   if (category) {
     where.push(`category = $${n}`); params.push(category); n += 1;
@@ -455,8 +373,8 @@ async function listPaginated({
   const total = countRes.rows[0]?.n || 0;
 
   const { rows } = await pool.query(
-    `SELECT id, type, phase, draft_session_id, build_session_id, category, title,
-            problem_context, failure_summary, fix_summary, lesson_text, details, created_at
+    `SELECT id, phase, draft_session_id, build_session_id, category, title,
+            failure_summary, fix_summary, created_at
        FROM lessons
        ${whereSql}
        ORDER BY created_at DESC
@@ -467,17 +385,13 @@ async function listPaginated({
   return {
     items: rows.map((r: Record<string, unknown>) => ({
       id: r.id,
-      type: r.type || 'fix',
       phase: r.phase,
       draftSessionId: r.draft_session_id,
       buildSessionId: r.build_session_id,
       category: r.category,
       title: r.title,
-      problemContext: r.problem_context,
       failureSummary: r.failure_summary,
       fixSummary: r.fix_summary,
-      lessonText: r.lesson_text,
-      details: r.details,
       createdAt: Number(r.created_at),
     })),
     total,
@@ -492,11 +406,11 @@ async function backfillEmbeddings({ limit = 50 }: { limit?: number } = {}): Prom
   let done = 0;
   try {
     const { rows } = await pool.query(
-      `SELECT id, lesson_text FROM lessons WHERE embedding IS NULL ORDER BY created_at DESC LIMIT $1`,
+      `SELECT id, failure_summary FROM lessons WHERE embedding IS NULL ORDER BY created_at DESC LIMIT $1`,
       [limit],
     );
-    for (const r of rows as Array<{ id: number; lesson_text: string }>) {
-      const vec: number[] | null = await llm.embed(r.lesson_text);
+    for (const r of rows as Array<{ id: number; failure_summary: string }>) {
+      const vec: number[] | null = await llm.embed(r.failure_summary);
       if (!vec) continue;
       await pool.query(`UPDATE lessons SET embedding = $1::vector WHERE id = $2`, [toPgVector(vec), r.id]);
       done += 1;
@@ -510,10 +424,8 @@ async function backfillEmbeddings({ limit = 50 }: { limit?: number } = {}): Prom
 module.exports = {
   record,
   findForRetry,
-  findByDraftContext,
   findSimilar,
   count,
   listPaginated,
   backfillEmbeddings,
-  buildProblemContext,
 };

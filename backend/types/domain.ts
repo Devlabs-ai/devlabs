@@ -187,7 +187,7 @@ export interface HttpError extends Error {
   logs?: unknown;
 }
 
-export type BuildPhase = 'CODE' | 'SPIN' | 'VALIDATE' | 'START';
+export type BuildPhase = 'CODE' | 'SPIN' | 'VALIDATE';
 
 export interface BuildAttempt {
   phase: BuildPhase | string;
@@ -322,21 +322,41 @@ export interface ServiceSpec {
 // Lessons
 // ---------------------------------------------------------------------------
 
-export type LessonType = 'fix' | 'anti-pattern';
 export type LessonPhase = 'spin' | 'validate';
 
 export interface LessonRecord {
   id: number;
-  type: LessonType;
   phase: LessonPhase;
-  text: string;
   failureSummary: string;
   fixSummary: string;
   category: string | null;
   title: string | null;
-  problemContext: string | null;
-  details: Record<string, unknown> | null;
   distance: number | null;
+}
+
+/** One lesson entry injected into the CODE agent repair payload. */
+export interface RelatedLesson {
+  phase: LessonPhase;
+  failureSummary: string | null | undefined;
+  fixSummary: string | null | undefined;
+  category: string | null;
+  similarity: number | null;
+}
+
+export interface LessonsBlock {
+  relatedLessons: RelatedLesson[];
+}
+
+/** First failure in a SPIN/VALIDATE window — anchor for failure_summary at record time. */
+export interface LessonAnchorFailure {
+  attempt: number;
+  phase: string;
+  message: string | null;
+  composeStderr?: string | null;
+  logs?: string | null;
+  feedback?: string | null;
+  suggestions?: string[];
+  extractedErrors?: string[];
 }
 
 // ---------------------------------------------------------------------------

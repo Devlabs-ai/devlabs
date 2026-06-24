@@ -28,7 +28,7 @@ npm run dev
 
 On startup the backend runs idempotent Postgres migrations, restores any in-flight sessions from the database, and seeds the `challenges` table from every `sandbox/verified/<slug>/challenge.json` it finds.
 
-On first boot when the `catalogue` table is empty, the backend auto-seeds handbook rows from `backend/pipeline/catalogue/seeds/catalogue.js` (~30 curated Docker recipes: Postgres, Kafka, Nginx, etc.). The build pipeline injects matching `catalogueBrief` entries (dos, donts, conf) on every GENERATE pass. Learned fixes are stored in `lessons` (requires `OPENAI_API_KEY` for embeddings) after a START or VALIDATE phase succeeds following prior failures in that build. Run `make seed-catalogue-if-empty` manually; seeding is insert-only and never overwrites existing rows.
+On first boot when the `catalogue` table is empty, the backend auto-seeds handbook rows from `backend/pipeline/catalogue/seeds/catalogue.js` (~30 curated Docker recipes: Postgres, Kafka, Nginx, etc.). The build pipeline injects matching `catalogueBrief` entries (dos, donts, conf) on every GENERATE pass. Learned fixes are stored in `lessons` (requires `OPENAI_API_KEY` for embeddings) after a SPIN or VALIDATE phase succeeds following prior failures in that build. Run `make seed-catalogue-if-empty` manually; seeding is insert-only and never overwrites existing rows.
 
 ### 3. Frontend (port 5173)
 

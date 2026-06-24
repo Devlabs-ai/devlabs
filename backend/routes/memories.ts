@@ -33,8 +33,8 @@ router.get('/lessons', async (req: ExpressRequest, res: ExpressResponse, next: E
   try {
     const { page, limit, category } = parsePageQuery(req);
     const phase = (req.query.phase as string) || null;
-    if (phase && phase !== 'start' && phase !== 'validate') {
-      return res.status(400).json({ error: 'phase must be start or validate' });
+    if (phase && phase !== 'spin' && phase !== 'validate') {
+      return res.status(400).json({ error: 'phase must be spin or validate' });
     }
     const result = await lessonStore.listPaginated({ page, limit, phase, category });
     res.json(result);
