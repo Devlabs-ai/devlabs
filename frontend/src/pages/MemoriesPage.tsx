@@ -121,10 +121,8 @@ interface LessonItem {
   category?: string;
   title?: string;
   createdAt: string;
-  problemContext: string;
   failureSummary: string;
   fixSummary: string;
-  details?: { workingCompose?: string };
 }
 
 interface LessonCardProps {
@@ -147,10 +145,6 @@ function LessonCard({ item, expanded, onToggle }: LessonCardProps): JSX.Element 
       {expanded && (
         <div className="memories-card-body">
           <section>
-            <h4>Problem context</h4>
-            <p className="memories-prose">{item.problemContext}</p>
-          </section>
-          <section>
             <h4>Failures (before fix)</h4>
             <pre className="memories-prose">{item.failureSummary}</pre>
           </section>
@@ -158,12 +152,6 @@ function LessonCard({ item, expanded, onToggle }: LessonCardProps): JSX.Element 
             <h4>Fix</h4>
             <p className="memories-prose">{item.fixSummary}</p>
           </section>
-          {item.details?.workingCompose && (
-            <section>
-              <h4>Working compose (excerpt)</h4>
-              <pre className="memories-code">{item.details.workingCompose}</pre>
-            </section>
-          )}
         </div>
       )}
     </article>

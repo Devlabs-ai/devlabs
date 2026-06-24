@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Build pipeline orchestrator — author loop: CODE → SPIN → VALIDATE (max 5 iterations).
+ * Build pipeline orchestrator — author loop: CODE → SPIN → VALIDATE (max n iterations).
  *
  * Agents:
  *   codeAgent       — scaffold/repair sandbox files
@@ -11,7 +11,7 @@
  * Helpers: lessonStore (retry hints), spinFailureLogs (compact SPIN errors for repair)
  */
 
-import type { ChallengeDraft, BuildEventHandler, ValidationResult, PortMap, BuildAttempt, BuildPhase } from '../../types/domain';
+import type { ChallengeDraft, BuildEventHandler, ValidationResult, PortMap, BuildAttempt, BuildPhase, LessonsBlock } from '../../types/domain';
 
 const fs = require('fs');
 const path = require('path');
@@ -189,6 +189,53 @@ function normalizeResumePhase(phase: string | null | undefined): string | null {
   return upper;
 }
 
+interface ResumeRepairContext {
+  spinFailureMsg: Record<string, unknown> | null;
+  validateFailureMsg: Record<string, unknown> | null;
+  resumeCodeFailure: BuildAttempt | null;
+}
+
+/**
+ * Cross-request retry: map stored failure phase/msg onto the repair channels the loop uses.
+ * In-loop retries update spinFailureMsg / validateFailureMsg / lastAttempt directly instead.
+ */
+function initResumeRepairContext({
+  hasResumeDir,
+  resumePhase,
+  resumeFailureMsg,
+}: {
+  hasResumeDir: boolean;
+  resumePhase: string | null;
+  resumeFailureMsg: unknown;
+}): ResumeRepairContext {
+  const none: ResumeRepairContext = {
+    spinFailureMsg: null,
+    validateFailureMsg: null,
+    resumeCodeFailure: null,
+  };
+  if (!hasResumeDir || !resumePhase || resumeFailureMsg == null) return none;
+
+  if (resumePhase === 'SPIN') {
+    return { ...none, spinFailureMsg: resumeFailureMsg as Record<string, unknown> };
+  }
+  if (resumePhase === 'VALIDATE') {
+    return { ...none, validateFailureMsg: resumeFailureMsg as Record<string, unknown> };
+  }
+  if (resumePhase === 'CODE') {
+    return {
+      ...none,
+      resumeCodeFailure: {
+        phase: 'CODE',
+        message: String(resumeFailureMsg),
+        artifacts: null,
+        rawText: null,
+        details: { message: resumeFailureMsg },
+      },
+    };
+  }
+  return none;
+}
+
 /**
  * Main build loop — up to MAX_ITERATIONS of CODE → SPIN → VALIDATE.
  * Returns on first passing VALIDATE; throws after exhausting retries.
@@ -288,55 +335,33 @@ async function runBuildLoop({
 
   let lastAttempt: BuildAttempt | null = null;
   let assets: ReturnType<typeof codeAgent.loadAssetsFromBuildDir> = null;
-  // When resuming, seed iteration 1 with the last failure so CODE starts in repair mode
-  // (spinFailureMsg / validateFailureMsg / resumeCodeFailure from draft session fields).
-  let spinFailureMsg: Record<string, unknown> | null = (
-    hasResumeDir && normalizedResumePhase === 'SPIN'
-  ) ? resumeFailureMsg as Record<string, unknown> : null;
-  let validateFailureMsg: Record<string, unknown> | null = (
-    hasResumeDir && normalizedResumePhase === 'VALIDATE'
-  ) ? resumeFailureMsg as Record<string, unknown> : null;
-  const resumeCodeFailure: BuildAttempt | null = (
-    hasResumeDir && normalizedResumePhase === 'CODE' && resumeFailureMsg
-  ) ? {
-    phase: 'CODE',
-    message: String(resumeFailureMsg),
-    artifacts: null,
-    rawText: null,
-    details: { message: resumeFailureMsg },
-  } : null;
+
+  const resumeRepair = initResumeRepairContext({
+    hasResumeDir,
+    resumePhase: normalizedResumePhase,
+    resumeFailureMsg,
+  });
+  let spinFailureMsg = resumeRepair.spinFailureMsg;
+  let validateFailureMsg = resumeRepair.validateFailureMsg;
+  const resumeCodeFailure = resumeRepair.resumeCodeFailure;
+
   const buildCategory = pickCategory(normalized);
+  // These are for the current iteration of runBuildPipeline.
   const spinFailureHistory: FailureSnapshot[] = [];
   const validateFailureHistory: FailureSnapshot[] = [];
-
-  let warmLessons: { relatedLessons: unknown[] } = { relatedLessons: [] };
-  try {
-    warmLessons = await lessonStore.findByDraftContext(normalized);
-    if (warmLessons.relatedLessons.length) {
-      const best = warmLessons.relatedLessons[0] as Record<string, unknown>;
-      emitLog(onEvent, {
-        level: 'info',
-        tag: 'lessons',
-        message: `Warm-start: injecting ${warmLessons.relatedLessons.length} lesson(s) before iteration 1`,
-        detail: `Top match similarity ${best.similarity != null ? (best.similarity as number).toFixed(2) : 'n/a'} (${best.phase || 'unknown'})`,
-      });
-    }
-  } catch (e) {
-    console.warn(`[lessons] findByDraftContext failed: ${(e as Error).message}`);
-  }
 
   for (let attempt = 1; attempt <= MAX_ITERATIONS; attempt++) {
     const attemptCost = createUsageAccumulator();
     onEvent({ type: 'phase', phase: 'CODE' as BuildPhase, attempt, total: MAX_ITERATIONS } as never);
 
-    const retryHint = spinFailureMsg
+    const priorFailurePhase = spinFailureMsg
       ? 'SPIN'
       : (validateFailureMsg ? 'VALIDATE' : (lastAttempt ? lastAttempt.phase : null));
     emitLog(onEvent, {
       level: 'phase',
       tag: 'build',
-      message: retryHint
-        ? `Iteration ${attempt}/${MAX_ITERATIONS} — retry after ${retryHint} failure`
+      message: priorFailurePhase
+        ? `Iteration ${attempt}/${MAX_ITERATIONS} — retry after ${priorFailurePhase} failure`
         : `Iteration ${attempt}/${MAX_ITERATIONS}`,
     });
 
@@ -366,38 +391,27 @@ async function runBuildLoop({
     const hasScaffoldArtifacts = fs.existsSync(path.join(buildDir, 'docker-compose.yml'));
 
     let codeMode: 'scaffold' | 'repair' = 'scaffold';
-    if (spinFailureMsg || validateFailureMsg) {
-      codeMode = 'repair';
-    } else if (hasScaffoldArtifacts && attempt > 1) {
+    if (spinFailureMsg || validateFailureMsg || (hasScaffoldArtifacts && attempt > 1)) {
       codeMode = 'repair';
     }
 
     try {
-      let lessonsBlock: { relatedLessons: unknown[] } = { relatedLessons: [] };
+      let lessonsBlock: LessonsBlock = { relatedLessons: [] };
       if (spinFailureMsg || validateFailureMsg) {
         lessonsBlock = await lessonStore.findForRetry({
           draft: normalized,
           spinFailureMsg,
           validateFailureMsg,
         });
-        if (warmLessons.relatedLessons.length) {
-          const existingIds = new Set((lessonsBlock.relatedLessons as Array<Record<string, unknown>>).map((l) => l.text));
-          const extras = (warmLessons.relatedLessons as Array<Record<string, unknown>>).filter((l) => !existingIds.has(l.text));
-          if (extras.length) {
-            lessonsBlock = { relatedLessons: [...lessonsBlock.relatedLessons, ...extras] };
-          }
-        }
         if (lessonsBlock.relatedLessons.length) {
-          const best = lessonsBlock.relatedLessons[0] as Record<string, unknown>;
+          const best = lessonsBlock.relatedLessons[0];
           emitLog(onEvent, {
             level: 'info',
             tag: 'lessons',
             message: `Injecting ${lessonsBlock.relatedLessons.length} lesson(s) (retry)`,
-            detail: `Top match similarity ${best.similarity != null ? (best.similarity as number).toFixed(2) : 'n/a'} (${best.phase || 'unknown'})`,
+            detail: `Top match similarity ${best.similarity != null ? best.similarity.toFixed(2) : 'n/a'} (${best.phase || 'unknown'})`,
           });
         }
-      } else if (attempt === 1 && warmLessons.relatedLessons.length) {
-        lessonsBlock = warmLessons;
       }
 
       const prevForCode: BuildAttempt | null = lastAttempt?.phase === 'CODE'

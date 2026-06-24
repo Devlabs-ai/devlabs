@@ -71,11 +71,8 @@ const STATEMENTS: string[] = [
      build_session_id TEXT NOT NULL,
      category         TEXT,
      title            TEXT,
-     problem_context  TEXT NOT NULL,
      failure_summary  TEXT NOT NULL,
      fix_summary      TEXT NOT NULL,
-     lesson_text      TEXT NOT NULL,
-     details          JSONB,
      embedding        vector(1536),
      created_at       BIGINT NOT NULL
    )`,
@@ -115,6 +112,26 @@ const STATEMENTS: string[] = [
   `ALTER TABLE lessons DROP CONSTRAINT IF EXISTS lessons_phase_check`,
   `UPDATE lessons SET phase = 'spin' WHERE phase = 'start'`,
   `ALTER TABLE lessons ADD CONSTRAINT lessons_phase_check CHECK (phase IN ('spin', 'validate'))`,
+
+  // Slim lessons schema: embed failure_summary only; drop legacy columns.
+  `DO $$ BEGIN
+     IF EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'lessons' AND column_name = 'lesson_text'
+     ) THEN
+       UPDATE lessons SET failure_summary = lesson_text
+       WHERE COALESCE(trim(failure_summary), '') = ''
+         AND lesson_text IS NOT NULL AND trim(lesson_text) <> '';
+       UPDATE lessons SET failure_summary = failure_summary || E'\\n\\n' || left(lesson_text, 2000)
+       WHERE lesson_text IS NOT NULL AND trim(lesson_text) <> ''
+         AND length(coalesce(failure_summary, '')) < 120
+         AND failure_summary NOT LIKE '%' || left(lesson_text, 40) || '%';
+       UPDATE lessons SET embedding = NULL;
+     END IF;
+   END $$`,
+  `ALTER TABLE lessons DROP COLUMN IF EXISTS problem_context`,
+  `ALTER TABLE lessons DROP COLUMN IF EXISTS lesson_text`,
+  `ALTER TABLE lessons DROP COLUMN IF EXISTS details`,
 
   // Persistent per-draft code chunks for semantic search during CODE repair
   // and future work on the same challenge draft.

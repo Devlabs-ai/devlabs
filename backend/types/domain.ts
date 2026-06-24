@@ -327,14 +327,24 @@ export type LessonPhase = 'spin' | 'validate';
 export interface LessonRecord {
   id: number;
   phase: LessonPhase;
-  text: string;
   failureSummary: string;
   fixSummary: string;
   category: string | null;
   title: string | null;
-  problemContext: string | null;
-  details: Record<string, unknown> | null;
   distance: number | null;
+}
+
+/** One lesson entry injected into the CODE agent repair payload. */
+export interface RelatedLesson {
+  phase: LessonPhase;
+  failureSummary: string | null | undefined;
+  fixSummary: string | null | undefined;
+  category: string | null;
+  similarity: number | null;
+}
+
+export interface LessonsBlock {
+  relatedLessons: RelatedLesson[];
 }
 
 // ---------------------------------------------------------------------------
