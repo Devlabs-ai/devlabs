@@ -12,6 +12,7 @@ The user message includes a JSON payload. Treat these as authoritative:
   - draft.sandboxSpec — optional layout hints when present
   - lessonsBlock — past lessons (failureSummary + fixSummary) on retry
   - spinFailureMsg / validateFailureMsg — on repair iterations
+  - workspaceTree / failureContext — on repair iterations (file layout + likely fix targets)
 
 Derive the file layout from the draft — do not assume a fixed stack.
 Every challenge needs docker-compose.yml, service code under services/*, and challenge.json.
@@ -243,9 +244,29 @@ Ensure while writing files (from draft + rules below):
 2. STOP — reply with a brief text-only summary (no more tool calls).
 
 Scaffold mode: do NOT run a grep/read verification pass — the server verifies next.
-Repair mode: read_file/grep only to locate the specific failure, then edit_file/write_file.
 
-============================= REPAIR ========================================
+============================= REPAIR WORKFLOW =================================
+1. ORIENT — read failureContext + workspaceTree in the payload. Identify candidate
+   files from error paths, service names, and symptom → service mapping. Do NOT list_files.
+
+2. INVESTIGATE — read/grep only files justified by the failure:
+   - SPIN/Dockerfile/build errors → service Dockerfiles, compose, deps files
+   - VALIDATE/evidence gaps → challenge.json validationSpec + services in that graph
+   - Unclear path → targeted grep, then read matching files from workspaceTree
+   Rules:
+   - Never read the same path twice (tool will reject duplicates)
+   - Never grep the same pattern twice in the same scope
+   - Prefer read_file with line ranges over full-file reads for large files
+   - Use workspaceTree objectives to pick files, not random exploration
+   Multi-file reads are fine when each file is justified.
+
+3. FIX — edit_file for surgical changes; write_file when replacing whole files.
+   Multi-file fixes are fine — batch related writes in one step when possible.
+
+4. STOP — once all intended edits are done, reply with a text summary.
+   Do NOT re-read or grep to self-verify; server runs verifyBuildComplete next.
+
+============================= REPAIR (failure phases) ==========================
 Read the failure message first. Match the fix to the phase:
 
 CODE / "build verification failed" / "scaffold rules failed":
@@ -268,10 +289,12 @@ const SYSTEM_PROMPT_DYNAMIC = `Mode (scaffold/repair) and per-challenge context 
 
 const SCAFFOLD_USER_HINT = `Mode: scaffold. Write docker-compose.yml, all services/*, init/*, and challenge.json with executable validationSpec.steps. Prefer write_files in one call (or several write_file in one turn). Do not grep/read to self-verify — stop with a text summary when files are written.`;
 
-const REPAIR_USER_HINT = `Mode: repair. Fix the reported failure in the correct file.
-If the error mentions docker-compose.yml, HOST_PORT, Dockerfile missing, or scaffold rules,
-edit docker-compose.yml and services/* — not only challenge.json.
-If VALIDATE failed for missing evidence, add validationSpec.steps; do not fix the interview bug unless the judge says it is not reproducible.`;
+const REPAIR_USER_HINT = `Mode: repair. Use workspaceTree + failureContext in the payload — do NOT list_files for orientation.
+Read spinFailureMsg / validateFailureMsg / previousAttempt first. Investigate with targeted read_file/grep
+(use tree objectives to pick files; multi-file reads OK when justified; no duplicate reads/greps).
+Fix the reported failure: docker-compose.yml / services/* for SPIN/build/scaffold errors;
+challenge.json validationSpec for VALIDATE evidence gaps — do not fix the interview bug unless
+the judge says it is not reproducible. Prefer edit_file; stop with a text summary when done — no self-verify reads.`;
 
 /** @deprecated */
 const SYSTEM_PROMPT = SYSTEM_PROMPT_STATIC;

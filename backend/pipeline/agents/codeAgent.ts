@@ -26,9 +26,12 @@ const {
 } = require('../prompts/codeAgent.prompt');
 const { verifyBuildComplete } = require('../validation/buildVerification');
 const { cloneAssets, diffAssets } = require('../helpers/assetDiff');
+const { buildWorkspaceTree, buildFailureContext } = require('../helpers/workspaceTree');
 
 const MAX_STEPS_SCAFFOLD = 20;
-const MAX_STEPS_REPAIR = 25;
+const MAX_STEPS_REPAIR = 15;
+/** Stop repair loops that only read/grep without ever applying a fix. */
+const MAX_READ_ONLY_STEPS_BEFORE_WRITE = 8;
 
 const READ_ONLY_TOOLS = new Set(['read_file', 'grep', 'list_files']);
 const WRITE_TOOLS = new Set(['write_file', 'write_files', 'edit_file']);
@@ -61,6 +64,74 @@ function createScaffoldEarlyStop(buildDir: string): {
   };
 }
 
+/** Stop repair loops that devolve into read-only spirals (pre- or post-write). */
+function createRepairEarlyStop(): {
+  shouldContinue: (step: { toolResults: Array<{ toolName: string; output?: unknown }> }) => boolean;
+  stopReason: () => 'pre_write' | 'post_write' | null;
+} {
+  let hasWritten = false;
+  let readOnlyStreakAfterWrite = 0;
+  let readOnlyStreakBeforeWrite = 0;
+  let lastStopReason: 'pre_write' | 'post_write' | null = null;
+  return {
+    stopReason: () => lastStopReason,
+    shouldContinue({ toolResults }) {
+      lastStopReason = null;
+      const names = toolResults.map((t) => t.toolName);
+      const readOnly = names.length > 0 && names.every((n) => READ_ONLY_TOOLS.has(n));
+
+      if (toolResults.some((tr) => isSuccessfulWrite(tr))) {
+        hasWritten = true;
+        readOnlyStreakAfterWrite = 0;
+        readOnlyStreakBeforeWrite = 0;
+        return true;
+      }
+
+      if (!hasWritten) {
+        if (readOnly) readOnlyStreakBeforeWrite += 1;
+        else readOnlyStreakBeforeWrite = 0;
+        if (readOnlyStreakBeforeWrite >= MAX_READ_ONLY_STEPS_BEFORE_WRITE) {
+          lastStopReason = 'pre_write';
+          return false;
+        }
+        return true;
+      }
+
+      if (readOnly) readOnlyStreakAfterWrite += 1;
+      else readOnlyStreakAfterWrite = 0;
+      if (readOnlyStreakAfterWrite >= 2) {
+        lastStopReason = 'post_write';
+        return false;
+      }
+      return true;
+    },
+  };
+}
+
+function isSuccessfulWrite(tr: { toolName: string; output?: unknown }): boolean {
+  if (!WRITE_TOOLS.has(tr.toolName)) return false;
+  const o = tr.output as Record<string, unknown> | undefined;
+  if (!o || o.error) return false;
+  if (tr.toolName === 'write_files') {
+    const written = o.written as unknown[] | undefined;
+    return (o.count as number) > 0 || (Array.isArray(written) && written.length > 0);
+  }
+  return o.ok === true;
+}
+
+/** Slim draft slice shared by scaffold and repair payloads. */
+function slimDraftSlice(draft: ChallengeDraft): Record<string, unknown> {
+  return {
+    title: draft.meta?.name || draft.title,
+    category: draft.meta?.category || draft.category,
+    infra: draft.infra,
+    brokenState: {
+      rootCause: draft.brokenState?.rootCause,
+      validationSymptoms: draft.brokenState?.validationSymptoms,
+    },
+    sandboxSpec: draft.sandboxSpec,
+  };
+}
 export interface ChallengeAssets {
   title?: string;
   description?: string;
@@ -107,6 +178,7 @@ function sanitizePreviousAttempt(prev: BuildAttempt | null | undefined): BuildAt
 function buildCodeUserPayload({
   mode,
   draft,
+  buildDir,
   lessonsBlock,
   spinFailureMsg,
   validateFailureMsg,
@@ -114,35 +186,41 @@ function buildCodeUserPayload({
 }: {
   mode: 'scaffold' | 'repair';
   draft: ChallengeDraft;
+  buildDir?: string;
   lessonsBlock: LessonsBlock;
   spinFailureMsg?: Record<string, unknown> | null;
   validateFailureMsg?: Record<string, unknown> | null;
   previousAttempt?: BuildAttempt | null;
 }): Record<string, unknown> {
+  const slimDraft = slimDraftSlice(draft);
   if (mode === 'scaffold') {
     return {
       mode,
-      draft: {
-        title: draft.meta?.name || draft.title,
-        category: draft.meta?.category || draft.category,
-        infra: draft.infra,
-        brokenState: {
-          rootCause: draft.brokenState?.rootCause,
-          validationSymptoms: draft.brokenState?.validationSymptoms,
-        },
-        sandboxSpec: draft.sandboxSpec,
-      },
+      draft: slimDraft,
       lessonsBlock,
     };
   }
-  return {
+
+  const workspaceTree = buildDir ? buildWorkspaceTree(buildDir, draft) : null;
+  const sanitizedPrev = sanitizePreviousAttempt(previousAttempt);
+  const failureContext = buildFailureContext({
+    spinFailureMsg,
+    validateFailureMsg,
+    previousAttempt: sanitizedPrev,
+    workspaceTree,
+  });
+
+  const payload: Record<string, unknown> = {
     mode,
-    draft,
+    draft: slimDraft,
+    workspaceTree,
     lessonsBlock,
     spinFailureMsg,
     validateFailureMsg,
-    previousAttempt: sanitizePreviousAttempt(previousAttempt),
+    previousAttempt: sanitizedPrev,
   };
+  if (failureContext) payload.failureContext = failureContext;
+  return payload;
 }
 
 /** Compact summary of loaded assets for build logs. */
@@ -248,7 +326,11 @@ async function runCodeAgentLoop({
 
   const repairBaseline = mode === 'repair' ? cloneAssets(loadAssetsFromBuildDir(buildDir) || {}) : null;
 
-  const earlyStop = mode === 'scaffold' ? createScaffoldEarlyStop(buildDir) : null;
+  const earlyStop = mode === 'scaffold'
+    ? createScaffoldEarlyStop(buildDir)
+    : mode === 'repair'
+      ? createRepairEarlyStop()
+      : null;
 
   const result = await runAgentWithTools({
     agent: 'code',
@@ -261,10 +343,19 @@ async function runCodeAgentLoop({
     label: mode,
     promptCache: provider === 'anthropic',
     shouldContinue: earlyStop
-      ? (step: { stepIndex: number; toolResults: Array<{ toolName: string }>; text?: string }) => {
+      ? (step: { stepIndex: number; toolResults: Array<{ toolName: string; output?: unknown }>; text?: string }) => {
           const cont = earlyStop.shouldContinue(step);
           if (!cont) {
-            emitCodeLog(onEvent, 'Scaffold files present — stopping tool loop (server verification runs next)');
+            if (mode === 'scaffold') {
+              emitCodeLog(onEvent, 'Scaffold files present — stopping tool loop (server verification runs next)');
+            } else {
+              const repairStop = earlyStop as ReturnType<typeof createRepairEarlyStop>;
+              const reason = repairStop.stopReason?.() ?? null;
+              const msg = reason === 'pre_write'
+                ? 'Repair read-only spiral — stopping tool loop (no edits applied; server verification runs next)'
+                : 'Repair fix applied — stopping tool loop (server verification runs next)';
+              emitCodeLog(onEvent, msg);
+            }
           }
           return cont;
         }
@@ -287,9 +378,8 @@ async function runCodeAgentLoop({
   if (!summary) {
     summary = mode === 'scaffold'
       ? 'Scaffold files written — server verification runs next.'
-      : '';
+      : 'Repair edits applied — server verification runs next.';
   }
-  if (!summary) throw new Error('CODE agent finished without a summary message');
 
   emitCodeLog(onEvent, `CODE agent complete — ${result.stepCount} step(s), $${costUsd.toFixed(4)}`, {
     modelId, inputTokens, outputTokens,
@@ -347,6 +437,7 @@ async function runCodePhase({
   const prompt = `${modeHint}\n\n${JSON.stringify(buildCodeUserPayload({
     mode,
     draft,
+    buildDir,
     lessonsBlock,
     spinFailureMsg,
     validateFailureMsg,

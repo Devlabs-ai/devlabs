@@ -14,6 +14,8 @@ const MAX_LINE_LEN = 500;
 
 const ERROR_LINE_RE = /(?:^|\b)(?:ERROR|Error|FATAL|Fatal|Traceback|Exception|panic|failed|FAILED|exit(?:ed)?\s+(?:code\s+)?[1-9]\d*|cannot|Can't|unable to|denied|refused|timeout|OOM|Killed)/i;
 const NOISE_RE = /^(DEBUG|TRACE|INFO\s+\[)/i;
+/** Lines with paths or filenames — always keep when trimming extracted errors. */
+const PATH_IN_LINE_RE = /(?:services\/|[\w.-]+\.(?:py|js|ts|yml|yaml|json|sh|sql|txt))|Dockerfile|docker-compose\.yml|challenge\.json/i;
 
 function capLine(s: string): string {
   const t = s.trim();
@@ -54,7 +56,20 @@ export function extractFailureSignals(rawLogs: string | null | undefined): strin
     }
   }
 
-  return out.slice(-MAX_EXTRACTED_LINES);
+  return prioritizePathLines(out);
+}
+
+/** When trimming, never drop lines that contain file paths or service paths. */
+function prioritizePathLines(lines: string[]): string[] {
+  if (lines.length <= MAX_EXTRACTED_LINES) return lines;
+  const withPath = lines.filter((l) => PATH_IN_LINE_RE.test(l));
+  const withoutPath = lines.filter((l) => !PATH_IN_LINE_RE.test(l));
+  const out = [...withPath];
+  for (const line of withoutPath) {
+    if (out.length >= MAX_EXTRACTED_LINES) break;
+    if (!out.includes(line)) out.push(line);
+  }
+  return out.slice(0, MAX_EXTRACTED_LINES);
 }
 
 export interface SpinFailureContext {
@@ -94,37 +109,36 @@ export function prepareSpinFailureContext(
     logFile = SPIN_LOG_FILE;
   }
 
-  const extractedErrors = extractFailureSignals(rawLogs);
+  let extractedErrors = extractFailureSignals(rawLogs);
   if (err.composeStderr) {
     const stderrLines = extractFailureSignals(err.composeStderr);
     for (const line of stderrLines) {
       if (!extractedErrors.includes(line)) extractedErrors.push(line);
     }
   }
+  extractedErrors = prioritizePathLines(extractedErrors);
 
   return {
     message: err.message || null,
     composeStdout: err.composeStdout || null,
     composeStderr: err.composeStderr || null,
-    extractedErrors: extractedErrors.slice(0, MAX_EXTRACTED_LINES),
+    extractedErrors,
     logFile,
     logBytes,
     logLineCount,
   };
 }
 
-/** Shape passed into code agent repair payload (no raw 141KB logs). */
+/** Shape passed into code agent repair payload — structured signals only (no inline stdout/stderr). */
 export function spinFailureForRepair(ctx: SpinFailureContext): Record<string, unknown> {
   return {
     message: ctx.message,
-    composeStdout: ctx.composeStdout,
-    composeStderr: ctx.composeStderr,
     extractedErrors: ctx.extractedErrors,
     logFile: ctx.logFile,
     logBytes: ctx.logBytes,
     logLineCount: ctx.logLineCount,
     hint: ctx.logFile
-      ? `Full container logs are on disk at ${ctx.logFile}. Use read_file or grep on that path — do not expect logs inline.`
+      ? `Full container logs are on disk at ${ctx.logFile}. Use read_file or grep on that path when extractedErrors is insufficient.`
       : null,
   };
 }

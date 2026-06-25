@@ -120,11 +120,33 @@ function emitRepairBatchDiffs(
   }
 }
 
+/** Per-loop lookup cache for repair mode — blocks duplicate read/grep. */
+function createRepairLookupSession() {
+  const readPaths = new Map<string, { preview: string; chars: number }>();
+  const grepCache = new Map<string, { matchCount: number; matches: Array<{ path: string; line: number; text: string }> }>();
+  return { readPaths, grepCache };
+}
+
+function readCacheKey(relPath: string, startLine?: number, endLine?: number): string {
+  if (startLine || endLine) return `${relPath}:${startLine || 1}-${endLine || ''}`;
+  return relPath;
+}
+
+function grepCacheKey(pattern: string, subpath?: string): string {
+  return `${pattern}\0${subpath || ''}`;
+}
+
+function previewContent(content: string, max = 240): string {
+  return content.length > max ? `${content.slice(0, max)}…` : content;
+}
+
 /**
  * Build the tool set passed to the CODE agent LLM loop.
  * Tool I/O logging is handled by agentRuntime.runAgentWithTools — not here.
  */
 export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnType<typeof tool>> {
+  const repairLookup = ctx.mode === 'repair' ? createRepairLookupSession() : null;
+
   return {
     list_files: tool({
       description: 'List files under the build workspace with byte sizes.',
@@ -159,6 +181,16 @@ export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnTyp
         startLine?: number;
         endLine?: number;
       }) => {
+        const cacheKey = readCacheKey(relPath, startLine, endLine);
+        if (repairLookup?.readPaths.has(cacheKey)) {
+          const prior = repairLookup.readPaths.get(cacheKey)!;
+          return {
+            ok: false,
+            error: `already read ${relPath} — use prior result (preview: ${prior.preview})`,
+            path: relPath,
+            chars: prior.chars,
+          };
+        }
         const abs = resolveInWorkspace(ctx.buildDir, relPath);
         if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
           return { ok: false, error: 'file not found or not allowed' };
@@ -170,7 +202,14 @@ export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnTyp
           const end = Math.min(lines.length, endLine || lines.length);
           content = lines.slice(start - 1, end).join('\n');
         }
-        return { ok: true, path: relPath, content: capOutput(content) };
+        const capped = capOutput(content);
+        if (repairLookup) {
+          repairLookup.readPaths.set(cacheKey, {
+            preview: previewContent(capped),
+            chars: capped.length,
+          });
+        }
+        return { ok: true, path: relPath, content: capped };
       },
     }),
 
@@ -287,6 +326,16 @@ export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnTyp
         path: z.string().optional().describe('Optional subdirectory or file to search'),
       }),
       execute: async ({ pattern, path: subpath }: { pattern: string; path?: string }) => {
+        const gKey = grepCacheKey(pattern, subpath);
+        if (repairLookup?.grepCache.has(gKey)) {
+          const prior = repairLookup.grepCache.get(gKey)!;
+          return {
+            ok: false,
+            error: `already grep'd pattern in this scope — ${prior.matchCount} prior match(es)`,
+            matchCount: prior.matchCount,
+            matches: prior.matches.slice(0, 8),
+          };
+        }
         const root = subpath ? resolveInWorkspace(ctx.buildDir, subpath) : ctx.buildDir;
         if (!root || !fs.existsSync(root)) return { ok: false, error: 'path not found' };
         const matches: Array<{ path: string; line: number; text: string }> = [];
@@ -319,6 +368,9 @@ export function createCodeAgentTools(ctx: ToolContext): Record<string, ReturnTyp
           }
         } else {
           walk(root, subpath ? safeRel(subpath) || '' : '');
+        }
+        if (repairLookup) {
+          repairLookup.grepCache.set(gKey, { matchCount: matches.length, matches: [...matches] });
         }
         return { ok: true, matches };
       },
