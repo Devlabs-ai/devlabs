@@ -25,7 +25,7 @@ const { createAnthropic } = require('@ai-sdk/anthropic');
 const DEFAULTS: Record<string, string> = {
   design:     'openai:gpt-4.5',
   schema:     'openai:gpt-4o',
-  code:       'openai:gpt-4o',
+  code:       'anthropic:claude-haiku-4-5',
   validation: 'openai:gpt-4o-mini',
   embedding:  'openai:text-embedding-3-small',
 };

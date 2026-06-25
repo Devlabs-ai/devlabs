@@ -3,10 +3,10 @@
 /**
  * CODE agent — Phase 1 of the build pipeline.
  *
- * Runs an LLM tool loop to scaffold or repair files under sandbox/builds/<id>/,
- * then verifies layout + validationSpec with buildVerification.
+ * Runs Claude Agent SDK (Claude Code harness) to scaffold or repair files under
+ * sandbox/builds/<id>/, then verifies layout + validationSpec with buildVerification.
  *
- * Flow: prompt → runAgentWithTools → verifyBuildComplete → loadAssetsFromBuildDir
+ * Flow: runCodePhase → runCodeAgent → runCodeAgentHarness → verifyBuildComplete
  */
 
 import * as fs from 'fs';
@@ -14,110 +14,19 @@ import * as path from 'path';
 
 import type { ChallengeDraft, BuildAttempt, BuildEventHandler, LessonsBlock } from '../../types/domain';
 
-const { modelIdFor, providerOf } = require('../../llm/models');
 const { estimateCostUsd } = require('../../llm/cost');
-const { runAgentWithTools } = require('../helpers/agentRuntime');
-const { createCodeAgentTools } = require('./codeAgentTools');
+const { runCodeAgentHarness } = require('../helpers/codeAgentHarness');
 const {
-  SYSTEM_PROMPT_STATIC,
-  SYSTEM_PROMPT_DYNAMIC,
+  buildCodeAgentSystemPrompt,
   SCAFFOLD_USER_HINT,
   REPAIR_USER_HINT,
-} = require('../prompts/codeAgent.prompt');
+} = require('../skills/codeAgentSkills');
 const { verifyBuildComplete } = require('../validation/buildVerification');
 const { cloneAssets, diffAssets } = require('../helpers/assetDiff');
 const { buildWorkspaceTree, buildFailureContext } = require('../helpers/workspaceTree');
 
-const MAX_STEPS_SCAFFOLD = 20;
-const MAX_STEPS_REPAIR = 15;
-/** Stop repair loops that only read/grep without ever applying a fix. */
-const MAX_READ_ONLY_STEPS_BEFORE_WRITE = 8;
-
-const READ_ONLY_TOOLS = new Set(['read_file', 'grep', 'list_files']);
-const WRITE_TOOLS = new Set(['write_file', 'write_files', 'edit_file']);
-
-function scaffoldCoreFilesExist(buildDir: string): boolean {
-  return fs.existsSync(path.join(buildDir, 'docker-compose.yml'))
-    && fs.existsSync(path.join(buildDir, 'challenge.json'));
-}
-
-/** Stop scaffold loops that devolve into grep/read self-verification after files exist. */
-function createScaffoldEarlyStop(buildDir: string): {
-  shouldContinue: (step: { toolResults: Array<{ toolName: string }> }) => boolean;
-} {
-  let readOnlyStreak = 0;
-  return {
-    shouldContinue({ toolResults }) {
-      if (!scaffoldCoreFilesExist(buildDir)) return true;
-      const names = toolResults.map((t) => t.toolName);
-      if (names.some((n) => WRITE_TOOLS.has(n))) {
-        readOnlyStreak = 0;
-        return true;
-      }
-      if (names.length > 0 && names.every((n) => READ_ONLY_TOOLS.has(n))) {
-        readOnlyStreak += 1;
-      } else {
-        readOnlyStreak = 0;
-      }
-      return readOnlyStreak < 2;
-    },
-  };
-}
-
-/** Stop repair loops that devolve into read-only spirals (pre- or post-write). */
-function createRepairEarlyStop(): {
-  shouldContinue: (step: { toolResults: Array<{ toolName: string; output?: unknown }> }) => boolean;
-  stopReason: () => 'pre_write' | 'post_write' | null;
-} {
-  let hasWritten = false;
-  let readOnlyStreakAfterWrite = 0;
-  let readOnlyStreakBeforeWrite = 0;
-  let lastStopReason: 'pre_write' | 'post_write' | null = null;
-  return {
-    stopReason: () => lastStopReason,
-    shouldContinue({ toolResults }) {
-      lastStopReason = null;
-      const names = toolResults.map((t) => t.toolName);
-      const readOnly = names.length > 0 && names.every((n) => READ_ONLY_TOOLS.has(n));
-
-      if (toolResults.some((tr) => isSuccessfulWrite(tr))) {
-        hasWritten = true;
-        readOnlyStreakAfterWrite = 0;
-        readOnlyStreakBeforeWrite = 0;
-        return true;
-      }
-
-      if (!hasWritten) {
-        if (readOnly) readOnlyStreakBeforeWrite += 1;
-        else readOnlyStreakBeforeWrite = 0;
-        if (readOnlyStreakBeforeWrite >= MAX_READ_ONLY_STEPS_BEFORE_WRITE) {
-          lastStopReason = 'pre_write';
-          return false;
-        }
-        return true;
-      }
-
-      if (readOnly) readOnlyStreakAfterWrite += 1;
-      else readOnlyStreakAfterWrite = 0;
-      if (readOnlyStreakAfterWrite >= 2) {
-        lastStopReason = 'post_write';
-        return false;
-      }
-      return true;
-    },
-  };
-}
-
-function isSuccessfulWrite(tr: { toolName: string; output?: unknown }): boolean {
-  if (!WRITE_TOOLS.has(tr.toolName)) return false;
-  const o = tr.output as Record<string, unknown> | undefined;
-  if (!o || o.error) return false;
-  if (tr.toolName === 'write_files') {
-    const written = o.written as unknown[] | undefined;
-    return (o.count as number) > 0 || (Array.isArray(written) && written.length > 0);
-  }
-  return o.ok === true;
-}
+const MAX_TURNS_SCAFFOLD = 20;
+const MAX_TURNS_REPAIR = 15;
 
 /** Slim draft slice shared by scaffold and repair payloads. */
 function slimDraftSlice(draft: ChallengeDraft): Record<string, unknown> {
@@ -125,6 +34,8 @@ function slimDraftSlice(draft: ChallengeDraft): Record<string, unknown> {
     title: draft.meta?.name || draft.title,
     category: draft.meta?.category || draft.category,
     infra: draft.infra,
+    readyServices: draft.readyServices,
+    codebase: draft.codebase,
     brokenState: {
       rootCause: draft.brokenState?.rootCause,
       validationSymptoms: draft.brokenState?.validationSymptoms,
@@ -208,6 +119,7 @@ function buildCodeUserPayload({
     validateFailureMsg,
     previousAttempt: sanitizedPrev,
     workspaceTree,
+    buildDir,
   });
 
   const payload: Record<string, unknown> = {
@@ -306,60 +218,32 @@ function emitCodeLog(onEvent: BuildEventHandler | undefined, message: string, de
   console.log(`[code] ${message}`);
 }
 
-/** Run the LLM + sandbox-tool loop for one CODE invocation. */
-async function runCodeAgentLoop({
+/** Run one CODE agent session (Claude Code harness + Devlabs post-processing). */
+async function runCodeAgent({
   mode,
   prompt,
   buildDir,
-  maxSteps,
+  maxTurns,
   onEvent,
 }: {
   mode: 'scaffold' | 'repair';
   prompt: string;
   buildDir: string;
-  maxSteps: number;
+  maxTurns: number;
   onEvent?: BuildEventHandler;
-}): Promise<{ summary: string; usage: Record<string, unknown> }> {
-  const modelId = modelIdFor('code');
-  const provider = providerOf(modelId);
-  emitCodeLog(onEvent, `CODE agent (${mode}) — ${modelId}, cwd=${buildDir}`);
+}): Promise<{ summary: string; usage: Record<string, unknown>; hasWritten: boolean }> {
+  emitCodeLog(onEvent, `CODE agent (${mode}) — Claude Code harness, skill=code-agent-${mode}, cwd=${buildDir}`);
 
   const repairBaseline = mode === 'repair' ? cloneAssets(loadAssetsFromBuildDir(buildDir) || {}) : null;
+  const systemPrompt = buildCodeAgentSystemPrompt(mode);
 
-  const earlyStop = mode === 'scaffold'
-    ? createScaffoldEarlyStop(buildDir)
-    : mode === 'repair'
-      ? createRepairEarlyStop()
-      : null;
-
-  const result = await runAgentWithTools({
-    agent: 'code',
-    system: `${SYSTEM_PROMPT_STATIC}\n\n${SYSTEM_PROMPT_DYNAMIC}`,
-    messages: [{ role: 'user', content: prompt }],
-    tools: createCodeAgentTools({ buildDir, mode, onEvent }),
-    maxSteps,
-    maxTokens: 16384,
+  const result = await runCodeAgentHarness({
+    prompt,
+    systemPrompt,
+    buildDir,
+    maxTurns,
     onEvent,
     label: mode,
-    promptCache: provider === 'anthropic',
-    shouldContinue: earlyStop
-      ? (step: { stepIndex: number; toolResults: Array<{ toolName: string; output?: unknown }>; text?: string }) => {
-          const cont = earlyStop.shouldContinue(step);
-          if (!cont) {
-            if (mode === 'scaffold') {
-              emitCodeLog(onEvent, 'Scaffold files present — stopping tool loop (server verification runs next)');
-            } else {
-              const repairStop = earlyStop as ReturnType<typeof createRepairEarlyStop>;
-              const reason = repairStop.stopReason?.() ?? null;
-              const msg = reason === 'pre_write'
-                ? 'Repair read-only spiral — stopping tool loop (no edits applied; server verification runs next)'
-                : 'Repair fix applied — stopping tool loop (server verification runs next)';
-              emitCodeLog(onEvent, msg);
-            }
-          }
-          return cont;
-        }
-      : undefined,
   });
 
   if (mode === 'repair' && repairBaseline && onEvent) {
@@ -370,28 +254,30 @@ async function runCodeAgentLoop({
     }
   }
 
-  const usage = result.usage as { inputTokens?: number; outputTokens?: number } | undefined;
-  const inputTokens = usage?.inputTokens || 0;
-  const outputTokens = usage?.outputTokens || 0;
-  const costUsd = estimateCostUsd(modelId, usage);
+  const { inputTokens, outputTokens, totalTokens } = result.usage;
+  const costUsd = result.costUsd || estimateCostUsd(result.modelId, result.usage);
   let summary = (result.text || '').trim();
+  const wrote = mode === 'scaffold' ? true : result.hasWritten;
   if (!summary) {
     summary = mode === 'scaffold'
       ? 'Scaffold files written — server verification runs next.'
-      : 'Repair edits applied — server verification runs next.';
+      : wrote
+        ? 'Repair edits applied — server verification runs next.'
+        : 'Repair loop ended without file edits.';
   }
 
-  emitCodeLog(onEvent, `CODE agent complete — ${result.stepCount} step(s), $${costUsd.toFixed(4)}`, {
-    modelId, inputTokens, outputTokens,
+  emitCodeLog(onEvent, `CODE agent complete — ${result.stepCount} turn(s), $${costUsd.toFixed(4)}`, {
+    modelId: result.modelId, inputTokens, outputTokens, hasWritten: wrote,
   });
 
   return {
     summary,
+    hasWritten: wrote,
     usage: {
       agent: 'code',
       label: mode,
-      modelId,
-      usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+      modelId: result.modelId,
+      usage: { inputTokens, outputTokens, totalTokens },
       stepCount: result.stepCount,
       costUsd,
     },
@@ -434,7 +320,7 @@ async function runCodePhase({
   fs.mkdirSync(buildDir, { recursive: true });
 
   const modeHint = mode === 'scaffold' ? SCAFFOLD_USER_HINT : REPAIR_USER_HINT;
-  const prompt = `${modeHint}\n\n${JSON.stringify(buildCodeUserPayload({
+  const userPayload = buildCodeUserPayload({
     mode,
     draft,
     buildDir,
@@ -442,15 +328,26 @@ async function runCodePhase({
     spinFailureMsg,
     validateFailureMsg,
     previousAttempt,
-  }), null, 2)}`;
+  });
+  const prompt = `${modeHint}\n\n${JSON.stringify(userPayload, null, 2)}`;
 
-  const agentResult = await runCodeAgentLoop({
+  const agentResult = await runCodeAgent({
     mode,
     prompt,
     buildDir,
-    maxSteps: mode === 'scaffold' ? MAX_STEPS_SCAFFOLD : MAX_STEPS_REPAIR,
+    maxTurns: mode === 'scaffold' ? MAX_TURNS_SCAFFOLD : MAX_TURNS_REPAIR,
     onEvent,
   });
+
+  if (
+    mode === 'repair'
+    && !agentResult.hasWritten
+    && (validateFailureMsg || spinFailureMsg)
+  ) {
+    throw new Error(
+      'CODE repair finished without editing any files — use Edit or Write on failureContext.likelyFiles (e.g. services/*/app.py) to fix the reported failure',
+    );
+  }
 
   emitCodeLog(onEvent, 'CODE verify…');
   verifyBuildComplete(buildDir, { scaffoldRules: true });

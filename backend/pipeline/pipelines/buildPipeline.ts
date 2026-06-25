@@ -18,6 +18,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
 const { assertLlmConfigured } = require('../helpers/agentRuntime');
+const { assertCodeHarnessConfigured } = require('../helpers/codeAgentHarness');
 const codeAgent = require('../agents/codeAgent');
 const spinAgent = require('../agents/spinAgent');
 const composeManager = require('../../sandbox/composeManager');
@@ -355,7 +356,7 @@ async function runBuildLoop({
   attempts: number;
 }> {
   try {
-    assertLlmConfigured('code', { label: 'code agent (build pipeline)' });
+    assertCodeHarnessConfigured();
   } catch (e) {
     onEvent({ type: 'error', message: (e as Error).message } as never);
     throw e;
