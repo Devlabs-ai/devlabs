@@ -50,16 +50,6 @@ function loadSkill(relativePath: string): string {
   return stripFrontmatter(readSkillFile(relativePath));
 }
 
-const SCAFFOLD_USER_HINT = `Mode: scaffold (server-selected skill: code-agent-scaffold).
-Write docker-compose.yml, services/* (Dockerfile per built service), init/*, and challenge.json with validationSpec.graphs (one graph per validationSymptom).
-Prefer multiple Write calls in one turn. Do not grep/read to self-verify — stop with a text summary when files are written.`;
-
-const REPAIR_USER_HINT = `Mode: repair (server-selected skill: code-agent-repair).
-Start with failureContext.repairPlan — failure, target file, and goodRepair steps (Read or skip if fileSnippet → Edit → stop).
-Also read actionHint, fileSnippet, spinFailureMsg/validateFailureMsg. Do NOT Glob for orientation.
-Prefer Edit on existing files. After the primary file is in context, apply Edit or Write before more reads.
-Fix scaffold/runtime blockers; do not remove the intentional broken behavior unless the judge says it is not reproducible.`;
-
 /**
  * Compose system prompt: shared invariants + exactly one mode skill.
  */
@@ -91,7 +81,5 @@ function clearSkillCache(): void {
 
 module.exports = {
   buildCodeAgentSystemPrompt,
-  SCAFFOLD_USER_HINT,
-  REPAIR_USER_HINT,
   clearSkillCache,
 };

@@ -7,6 +7,7 @@
  */
 
 import type {
+  BuildAttempt,
   LessonAnchorFailure,
   LessonRecord,
   LessonPhase,
@@ -245,71 +246,31 @@ function shapeLessonForPrompt(lesson: LessonRecord): RelatedLesson {
   };
 }
 
-interface SpinFailure {
-  message?: string;
-  composeStderr?: string | null;
-  logs?: string | null;
-  extractedErrors?: string[];
-}
-
-interface ValidateFailure {
-  message?: string;
-  suggestions?: string[];
-}
-
 async function findForRetry({
   draft,
-  spinFailureMsg,
-  validateFailureMsg,
+  previousAttempt,
   k = LESSONS_K,
 }: {
   draft?: { meta?: { category?: string }; category?: string } | null;
-  spinFailureMsg?: SpinFailure | null;
-  validateFailureMsg?: ValidateFailure | null;
+  previousAttempt?: BuildAttempt | null;
   k?: number;
 }): Promise<LessonsBlock> {
-  const parts: string[] = [];
-  if (spinFailureMsg) {
-    parts.push(spinFailureMsg.message || '');
-    parts.push(spinFailureMsg.composeStderr || '');
-    if (Array.isArray(spinFailureMsg.extractedErrors) && spinFailureMsg.extractedErrors.length) {
-      parts.push(spinFailureMsg.extractedErrors.join('\n'));
-    } else {
-      parts.push(spinFailureMsg.logs || '');
-    }
-  }
-  if (validateFailureMsg) {
-    parts.push(validateFailureMsg.message || '');
-    if (Array.isArray(validateFailureMsg.suggestions)) {
-      parts.push(validateFailureMsg.suggestions.join(' '));
-    }
-  }
-  const text = parts.filter(Boolean).join('\n').trim();
+  const { failureTextForLessons } = require('../helpers/repairAttempt');
+  const text = failureTextForLessons(previousAttempt);
   if (!text) return { relatedLessons: [] };
 
   const category = draft?.meta?.category || draft?.category || null;
-  const hits = await findSimilar({ text, k, category: category as string | null });
+  const phase = previousAttempt?.phase
+    ? String(previousAttempt.phase).toLowerCase()
+    : null;
+  const hits = await findSimilar({
+    text,
+    k,
+    category: category as string | null,
+    phase: phase === 'spin' || phase === 'validate' ? phase as 'spin' | 'validate' : null,
+  });
   const byId = new Map<number, LessonRecord>();
   for (const h of hits) byId.set(h.id, h);
-
-  if (spinFailureMsg && validateFailureMsg) {
-    const spinHits = await findSimilar({
-      text: [
-        spinFailureMsg.message,
-        (spinFailureMsg.extractedErrors || []).join('\n') || spinFailureMsg.logs,
-      ].filter(Boolean).join('\n'),
-      k: Math.ceil(k / 2),
-      phase: 'spin',
-      category: category as string | null,
-    });
-    const valHits = await findSimilar({
-      text: [validateFailureMsg.message, (validateFailureMsg.suggestions || []).join(' ')].join('\n'),
-      k: Math.ceil(k / 2),
-      phase: 'validate',
-      category: category as string | null,
-    });
-    for (const h of [...spinHits, ...valHits]) byId.set(h.id, h);
-  }
 
   const merged = [...byId.values()]
     .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999))
@@ -421,6 +382,16 @@ async function backfillEmbeddings({ limit = 50 }: { limit?: number } = {}): Prom
   return done;
 }
 
+async function deleteAll(): Promise<number> {
+  try {
+    const { rowCount } = await pool.query(`DELETE FROM lessons`);
+    return rowCount ?? 0;
+  } catch (e) {
+    console.warn(`[lessons] deleteAll failed: ${(e as Error).message}`);
+    throw e;
+  }
+}
+
 module.exports = {
   record,
   findForRetry,
@@ -428,4 +399,5 @@ module.exports = {
   count,
   listPaginated,
   backfillEmbeddings,
+  deleteAll,
 };

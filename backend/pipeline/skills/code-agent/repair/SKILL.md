@@ -5,7 +5,7 @@ mode: repair
 
 # Repair skill
 
-**When the pipeline uses this skill:** iteration 2+, or after SPIN/VALIDATE/CODE verification failure. The server sets `mode: repair` and includes `failureContext`, `spinFailureMsg`, and/or `validateFailureMsg` — you do not choose the skill.
+**When the pipeline uses this skill:** iteration 2+, or after SPIN/VALIDATE/CODE verification failure. The server sets `mode: repair` and includes `previousAttempt` plus derived `failureContext` — you do not choose the skill.
 
 ## Goal
 
@@ -14,7 +14,7 @@ Apply a **short, targeted patch** — not a re-scaffold. Fix the reported failur
 ## Workflow
 
 1. **ORIENT** — read `failureContext.repairPlan` first (failure, targetFile, goodRepair steps).
-   - Also scan `actionHint`, `fileSnippet`, `spinFailureMsg`, `validateFailureMsg`.
+   - Also scan `actionHint`, `fileSnippet`, and `previousAttempt.details`.
    - Use `workspaceTree` objectives to pick files. Do **not** **Glob** for orientation.
 
 2. **INVESTIGATE** (minimal) — **Read** / **Grep** only files justified by the failure:

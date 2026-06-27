@@ -5281,6 +5281,7 @@ button.phase-tracker--clickable.phase-tracker--compact {
 .log-code-step-tools { color: var(--text); flex: 1; min-width: 120px; }
 .log-code-step-meta { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
 .log-code-step-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; padding-left: 2px; }
+.log-code-step-hint-warn { color: var(--warn, #c2841a); }
 
 .log-code-diff {
   border-left: 2px solid rgba(74, 222, 128, 0.35);

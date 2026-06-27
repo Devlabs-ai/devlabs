@@ -18,14 +18,14 @@ buildPipeline.runBuildLoop()
 | Signal | Mode | Skill file |
 |--------|------|------------|
 | First iteration, no SPIN/VALIDATE failure | `scaffold` | `scaffold/SKILL.md` |
-| `spinFailureMsg` or `validateFailureMsg` or retry | `repair` | `repair/SKILL.md` |
+| `previousAttempt` (phase SPIN / VALIDATE / CODE) or retry | `repair` | `repair/SKILL.md` |
 
 The **system prompt** includes:
 
 1. **ACTIVE SKILL** — workflow for the current mode  
 2. **DEVLABS INVARIANTS** — challenge.json, compose, graphs (always)
 
-The **user message** repeats mode via `SCAFFOLD_USER_HINT` / `REPAIR_USER_HINT` plus the JSON payload (`mode`, `draft`, `failureContext`, …).
+The **user message** is JSON: `mode`, `draft`, `previousAttempt`, `failureContext`, `workspaceTree`, `lessonsBlock`.
 
 ## Files
 

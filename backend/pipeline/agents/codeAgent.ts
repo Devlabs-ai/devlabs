@@ -18,12 +18,11 @@ const { estimateCostUsd } = require('../../llm/cost');
 const { runCodeAgentHarness } = require('../helpers/codeAgentHarness');
 const {
   buildCodeAgentSystemPrompt,
-  SCAFFOLD_USER_HINT,
-  REPAIR_USER_HINT,
 } = require('../skills/codeAgentSkills');
 const { verifyBuildComplete } = require('../validation/buildVerification');
 const { cloneAssets, diffAssets } = require('../helpers/assetDiff');
 const { buildWorkspaceTree, buildFailureContext } = require('../helpers/workspaceTree');
+const { sanitizePreviousAttemptForRepair } = require('../helpers/repairAttempt');
 
 const MAX_TURNS_SCAFFOLD = 20;
 const MAX_TURNS_REPAIR = 15;
@@ -43,6 +42,7 @@ function slimDraftSlice(draft: ChallengeDraft): Record<string, unknown> {
     sandboxSpec: draft.sandboxSpec,
   };
 }
+
 export interface ChallengeAssets {
   title?: string;
   description?: string;
@@ -57,50 +57,26 @@ export interface ChallengeAssets {
   id?: string | null;
 }
 
-/** Truncate long strings for repair payloads and logs. */
-function cap(s: unknown, max: number): string | null | undefined {
-  if (!s) return s as string | null | undefined;
-  const str = typeof s === 'string' ? s : String(s);
-  if (str.length <= max) return str;
-  return `${str.slice(0, max)}\n…[truncated ${str.length - max} chars]`;
-}
-
-/** Strip bulky fields from a prior CODE attempt before sending to the LLM. */
+/** Strip bulky fields from a prior failure before sending to the LLM. */
 function sanitizePreviousAttempt(prev: BuildAttempt | null | undefined): BuildAttempt | null {
-  if (!prev) return null;
-  const out: BuildAttempt = {
-    phase: prev.phase,
-    message: prev.message,
-    artifacts: null,
-    rawText: cap(prev.rawText, 2000) || null,
-    details: null,
-  };
-  if (prev.details) {
-    const d = prev.details as Record<string, unknown>;
-    out.details = { message: d.message || prev.message };
-  }
-  return out;
+  return sanitizePreviousAttemptForRepair(prev);
 }
 
 /**
  * Build the JSON user payload for the CODE agent.
- * Scaffold sends a slim draft; repair includes SPIN/VALIDATE failure signals.
+ * Scaffold sends a slim draft; repair includes previousAttempt + failureContext.
  */
 function buildCodeUserPayload({
   mode,
   draft,
   buildDir,
   lessonsBlock,
-  spinFailureMsg,
-  validateFailureMsg,
   previousAttempt,
 }: {
   mode: 'scaffold' | 'repair';
   draft: ChallengeDraft;
   buildDir?: string;
   lessonsBlock: LessonsBlock;
-  spinFailureMsg?: Record<string, unknown> | null;
-  validateFailureMsg?: Record<string, unknown> | null;
   previousAttempt?: BuildAttempt | null;
 }): Record<string, unknown> {
   const slimDraft = slimDraftSlice(draft);
@@ -115,8 +91,6 @@ function buildCodeUserPayload({
   const workspaceTree = buildDir ? buildWorkspaceTree(buildDir, draft) : null;
   const sanitizedPrev = sanitizePreviousAttempt(previousAttempt);
   const failureContext = buildFailureContext({
-    spinFailureMsg,
-    validateFailureMsg,
     previousAttempt: sanitizedPrev,
     workspaceTree,
     buildDir,
@@ -127,8 +101,6 @@ function buildCodeUserPayload({
     draft: slimDraft,
     workspaceTree,
     lessonsBlock,
-    spinFailureMsg,
-    validateFailureMsg,
     previousAttempt: sanitizedPrev,
   };
   if (failureContext) payload.failureContext = failureContext;
@@ -285,7 +257,7 @@ async function runCodeAgent({
 }
 
 /**
- * Entry point for the CODE phase — called by buildPipeline each iteration.
+ * Entry point for the CODE phase — called by buildPipeline in each iteration.
  */
 async function runCodePhase({
   mode,
@@ -295,8 +267,6 @@ async function runCodePhase({
   draftSessionId: _draftSessionId = null,
   attempt: _attempt,
   lessonsBlock = { relatedLessons: [] },
-  spinFailureMsg = null,
-  validateFailureMsg = null,
   previousAttempt = null,
   onEvent,
 }: {
@@ -307,8 +277,6 @@ async function runCodePhase({
   draftSessionId?: string | null;
   attempt: number;
   lessonsBlock?: LessonsBlock;
-  spinFailureMsg?: Record<string, unknown> | null;
-  validateFailureMsg?: Record<string, unknown> | null;
   previousAttempt?: BuildAttempt | null;
   onEvent?: BuildEventHandler;
 }): Promise<{
@@ -319,17 +287,14 @@ async function runCodePhase({
 }> {
   fs.mkdirSync(buildDir, { recursive: true });
 
-  const modeHint = mode === 'scaffold' ? SCAFFOLD_USER_HINT : REPAIR_USER_HINT;
   const userPayload = buildCodeUserPayload({
     mode,
     draft,
     buildDir,
     lessonsBlock,
-    spinFailureMsg,
-    validateFailureMsg,
     previousAttempt,
   });
-  const prompt = `${modeHint}\n\n${JSON.stringify(userPayload, null, 2)}`;
+  const prompt = JSON.stringify(userPayload, null, 2);
 
   const agentResult = await runCodeAgent({
     mode,
@@ -342,7 +307,9 @@ async function runCodePhase({
   if (
     mode === 'repair'
     && !agentResult.hasWritten
-    && (validateFailureMsg || spinFailureMsg)
+    && previousAttempt
+    && (String(previousAttempt.phase).toUpperCase() === 'SPIN'
+      || String(previousAttempt.phase).toUpperCase() === 'VALIDATE')
   ) {
     throw new Error(
       'CODE repair finished without editing any files — use Edit or Write on failureContext.likelyFiles (e.g. services/*/app.py) to fix the reported failure',

@@ -54,7 +54,11 @@ function LogEntryView({ entry }: { entry: PipelineLogEntry }): JSX.Element {
             {(entry.ms / 1000).toFixed(1)}s · {entry.cost} · {entry.tokens}
           </span>
         </div>
-        {hint && <div className="log-code-step-hint">{hint}</div>}
+        {hint && (
+          <div className={`log-code-step-hint${hint.includes('⚠') ? ' log-code-step-hint-warn' : ''}`}>
+            {hint}
+          </div>
+        )}
       </div>
     );
   }

@@ -10,7 +10,7 @@ The user message JSON payload is authoritative:
 - `draft.codebase` — when present: dockerCompose, dockerfiles[], pythonServices[], initFiles[]
 - `draft.readyServices` — when present: SPIN gating hint
 - `lessonsBlock` — past failure/fix summaries on retry
-- `spinFailureMsg` / `validateFailureMsg` — repair iterations only
+- `previousAttempt` — last failed phase (SPIN, VALIDATE, or CODE) with capped `details`
 - `workspaceTree` / `failureContext` — repair iterations only
 
 Derive layout from the draft. Every challenge needs **docker-compose.yml** (root), **services/***, **init/***, **challenge.json**.
