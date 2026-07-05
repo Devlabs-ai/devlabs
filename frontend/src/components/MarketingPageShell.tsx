@@ -55,7 +55,6 @@ export default function MarketingPageShell({ children, onLoggedIn, candidateErro
           </Link>
           <nav className="landing-nav" aria-label="Marketing">
             <Link to="/about">About</Link>
-            <Link to="/pricing">Pricing</Link>
           </nav>
         </header>
 
@@ -65,8 +64,6 @@ export default function MarketingPageShell({ children, onLoggedIn, candidateErro
           <span>Devlabs v0.1</span>
           <span className="landing-footer-sep">·</span>
           <Link to="/about">About</Link>
-          <span className="landing-footer-sep">·</span>
-          <Link to="/pricing">Pricing</Link>
           <span className="landing-footer-sep">·</span>
           <span>Interview platform for infrastructure debugging</span>
         </footer>
