@@ -61,14 +61,6 @@ export default function AppLayout(): React.JSX.Element {
                 >
                   Profile
                 </NavLink>
-                {import.meta.env.DEV && (
-                  <NavLink
-                    to="/dev/db"
-                    className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
-                  >
-                    DB
-                  </NavLink>
-                )}
                 {isAdmin && (
                   <button type="button" className="topnav-pill topnav-action">Billing</button>
                 )}

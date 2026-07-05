@@ -1,5 +1,4 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
 import MarketingPageShell, { useMarketing } from '../components/MarketingPageShell';
 import type { UserRecord } from '../types/domain';
 
@@ -63,7 +62,7 @@ function LandingContent(): JSX.Element {
             </button>
           </div>
           <span className="landing-cta-note">
-            New company? <Link to="/pricing">View pricing</Link> or contact sales to register.
+            New company? Contact sales to register.
             Candidates join via invite link — no sign-up required.
           </span>
         </div>

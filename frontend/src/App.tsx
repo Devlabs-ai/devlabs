@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
-import PricingPage from './pages/PricingPage';
 import AboutPage from './pages/AboutPage';
 import PlayPage from './pages/PlayPage';
 import AuthoringPage from './pages/AuthoringPage';
@@ -305,15 +304,6 @@ export default function App(): React.JSX.Element {
           path="/about"
           element={
             <AboutPage
-              candidateError={candidateError}
-              onLoggedIn={handleLoggedIn}
-            />
-          }
-        />
-        <Route
-          path="/pricing"
-          element={
-            <PricingPage
               candidateError={candidateError}
               onLoggedIn={handleLoggedIn}
             />
