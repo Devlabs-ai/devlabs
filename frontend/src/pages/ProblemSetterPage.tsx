@@ -9,6 +9,7 @@ import {
   generateSchema,
 } from '../services/problemApi';
 import type { ProblemSession, ChallengeDraft } from '../types/domain';
+import { formatChatForDisplay } from '../utils/chatDisplaySanitizer';
 
 interface LlmConfig {
   llmConfigured: boolean;
@@ -66,11 +67,29 @@ interface ChatBubbleProps {
   content: string;
 }
 
-function ChatBubble({ role, content }: ChatBubbleProps): JSX.Element {
+function ChatBubble({ role, content }: ChatBubbleProps): JSX.Element | null {
+  const display = role === 'assistant' ? formatChatForDisplay(content) : content;
+  if (role === 'assistant' && !display) return null;
+
   return (
     <div className={`chat-bubble ${role}`}>
       <div className="role">{role}</div>
-      <div className="content">{content}</div>
+      <div className="content">
+        {role === 'assistant' ? (
+          <MarkdownProse text={display} className="chat-prose markdown-prose" />
+        ) : (
+          display
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ChatPendingBubble({ message }: { message: string }): JSX.Element {
+  return (
+    <div className="chat-bubble assistant chat-bubble--pending">
+      <div className="role">assistant</div>
+      <div className="content dim">{message}</div>
     </div>
   );
 }
@@ -533,6 +552,7 @@ export default function ProblemSetterPage({
 }: ProblemSetterPageProps): JSX.Element {
   const [input, setInput] = useState<string>('');
   const [streamingText, setStreamingText] = useState<string>('');
+  const [streamingPending, setStreamingPending] = useState<string | null>(null);
   const [busy, setBusy] = useState<boolean>(false);
   const [err, setErr] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -582,6 +602,7 @@ export default function ProblemSetterPage({
     setBusy(true);
     setErr(null);
     setStreamingText('');
+    setStreamingPending('Shaping design contract in Preview…');
 
     const optimistic: ProblemSession = {
       ...draft,
@@ -592,14 +613,15 @@ export default function ProblemSetterPage({
     const controller = new AbortController();
     abortRef.current = controller;
 
-    let assistantText = '';
+    let visibleText = '';
     let partial: ChallengeDraft = optimistic.draft || {};
     try {
       await streamChat(draft.id, msg, (ev: unknown) => {
         const event = ev as StreamEvent;
         if (event.type === 'text') {
-          assistantText += event.delta;
-          setStreamingText(assistantText);
+          visibleText += event.delta || '';
+          setStreamingText(visibleText);
+          setStreamingPending(null);
         } else if (event.type === 'design') {
           const ex = event.extracted || {};
           partial = {
@@ -627,13 +649,14 @@ export default function ProblemSetterPage({
 
       onDraftChanged({
         ...optimistic,
-        messages: [...optimistic.messages!, { role: 'assistant', content: assistantText }],
+        messages: [...optimistic.messages!, { role: 'assistant', content: visibleText }],
         draft: partial,
         shapeContractComplete: isShapeContractCompleteLocal(partial),
         shapeContractMissing: shapeContractMissingLocal(partial),
       });
       if (onRefreshSession) await onRefreshSession();
       setStreamingText('');
+      setStreamingPending(null);
     } catch (e: unknown) {
       if ((e as Error).name !== 'AbortError') setErr((e as Error).message);
     } finally {
@@ -644,16 +667,18 @@ export default function ProblemSetterPage({
 
   const runGenerateSchema = async (): Promise<void> => {
     setStreamingText('');
+    setStreamingPending('Materializing schema — see Preview when ready…');
     const controller = new AbortController();
     abortRef.current = controller;
 
-    let assistantText = '';
+    let visibleText = '';
     let sessionPatch: ProblemSession = draft;
     await generateSchema(draft.id, (ev: unknown) => {
       const event = ev as StreamEvent;
       if (event.type === 'text') {
-        assistantText += event.delta;
-        setStreamingText(assistantText);
+        visibleText += event.delta || '';
+        setStreamingText(visibleText);
+        setStreamingPending(null);
       } else if (event.type === 'error') {
         setErr(event.message ?? 'Unknown error');
       } else if (event.type === 'draft' && onDraftChanged) {
@@ -678,6 +703,7 @@ export default function ProblemSetterPage({
       await onRefreshSession();
     }
     setStreamingText('');
+    setStreamingPending(null);
   };
 
   const handleApproveDesign = async (): Promise<void> => {
@@ -832,6 +858,9 @@ export default function ProblemSetterPage({
           {(draft.messages || []).map((m, i) => (
             <ChatBubble key={i} role={m.role} content={m.content} />
           ))}
+          {streamingPending && !streamingText && (
+            <ChatPendingBubble message={streamingPending} />
+          )}
           {streamingText && <ChatBubble role="assistant" content={streamingText} />}
         </div>
 

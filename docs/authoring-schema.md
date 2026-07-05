@@ -70,7 +70,9 @@ For **each** `validationSymptoms[]` entry, the CODE agent emits **one** item in 
 |--------------|----------------------|
 | `id` | `symptomId` |
 | `check` | `symptomCheck` (copied verbatim) |
-| (derived) | `graph` — action DAG: setup → perturb → observe **for this symptom only** |
+| (derived at CODE) | `graph: { entry, nodes }` — executable DAG (see stale-cache-validation.graph.json) |
+
+The design phases use setup → perturb → observe **conceptually**; challenge.json must **not** use those as JSON keys. The build pipeline emits `validationSpecTemplate` for the CODE agent with the correct `graph.entry` + `graph.nodes` shape.
 
 **Rules:**
 

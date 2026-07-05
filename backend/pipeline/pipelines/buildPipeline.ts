@@ -1,14 +1,14 @@
 'use strict';
 
 /**
- * Build pipeline orchestrator — author loop: CODE → SPIN → VALIDATE (max n iterations).
+ * Build pipeline orchestrator — author loop: CODE → SPIN → VALIDATE (max 2 iterations).
  *
  * Agents:
  *   codeAgent       — scaffold/repair sandbox files
  *   spinAgent       — docker compose up + wait for readyServices
  *   validationAgent — run validationSpec.steps + LLM judge
  *
- * Helpers: lessonStore (retry hints), spinFailureLogs (compact SPIN errors for repair)
+ * Helpers: lessonStore (retry hints), spinFailureLogs (SPIN failure persistence)
  */
 
 import type { ChallengeDraft, BuildEventHandler, ValidationResult, PortMap, BuildAttempt, BuildPhase, LessonsBlock, LessonAnchorFailure } from '../../types/domain';
@@ -18,8 +18,10 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
 const { assertLlmConfigured } = require('../helpers/agentRuntime');
+const { assertCodeHarnessConfigured } = require('../helpers/codeAgentHarness');
 const codeAgent = require('../agents/codeAgent');
 const spinAgent = require('../agents/spinAgent');
+const { SpinError } = spinAgent;
 const composeManager = require('../../sandbox/composeManager');
 const portAllocator = require('../../sandbox/portAllocator');
 const validationAgent = require('../agents/validationAgent');
@@ -27,6 +29,7 @@ const lessonStore = require('../stores/lessonStore');
 const { normalizeDraft, isDraftReady } = require('../draft/draftSchema');
 const { emitLog } = require('../build/buildLogger');
 const { recordBuildFailure } = require('../build/buildFailureRecord');
+const { createBuildLifecycleLogger, BUILD_LIFECYCLE_FILE } = require('../build/buildLifecycleLog');
 const { buildIterationChecklist } = require('../validation/validationChecklist');
 const { BUILDS_ROOT } = require('../../sandbox/paths');
 const { createUsageAccumulator } = require('../../llm/usage');
@@ -36,8 +39,10 @@ const {
   spinFailureForRepair,
 } = require('../helpers/spinFailureLogs');
 const { cloneAssets, diffAssets } = require('../helpers/assetDiff');
+const { loadLatestBuildFailure } = require('../build/buildFailureRecord');
+const { isActionableRepairFailure } = require('../helpers/repairAttempt');
 
-const MAX_ITERATIONS = 5;
+const MAX_ITERATIONS = 2;
 
 /** Truncate log/detail strings. */
 function cap(s: unknown, max: number): string | null | undefined {
@@ -58,8 +63,8 @@ interface FailureSnapshot {
   phase: string;
   message: string | null;
   composeSnippet?: string | null;
-  composeStderr?: string | null;
-  logs?: string | null;
+  failureKind?: string | null;
+  psSnapshot?: string | null;
   feedback?: string | null;
   suggestions?: string[];
   extractedErrors?: string[];
@@ -109,8 +114,8 @@ function captureFailureSnapshot({
     phase,
     message: cap(lastAttempt.message || '', 600) || null,
     composeSnippet: readComposeSnippet(buildDir || null),
-    composeStderr: cap(d?.composeStderr, 600) || null,
-    logs: cap(d?.logs, 600) || null,
+    failureKind: typeof d?.failureKind === 'string' ? d.failureKind : null,
+    psSnapshot: cap(d?.psSnapshot, 600) || null,
     feedback: cap(d?.feedback, 400) || null,
     suggestions,
     extractedErrors,
@@ -128,8 +133,8 @@ function ensurePhaseLessonAnchor(
     attempt: snap.attempt,
     phase: snap.phase,
     message: snap.message,
-    composeStderr: snap.composeStderr,
-    logs: snap.logs,
+    failureKind: snap.failureKind,
+    psSnapshot: snap.psSnapshot,
     feedback: snap.feedback,
     suggestions: snap.suggestions,
     extractedErrors: snap.extractedErrors,
@@ -277,51 +282,52 @@ function normalizeResumePhase(phase: string | null | undefined): string | null {
   return upper;
 }
 
-interface ResumeRepairContext {
-  spinFailureMsg: Record<string, unknown> | null;
-  validateFailureMsg: Record<string, unknown> | null;
-  resumeCodeFailure: BuildAttempt | null;
-}
-
-/**
- * Cross-request retry: map stored failure phase/msg onto the repair channels the loop uses.
- * In-loop retries update spinFailureMsg / validateFailureMsg / lastAttempt directly instead.
- */
-function initResumeRepairContext({
+/** Build previousAttempt for cross-request resume from disk or stored phase/message. */
+function initResumePreviousAttempt({
   hasResumeDir,
+  buildDir,
   resumePhase,
   resumeFailureMsg,
 }: {
   hasResumeDir: boolean;
+  buildDir: string;
   resumePhase: string | null;
   resumeFailureMsg: unknown;
-}): ResumeRepairContext {
-  const none: ResumeRepairContext = {
-    spinFailureMsg: null,
-    validateFailureMsg: null,
-    resumeCodeFailure: null,
-  };
-  if (!hasResumeDir || !resumePhase || resumeFailureMsg == null) return none;
-
-  if (resumePhase === 'SPIN') {
-    return { ...none, spinFailureMsg: resumeFailureMsg as Record<string, unknown> };
-  }
-  if (resumePhase === 'VALIDATE') {
-    return { ...none, validateFailureMsg: resumeFailureMsg as Record<string, unknown> };
-  }
-  if (resumePhase === 'CODE') {
-    return {
-      ...none,
-      resumeCodeFailure: {
-        phase: 'CODE',
-        message: String(resumeFailureMsg),
+}): BuildAttempt | null {
+  if (hasResumeDir && buildDir) {
+    const rec = loadLatestBuildFailure(buildDir);
+    if (rec?.phase) {
+      return {
+        phase: rec.phase,
+        message: rec.message || '',
         artifacts: null,
         rawText: null,
-        details: { message: resumeFailureMsg },
-      },
+        details: rec.detail && typeof rec.detail === 'object'
+          ? rec.detail as Record<string, unknown>
+          : null,
+      };
+    }
+  }
+  if (!resumePhase || resumeFailureMsg == null) return null;
+  const phase = normalizeResumePhase(resumePhase);
+  if (!phase) return null;
+  if (typeof resumeFailureMsg === 'object' && resumeFailureMsg !== null) {
+    const obj = resumeFailureMsg as Record<string, unknown>;
+    return {
+      phase,
+      message: String(obj.message || resumeFailureMsg),
+      artifacts: null,
+      rawText: null,
+      details: obj,
     };
   }
-  return none;
+  return {
+    phase,
+    message: String(resumeFailureMsg),
+    artifacts: null,
+    rawText: null,
+    details: { message: resumeFailureMsg },
+  };
 }
 
 /**
@@ -355,7 +361,7 @@ async function runBuildLoop({
   attempts: number;
 }> {
   try {
-    assertLlmConfigured('code', { label: 'code agent (build pipeline)' });
+    assertCodeHarnessConfigured();
   } catch (e) {
     onEvent({ type: 'error', message: (e as Error).message } as never);
     throw e;
@@ -396,14 +402,6 @@ async function runBuildLoop({
     buildDir = resumeBuildDir!;
     buildSessionId = path.basename(buildDir);
   } else {
-    if (resumeBuildDir) {
-      emitLog(onEvent, {
-        level: 'warn',
-        tag: 'build',
-        message: 'Prior build workspace missing on disk — starting a fresh build folder',
-        detail: resumeBuildDir,
-      });
-    }
     buildSessionId = uuidv4();
     buildDir = path.join(BUILDS_ROOT, buildSessionId);
     fs.mkdirSync(buildDir, { recursive: true });
@@ -412,26 +410,42 @@ async function runBuildLoop({
   console.log(
     `[build] started draftSessionId=${draftSessionId} buildSessionId=${buildSessionId} buildDir=${buildDir}`,
   );
-  emitLog(onEvent, {
+
+  const lifecycle = createBuildLifecycleLogger(buildDir, {
+    draftSessionId,
+    buildSessionId,
+    resumed: hasResumeDir,
+  });
+  const emitEvent: BuildEventHandler = (ev) => {
+    lifecycle.append(ev);
+    onEvent(ev);
+  };
+
+  if (!hasResumeDir && resumeBuildDir) {
+    emitLog(emitEvent, {
+      level: 'warn',
+      tag: 'build',
+      message: 'Prior build workspace missing on disk — starting a fresh build folder',
+      detail: resumeBuildDir,
+    });
+  }
+
+  emitLog(emitEvent, {
     level: 'info',
     tag: 'build',
     message: hasResumeDir
       ? `Retrying build in same workspace after ${normalizedResumePhase || 'pipeline'} failure (max ${MAX_ITERATIONS} iterations)`
       : `Starting build pipeline (max ${MAX_ITERATIONS} iterations)`,
-    detail: buildDir,
+    detail: { buildDir, lifecycleLog: BUILD_LIFECYCLE_FILE },
   });
 
-  let lastAttempt: BuildAttempt | null = null;
-  let assets: ReturnType<typeof codeAgent.loadAssetsFromBuildDir> = null;
-
-  const resumeRepair = initResumeRepairContext({
+  let lastAttempt: BuildAttempt | null = initResumePreviousAttempt({
     hasResumeDir,
+    buildDir,
     resumePhase: normalizedResumePhase,
     resumeFailureMsg,
   });
-  let spinFailureMsg = resumeRepair.spinFailureMsg;
-  let validateFailureMsg = resumeRepair.validateFailureMsg;
-  const resumeCodeFailure = resumeRepair.resumeCodeFailure;
+  let assets: ReturnType<typeof codeAgent.loadAssetsFromBuildDir> = null;
 
   const buildCategory = pickCategory(normalized);
   const spinLessonWindow: PhaseLessonWindow = { anchorFailure: null, baselineAssets: null };
@@ -439,12 +453,10 @@ async function runBuildLoop({
 
   for (let attempt = 1; attempt <= MAX_ITERATIONS; attempt++) {
     const attemptCost = createUsageAccumulator();
-    onEvent({ type: 'phase', phase: 'CODE' as BuildPhase, attempt, total: MAX_ITERATIONS } as never);
+    emitEvent({ type: 'phase', phase: 'CODE' as BuildPhase, attempt, total: MAX_ITERATIONS } as never);
 
-    const priorFailurePhase = spinFailureMsg
-      ? 'SPIN'
-      : (validateFailureMsg ? 'VALIDATE' : (lastAttempt ? lastAttempt.phase : null));
-    emitLog(onEvent, {
+    const priorFailurePhase = lastAttempt?.phase || null;
+    emitLog(emitEvent, {
       level: 'phase',
       tag: 'build',
       message: priorFailurePhase
@@ -454,15 +466,15 @@ async function runBuildLoop({
 
     if (attempt === 1) {
       if (hasResumeDir) {
-        emitLog(onEvent, {
+        emitLog(emitEvent, {
           level: 'info',
           tag: 'code',
           message: 'Reusing prior failed build workspace (in-place retry)',
           detail: { buildDir, buildSessionId },
         });
       }
-      onEvent({ type: 'buildDir', buildDir } as never);
-      emitLog(onEvent, {
+      emitEvent({ type: 'buildDir', buildDir } as never);
+      emitLog(emitEvent, {
         level: 'info',
         tag: 'code',
         message: `Build workspace ready`,
@@ -478,21 +490,20 @@ async function runBuildLoop({
     const hasScaffoldArtifacts = fs.existsSync(path.join(buildDir, 'docker-compose.yml'));
 
     let codeMode: 'scaffold' | 'repair' = 'scaffold';
-    if (spinFailureMsg || validateFailureMsg || (hasScaffoldArtifacts && attempt > 1)) {
+    if (lastAttempt || (hasScaffoldArtifacts && attempt > 1)) {
       codeMode = 'repair';
     }
 
     try {
       let lessonsBlock: LessonsBlock = { relatedLessons: [] };
-      if (spinFailureMsg || validateFailureMsg) {
+      if (lastAttempt && isActionableRepairFailure(lastAttempt)) {
         lessonsBlock = await lessonStore.findForRetry({
           draft: normalized,
-          spinFailureMsg,
-          validateFailureMsg,
+          previousAttempt: lastAttempt,
         });
         if (lessonsBlock.relatedLessons.length) {
           const best = lessonsBlock.relatedLessons[0];
-          emitLog(onEvent, {
+          emitLog(emitEvent, {
             level: 'info',
             tag: 'lessons',
             message: `Injecting ${lessonsBlock.relatedLessons.length} lesson(s) (retry)`,
@@ -501,11 +512,7 @@ async function runBuildLoop({
         }
       }
 
-      const prevForCode: BuildAttempt | null = lastAttempt?.phase === 'CODE'
-        ? lastAttempt
-        : (attempt === 1 ? resumeCodeFailure : null);
-
-      emitLog(onEvent, {
+      emitLog(emitEvent, {
         level: 'info',
         tag: 'code',
         message: `Calling code agent (${codeMode} mode)`,
@@ -520,10 +527,8 @@ async function runBuildLoop({
         draftSessionId,
         attempt,
         lessonsBlock,
-        spinFailureMsg,
-        validateFailureMsg,
-        previousAttempt: prevForCode,
-        onEvent,
+        previousAttempt: codeMode === 'repair' ? lastAttempt : null,
+        onEvent: emitEvent,
       });
 
       assets = codeResult.assets;
@@ -533,8 +538,8 @@ async function runBuildLoop({
 
       // Code-chunk indexing after CODE used to run here; removed.
 
-      onEvent({ type: 'buildDir', buildDir } as never);
-      emitLog(onEvent, {
+      emitEvent({ type: 'buildDir', buildDir } as never);
+      emitLog(emitEvent, {
         level: 'ok',
         tag: 'code',
         message: 'CODE phase complete',
@@ -545,7 +550,7 @@ async function runBuildLoop({
         },
       });
     } catch (e) {
-      emitLog(onEvent, { level: 'error', tag: 'code', message: (e as Error).message });
+      emitLog(emitEvent, { level: 'error', tag: 'code', message: (e as Error).message });
       lastAttempt = {
         phase: 'CODE',
         message: (e as Error).message,
@@ -553,7 +558,7 @@ async function runBuildLoop({
         rawText: null,
         details: { message: (e as Error).message },
       };
-      emitIterationSummary(onEvent, {
+      emitIterationSummary(emitEvent, {
         attempt,
         total: MAX_ITERATIONS,
         failedPhase: 'CODE',
@@ -573,17 +578,17 @@ async function runBuildLoop({
       continue;
     }
 
-    onEvent({ type: 'phase', phase: 'SPIN' as BuildPhase, attempt, total: MAX_ITERATIONS } as never);
+    emitEvent({ type: 'phase', phase: 'SPIN' as BuildPhase, attempt, total: MAX_ITERATIONS } as never);
     let portMap: PortMap | null = null;
     try {
       ({ portMap } = await spinAgent.spin({
         buildDir,
         buildSessionId,
-        onEvent,
+        onEvent: emitEvent,
         readyServices: assets?.validationSpec?.readyServices as string[] | null || null,
       }));
 
-      spinFailureMsg = null;
+      lastAttempt = null;
       await recordPhaseLesson({
         window: spinLessonWindow,
         phase: 'spin',
@@ -592,23 +597,25 @@ async function runBuildLoop({
         buildSessionId,
         category: buildCategory,
         title: normalized.meta?.name || normalized.title || assets?.title,
-        onEvent,
+        onEvent: emitEvent,
       });
     } catch (e) {
-      const err = e as Record<string, unknown> & { message?: string };
-      const failureCtx = prepareSpinFailureContext(buildDir, {
-        message: err.message,
-        composeStdout: err.composeStdout || null,
-        composeStderr: err.composeStderr || null,
-        logs: err.logs || null,
-      });
-      spinFailureMsg = spinFailureForRepair(failureCtx);
-      emitLog(onEvent, {
+      const input = e instanceof SpinError
+        ? e.evidence
+        : {
+          failureKind: 'COMPOSE_UP' as const,
+          message: String((e as Error).message || 'SPIN failed'),
+        };
+      const failureCtx = prepareSpinFailureContext(buildDir, input);
+      const repairSpin = spinFailureForRepair(failureCtx);
+      emitLog(emitEvent, {
         level: 'info',
         tag: 'spin',
-        message: 'SPIN failure — logs saved, errors extracted for repair',
+        message: `SPIN failure (${failureCtx.failureKind}) — logs saved, errors extracted for repair`,
         detail: {
+          failureKind: failureCtx.failureKind,
           logFile: failureCtx.logFile,
+          psFile: failureCtx.psFile || null,
           logBytes: failureCtx.logBytes,
           logLineCount: failureCtx.logLineCount,
           extractedErrorCount: failureCtx.extractedErrors.length,
@@ -617,20 +624,17 @@ async function runBuildLoop({
       });
       lastAttempt = {
         phase: 'SPIN',
-        message: failureCtx.message || String(err.message || 'SPIN failed'),
+        message: failureCtx.message || input.message || 'SPIN failed',
         artifacts: assets,
         rawText: null,
         details: {
-          composeStdout: err.composeStdout || null,
-          composeStderr: err.composeStderr || null,
-          logs: err.logs || null,
-          logFile: failureCtx.logFile,
+          ...repairSpin,
           extractedErrors: failureCtx.extractedErrors,
         },
       };
       const snap = captureFailureSnapshot({ attempt, phase: 'SPIN', lastAttempt, buildDir });
       if (snap) ensurePhaseLessonAnchor(spinLessonWindow, snap, assets);
-      emitIterationSummary(onEvent, {
+      emitIterationSummary(emitEvent, {
         attempt,
         total: MAX_ITERATIONS,
         failedPhase: 'SPIN',
@@ -650,7 +654,7 @@ async function runBuildLoop({
       continue;
     }
 
-    onEvent({ type: 'phase', phase: 'VALIDATE' as BuildPhase, attempt, total: MAX_ITERATIONS } as never);
+    emitEvent({ type: 'phase', phase: 'VALIDATE' as BuildPhase, attempt, total: MAX_ITERATIONS } as never);
     let validation: (ValidationResult & { llmUsage?: unknown }) | null = null;
     try {
       const validationResult = await validationAgent.validate({
@@ -661,19 +665,19 @@ async function runBuildLoop({
         validationSpec: assets!.validationSpec,
         onLog: (payload: string | Record<string, unknown>) => {
           if (typeof payload === 'string') {
-            emitLog(onEvent, { level: 'info', tag: 'validate', message: payload });
+            emitLog(emitEvent, { level: 'info', tag: 'validate', message: payload });
           } else if ((payload as Record<string, unknown>)?.type) {
-            onEvent(payload as never);
+            emitEvent(payload as never);
           } else {
-            emitLog(onEvent, { tag: 'validate', ...(payload as Record<string, unknown>) } as { level?: string; tag?: string; message: string; detail?: unknown });
+            emitLog(emitEvent, { tag: 'validate', ...(payload as Record<string, unknown>) } as { level?: string; tag?: string; message: string; detail?: unknown });
           }
         },
       });
       validation = validationResult;
       if (validationResult.llmUsage) attemptCost.add(validationResult.llmUsage);
-      onEvent({ type: 'validation', result: validationResult } as never);
+      emitEvent({ type: 'validation', result: validationResult } as never);
     } catch (e) {
-      emitLog(onEvent, { level: 'error', tag: 'validate', message: (e as Error).message });
+      emitLog(emitEvent, { level: 'error', tag: 'validate', message: (e as Error).message });
       await composeManager.down(buildDir).catch(() => {});
       await portAllocator.releaseIn('build', buildSessionId).catch(() => {});
       lastAttempt = {
@@ -685,7 +689,7 @@ async function runBuildLoop({
       };
       const snap = captureFailureSnapshot({ attempt, phase: 'VALIDATE', lastAttempt, buildDir });
       if (snap) ensurePhaseLessonAnchor(validateLessonWindow, snap, assets);
-      emitIterationSummary(onEvent, {
+      emitIterationSummary(emitEvent, {
         attempt,
         total: MAX_ITERATIONS,
         failedPhase: 'VALIDATE',
@@ -710,7 +714,7 @@ async function runBuildLoop({
       continue;
     }
 
-    emitIterationSummary(onEvent, {
+    emitIterationSummary(emitEvent, {
       attempt,
       total: MAX_ITERATIONS,
       failedPhase: validation.passed ? null : 'VALIDATE',
@@ -738,7 +742,7 @@ async function runBuildLoop({
         ? `${terminalWsBase}/ws/metrics?sessionId=__build:${buildSessionId}`
         : null;
 
-      validateFailureMsg = null;
+      lastAttempt = null;
       await recordPhaseLesson({
         window: validateLessonWindow,
         phase: 'validate',
@@ -747,7 +751,7 @@ async function runBuildLoop({
         buildSessionId,
         category: buildCategory,
         title: normalized.meta?.name || normalized.title || assets?.title,
-        onEvent,
+        onEvent: emitEvent,
       });
 
       built.metrics = normalized.metrics;
@@ -755,7 +759,7 @@ async function runBuildLoop({
       built.arch = normalized.arch;
       built.meta = normalized.meta;
 
-      emitLog(onEvent, {
+      emitLog(emitEvent, {
         level: 'ok',
         tag: 'spin',
         message: 'Validation passed — bringing down build compose stack',
@@ -763,7 +767,7 @@ async function runBuildLoop({
       await composeManager.down(buildDir).catch(() => {});
       await portAllocator.releaseIn('build', buildSessionId).catch(() => {});
 
-      onEvent({
+      emitEvent({
         type: 'done',
         buildSessionId,
         builtChallenge: built,
@@ -771,6 +775,11 @@ async function runBuildLoop({
         terminalWsUrl,
         metricsWsUrl,
       } as never);
+      lifecycle.finish({
+        status: 'success',
+        attempts: attempt,
+        buildSessionId,
+      });
       return {
         buildSessionId,
         buildDir,
@@ -785,29 +794,29 @@ async function runBuildLoop({
 
     await composeManager.down(buildDir).catch(() => {});
     await portAllocator.releaseIn('build', buildSessionId).catch(() => {});
-    validateFailureMsg = {
-      message: validation.feedback || 'validation rejected the build',
-      suggestions: validation.suggestions || [],
-      evidence: (validation.evidence || []).map((ev) => {
-        const e = ev as Record<string, unknown>;
-        return {
-          step: e.step,
-          ok: e.ok,
-          stdout: cap(e.stdout, 1500),
-          stderr: cap(e.stderr, 800),
-          error: e.error,
-        };
-      }),
-    };
+    const validateMessage = validation.feedback || 'validation rejected the build';
+    const cappedEvidence = (validation.evidence || []).map((ev) => {
+      const e = ev as Record<string, unknown>;
+      return {
+        step: e.step,
+        ok: e.ok,
+        label: e.label,
+        statusCode: e.statusCode,
+        body: cap(e.body, 500),
+        stdout: cap(e.stdout, 1500),
+        stderr: cap(e.stderr, 800),
+        error: e.error,
+      };
+    });
     lastAttempt = {
       phase: 'VALIDATE',
-      message: validateFailureMsg.message as string,
+      message: validateMessage,
       artifacts: assets,
       rawText: null,
       details: {
         feedback: validation.feedback,
         suggestions: validation.suggestions || [],
-        evidence: validation.evidence || [],
+        evidence: cappedEvidence,
       },
     };
     const snap = captureFailureSnapshot({ attempt, phase: 'VALIDATE', lastAttempt, buildDir });
@@ -840,13 +849,20 @@ async function runBuildLoop({
     lastAttempt: lastAttempt || { phase: 'VALIDATE', message: err.message },
     attempt: MAX_ITERATIONS,
   });
-  onEvent({
+  emitEvent({
     type: 'error',
     message: err.message,
     lastAttempt,
     failedBuildDir,
     failedBuildSessionId: buildSessionId,
   } as never);
+  lifecycle.finish({
+    status: 'exhausted',
+    attempts: MAX_ITERATIONS,
+    buildSessionId,
+    lastPhase: lastAttempt?.phase || null,
+    lastMessage: lastAttempt?.message || null,
+  });
   throw err;
 }
 

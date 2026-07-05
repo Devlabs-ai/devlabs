@@ -16,7 +16,7 @@ const SHAPE_CONTRACT_HINT = `shape_contract JSON (schemaVersion implied 1, Phase
     "tags": ["optional"],
     "catalogueCategories": ["postgres", "python", "load-generator"]
   },
-  "description": "FULL candidate-facing problem statement (markdown OK, qualitative only)",
+  "description": "FULL candidate-facing problem statement (markdown OK, qualitative only). Describe symptoms and context only — do NOT reveal brokenState.rootCause or the fix.",
   "arch": "how named services connect — qualitative, no Docker tags",
   "infra": {
     "services": [{ "name": "orders-service" }, { "name": "postgres" }, { "name": "load-generator" }]

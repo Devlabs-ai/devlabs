@@ -12,8 +12,5 @@ declare global {
     lastFailure?: string | null;
     lastAttempt?: import('./domain').BuildAttempt | null;
     availableCategories?: unknown;
-    composeStdout?: string | null;
-    composeStderr?: string | null;
-    logs?: unknown;
   }
 }

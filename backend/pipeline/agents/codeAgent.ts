@@ -3,10 +3,10 @@
 /**
  * CODE agent — Phase 1 of the build pipeline.
  *
- * Runs an LLM tool loop to scaffold or repair files under sandbox/builds/<id>/,
- * then verifies layout + validationSpec with buildVerification.
+ * Runs Claude Agent SDK (Claude Code harness) to scaffold or repair files under
+ * sandbox/builds/<id>/, then verifies layout + validationSpec with buildVerification.
  *
- * Flow: prompt → runAgentWithTools → verifyBuildComplete → loadAssetsFromBuildDir
+ * Flow: runCodePhase → runCodeAgent → runCodeAgentHarness → verifyBuildComplete
  */
 
 import * as fs from 'fs';
@@ -14,50 +14,34 @@ import * as path from 'path';
 
 import type { ChallengeDraft, BuildAttempt, BuildEventHandler, LessonsBlock } from '../../types/domain';
 
-const { modelIdFor, providerOf } = require('../../llm/models');
 const { estimateCostUsd } = require('../../llm/cost');
-const { runAgentWithTools } = require('../helpers/agentRuntime');
-const { createCodeAgentTools } = require('./codeAgentTools');
+const { runCodeAgentHarness } = require('../helpers/codeAgentHarness');
 const {
-  SYSTEM_PROMPT_STATIC,
-  SYSTEM_PROMPT_DYNAMIC,
-  SCAFFOLD_USER_HINT,
-  REPAIR_USER_HINT,
-} = require('../prompts/codeAgent.prompt');
+  buildCodeAgentSystemPrompt,
+} = require('../skills/codeAgentSkills');
 const { verifyBuildComplete } = require('../validation/buildVerification');
 const { cloneAssets, diffAssets } = require('../helpers/assetDiff');
+const { buildWorkspaceTree, buildFailureContext } = require('../helpers/workspaceTree');
+const { sanitizePreviousAttemptForRepair } = require('../helpers/repairAttempt');
+const { buildValidationSpecTemplate } = require('../helpers/validationGraphTemplate');
+const { workspacePayloadFields } = require('../helpers/buildWorkspacePaths');
 
-const MAX_STEPS_SCAFFOLD = 20;
-const MAX_STEPS_REPAIR = 25;
+const MAX_TURNS_SCAFFOLD = 20;
+const MAX_TURNS_REPAIR = 15;
 
-const READ_ONLY_TOOLS = new Set(['read_file', 'grep', 'list_files']);
-const WRITE_TOOLS = new Set(['write_file', 'write_files', 'edit_file']);
-
-function scaffoldCoreFilesExist(buildDir: string): boolean {
-  return fs.existsSync(path.join(buildDir, 'docker-compose.yml'))
-    && fs.existsSync(path.join(buildDir, 'challenge.json'));
-}
-
-/** Stop scaffold loops that devolve into grep/read self-verification after files exist. */
-function createScaffoldEarlyStop(buildDir: string): {
-  shouldContinue: (step: { toolResults: Array<{ toolName: string }> }) => boolean;
-} {
-  let readOnlyStreak = 0;
+/** Slim draft slice shared by scaffold and repair payloads. */
+function slimDraftSlice(draft: ChallengeDraft): Record<string, unknown> {
   return {
-    shouldContinue({ toolResults }) {
-      if (!scaffoldCoreFilesExist(buildDir)) return true;
-      const names = toolResults.map((t) => t.toolName);
-      if (names.some((n) => WRITE_TOOLS.has(n))) {
-        readOnlyStreak = 0;
-        return true;
-      }
-      if (names.length > 0 && names.every((n) => READ_ONLY_TOOLS.has(n))) {
-        readOnlyStreak += 1;
-      } else {
-        readOnlyStreak = 0;
-      }
-      return readOnlyStreak < 2;
+    title: draft.meta?.name || draft.title,
+    category: draft.meta?.category || draft.category,
+    infra: draft.infra,
+    readyServices: draft.readyServices,
+    codebase: draft.codebase,
+    brokenState: {
+      rootCause: draft.brokenState?.rootCause,
+      validationSymptoms: draft.brokenState?.validationSymptoms,
     },
+    sandboxSpec: draft.sandboxSpec,
   };
 }
 
@@ -75,74 +59,61 @@ export interface ChallengeAssets {
   id?: string | null;
 }
 
-/** Truncate long strings for repair payloads and logs. */
-function cap(s: unknown, max: number): string | null | undefined {
-  if (!s) return s as string | null | undefined;
-  const str = typeof s === 'string' ? s : String(s);
-  if (str.length <= max) return str;
-  return `${str.slice(0, max)}\n…[truncated ${str.length - max} chars]`;
-}
-
-/** Strip bulky fields from a prior CODE attempt before sending to the LLM. */
+/** Strip bulky fields from a prior failure before sending to the LLM. */
 function sanitizePreviousAttempt(prev: BuildAttempt | null | undefined): BuildAttempt | null {
-  if (!prev) return null;
-  const out: BuildAttempt = {
-    phase: prev.phase,
-    message: prev.message,
-    artifacts: null,
-    rawText: cap(prev.rawText, 2000) || null,
-    details: null,
-  };
-  if (prev.details) {
-    const d = prev.details as Record<string, unknown>;
-    out.details = { message: d.message || prev.message };
-  }
-  return out;
+  return sanitizePreviousAttemptForRepair(prev);
 }
 
 /**
  * Build the JSON user payload for the CODE agent.
- * Scaffold sends a slim draft; repair includes SPIN/VALIDATE failure signals.
+ * Scaffold sends a slim draft; repair includes previousAttempt + failureContext.
  */
 function buildCodeUserPayload({
   mode,
   draft,
+  buildDir,
   lessonsBlock,
-  spinFailureMsg,
-  validateFailureMsg,
   previousAttempt,
 }: {
   mode: 'scaffold' | 'repair';
   draft: ChallengeDraft;
+  buildDir: string;
   lessonsBlock: LessonsBlock;
-  spinFailureMsg?: Record<string, unknown> | null;
-  validateFailureMsg?: Record<string, unknown> | null;
   previousAttempt?: BuildAttempt | null;
 }): Record<string, unknown> {
+  const slimDraft = slimDraftSlice(draft);
+  const validationSpecTemplate = buildValidationSpecTemplate(draft);
+  const workspace = workspacePayloadFields(buildDir);
+
   if (mode === 'scaffold') {
     return {
       mode,
-      draft: {
-        title: draft.meta?.name || draft.title,
-        category: draft.meta?.category || draft.category,
-        infra: draft.infra,
-        brokenState: {
-          rootCause: draft.brokenState?.rootCause,
-          validationSymptoms: draft.brokenState?.validationSymptoms,
-        },
-        sandboxSpec: draft.sandboxSpec,
-      },
+      ...workspace,
+      draft: slimDraft,
+      validationSpecTemplate,
       lessonsBlock,
     };
   }
-  return {
+
+  const workspaceTree = buildDir ? buildWorkspaceTree(buildDir, draft) : null;
+  const sanitizedPrev = sanitizePreviousAttempt(previousAttempt);
+  const failureContext = buildFailureContext({
+    previousAttempt: sanitizedPrev,
+    workspaceTree,
+    buildDir,
+  });
+
+  const payload: Record<string, unknown> = {
     mode,
-    draft,
+    ...workspace,
+    draft: slimDraft,
+    validationSpecTemplate,
+    workspaceTree,
     lessonsBlock,
-    spinFailureMsg,
-    validateFailureMsg,
-    previousAttempt: sanitizePreviousAttempt(previousAttempt),
+    previousAttempt: sanitizedPrev,
   };
+  if (failureContext) payload.failureContext = failureContext;
+  return payload;
 }
 
 /** Compact summary of loaded assets for build logs. */
@@ -228,47 +199,32 @@ function emitCodeLog(onEvent: BuildEventHandler | undefined, message: string, de
   console.log(`[code] ${message}`);
 }
 
-/** Run the LLM + sandbox-tool loop for one CODE invocation. */
-async function runCodeAgentLoop({
+/** Run one CODE agent session (Claude Code harness + Devlabs post-processing). */
+async function runCodeAgent({
   mode,
   prompt,
   buildDir,
-  maxSteps,
+  maxTurns,
   onEvent,
 }: {
   mode: 'scaffold' | 'repair';
   prompt: string;
   buildDir: string;
-  maxSteps: number;
+  maxTurns: number;
   onEvent?: BuildEventHandler;
-}): Promise<{ summary: string; usage: Record<string, unknown> }> {
-  const modelId = modelIdFor('code');
-  const provider = providerOf(modelId);
-  emitCodeLog(onEvent, `CODE agent (${mode}) — ${modelId}, cwd=${buildDir}`);
+}): Promise<{ summary: string; usage: Record<string, unknown>; hasWritten: boolean }> {
+  emitCodeLog(onEvent, `CODE agent (${mode}) — Claude Code harness, skill=code-agent-${mode}, cwd=${buildDir}`);
 
   const repairBaseline = mode === 'repair' ? cloneAssets(loadAssetsFromBuildDir(buildDir) || {}) : null;
+  const systemPrompt = buildCodeAgentSystemPrompt(mode);
 
-  const earlyStop = mode === 'scaffold' ? createScaffoldEarlyStop(buildDir) : null;
-
-  const result = await runAgentWithTools({
-    agent: 'code',
-    system: `${SYSTEM_PROMPT_STATIC}\n\n${SYSTEM_PROMPT_DYNAMIC}`,
-    messages: [{ role: 'user', content: prompt }],
-    tools: createCodeAgentTools({ buildDir, mode, onEvent }),
-    maxSteps,
-    maxTokens: 16384,
+  const result = await runCodeAgentHarness({
+    prompt,
+    systemPrompt,
+    buildDir,
+    maxTurns,
     onEvent,
     label: mode,
-    promptCache: provider === 'anthropic',
-    shouldContinue: earlyStop
-      ? (step: { stepIndex: number; toolResults: Array<{ toolName: string }>; text?: string }) => {
-          const cont = earlyStop.shouldContinue(step);
-          if (!cont) {
-            emitCodeLog(onEvent, 'Scaffold files present — stopping tool loop (server verification runs next)');
-          }
-          return cont;
-        }
-      : undefined,
   });
 
   if (mode === 'repair' && repairBaseline && onEvent) {
@@ -279,29 +235,30 @@ async function runCodeAgentLoop({
     }
   }
 
-  const usage = result.usage as { inputTokens?: number; outputTokens?: number } | undefined;
-  const inputTokens = usage?.inputTokens || 0;
-  const outputTokens = usage?.outputTokens || 0;
-  const costUsd = estimateCostUsd(modelId, usage);
+  const { inputTokens, outputTokens, totalTokens } = result.usage;
+  const costUsd = result.costUsd || estimateCostUsd(result.modelId, result.usage);
   let summary = (result.text || '').trim();
+  const wrote = mode === 'scaffold' ? true : result.hasWritten;
   if (!summary) {
     summary = mode === 'scaffold'
       ? 'Scaffold files written — server verification runs next.'
-      : '';
+      : wrote
+        ? 'Repair edits applied — server verification runs next.'
+        : 'Repair loop ended without file edits.';
   }
-  if (!summary) throw new Error('CODE agent finished without a summary message');
 
-  emitCodeLog(onEvent, `CODE agent complete — ${result.stepCount} step(s), $${costUsd.toFixed(4)}`, {
-    modelId, inputTokens, outputTokens,
+  emitCodeLog(onEvent, `CODE agent complete — ${result.stepCount} turn(s), $${costUsd.toFixed(4)}`, {
+    modelId: result.modelId, inputTokens, outputTokens, hasWritten: wrote,
   });
 
   return {
     summary,
+    hasWritten: wrote,
     usage: {
       agent: 'code',
       label: mode,
-      modelId,
-      usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+      modelId: result.modelId,
+      usage: { inputTokens, outputTokens, totalTokens },
       stepCount: result.stepCount,
       costUsd,
     },
@@ -309,7 +266,7 @@ async function runCodeAgentLoop({
 }
 
 /**
- * Entry point for the CODE phase — called by buildPipeline each iteration.
+ * Entry point for the CODE phase — called by buildPipeline in each iteration.
  */
 async function runCodePhase({
   mode,
@@ -319,8 +276,6 @@ async function runCodePhase({
   draftSessionId: _draftSessionId = null,
   attempt: _attempt,
   lessonsBlock = { relatedLessons: [] },
-  spinFailureMsg = null,
-  validateFailureMsg = null,
   previousAttempt = null,
   onEvent,
 }: {
@@ -331,8 +286,6 @@ async function runCodePhase({
   draftSessionId?: string | null;
   attempt: number;
   lessonsBlock?: LessonsBlock;
-  spinFailureMsg?: Record<string, unknown> | null;
-  validateFailureMsg?: Record<string, unknown> | null;
   previousAttempt?: BuildAttempt | null;
   onEvent?: BuildEventHandler;
 }): Promise<{
@@ -343,23 +296,40 @@ async function runCodePhase({
 }> {
   fs.mkdirSync(buildDir, { recursive: true });
 
-  const modeHint = mode === 'scaffold' ? SCAFFOLD_USER_HINT : REPAIR_USER_HINT;
-  const prompt = `${modeHint}\n\n${JSON.stringify(buildCodeUserPayload({
+  const userPayload = buildCodeUserPayload({
     mode,
     draft,
+    buildDir,
     lessonsBlock,
-    spinFailureMsg,
-    validateFailureMsg,
     previousAttempt,
-  }), null, 2)}`;
+  });
+  const prompt = JSON.stringify(userPayload, null, 2);
 
-  const agentResult = await runCodeAgentLoop({
+  const agentResult = await runCodeAgent({
     mode,
     prompt,
     buildDir,
-    maxSteps: mode === 'scaffold' ? MAX_STEPS_SCAFFOLD : MAX_STEPS_REPAIR,
+    maxTurns: mode === 'scaffold' ? MAX_TURNS_SCAFFOLD : MAX_TURNS_REPAIR,
     onEvent,
   });
+
+  if (
+    mode === 'repair'
+    && !agentResult.hasWritten
+    && previousAttempt
+  ) {
+    const prevPhase = String(previousAttempt.phase).toUpperCase();
+    if (prevPhase === 'SPIN' || prevPhase === 'VALIDATE') {
+      throw new Error(
+        'CODE repair finished without editing any files — use Edit or Write on failureContext.likelyFiles (e.g. services/*/app.py) to fix the reported failure',
+      );
+    }
+    if (prevPhase === 'CODE' && /scaffold rules failed|validationSpec\.graphs|verifyBuildComplete/i.test(previousAttempt.message || '')) {
+      throw new Error(
+        'CODE repair finished without editing any files — scaffold verification failed (likely challenge.json validationSpec.graphs shape). Use Write/Edit on challenge.json to fix graph DAG format',
+      );
+    }
+  }
 
   emitCodeLog(onEvent, 'CODE verify…');
   verifyBuildComplete(buildDir, { scaffoldRules: true });

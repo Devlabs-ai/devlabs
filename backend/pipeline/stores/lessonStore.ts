@@ -7,6 +7,7 @@
  */
 
 import type {
+  BuildAttempt,
   LessonAnchorFailure,
   LessonRecord,
   LessonPhase,
@@ -59,11 +60,13 @@ function buildAnchorFailureInput(anchor: LessonAnchorFailure, phase: LessonPhase
     `Attempt: ${anchor.attempt}`,
     `Message: ${anchor.message || '(none)'}`,
   ];
-  if (anchor.composeStderr) lines.push(`Stderr: ${cap(anchor.composeStderr, 1500)}`);
+  if (anchor.failureKind) {
+    lines.push(`Failure kind: ${anchor.failureKind}`);
+  }
   if (anchor.extractedErrors?.length) {
     lines.push(`Extracted errors:\n${anchor.extractedErrors.slice(0, 12).join('\n')}`);
-  } else if (anchor.logs) {
-    lines.push(`Logs: ${cap(anchor.logs, 1500)}`);
+  } else if (anchor.psSnapshot) {
+    lines.push(`Service state:\n${cap(anchor.psSnapshot, 1500)}`);
   }
   if (anchor.feedback) lines.push(`Validation feedback: ${cap(anchor.feedback, 800)}`);
   if (anchor.suggestions?.length) {
@@ -77,7 +80,7 @@ function fallbackFailureSummary(anchor: LessonAnchorFailure, phase: LessonPhase)
     `${phase.toUpperCase()} failure (attempt ${anchor.attempt}): ${anchor.message || 'unknown error'}`,
   ];
   const extra = anchor.extractedErrors?.[0]
-    || (anchor.composeStderr ? String(anchor.composeStderr).split('\n').find((l) => l.trim()) : null)
+    || (anchor.psSnapshot ? String(anchor.psSnapshot).split('\n').find((l) => l.trim()) : null)
     || anchor.suggestions?.[0]
     || null;
   if (extra) parts.push(String(extra).trim());
@@ -245,71 +248,31 @@ function shapeLessonForPrompt(lesson: LessonRecord): RelatedLesson {
   };
 }
 
-interface SpinFailure {
-  message?: string;
-  composeStderr?: string | null;
-  logs?: string | null;
-  extractedErrors?: string[];
-}
-
-interface ValidateFailure {
-  message?: string;
-  suggestions?: string[];
-}
-
 async function findForRetry({
   draft,
-  spinFailureMsg,
-  validateFailureMsg,
+  previousAttempt,
   k = LESSONS_K,
 }: {
   draft?: { meta?: { category?: string }; category?: string } | null;
-  spinFailureMsg?: SpinFailure | null;
-  validateFailureMsg?: ValidateFailure | null;
+  previousAttempt?: BuildAttempt | null;
   k?: number;
 }): Promise<LessonsBlock> {
-  const parts: string[] = [];
-  if (spinFailureMsg) {
-    parts.push(spinFailureMsg.message || '');
-    parts.push(spinFailureMsg.composeStderr || '');
-    if (Array.isArray(spinFailureMsg.extractedErrors) && spinFailureMsg.extractedErrors.length) {
-      parts.push(spinFailureMsg.extractedErrors.join('\n'));
-    } else {
-      parts.push(spinFailureMsg.logs || '');
-    }
-  }
-  if (validateFailureMsg) {
-    parts.push(validateFailureMsg.message || '');
-    if (Array.isArray(validateFailureMsg.suggestions)) {
-      parts.push(validateFailureMsg.suggestions.join(' '));
-    }
-  }
-  const text = parts.filter(Boolean).join('\n').trim();
+  const { failureTextForLessons } = require('../helpers/repairAttempt');
+  const text = failureTextForLessons(previousAttempt);
   if (!text) return { relatedLessons: [] };
 
   const category = draft?.meta?.category || draft?.category || null;
-  const hits = await findSimilar({ text, k, category: category as string | null });
+  const phase = previousAttempt?.phase
+    ? String(previousAttempt.phase).toLowerCase()
+    : null;
+  const hits = await findSimilar({
+    text,
+    k,
+    category: category as string | null,
+    phase: phase === 'spin' || phase === 'validate' ? phase as 'spin' | 'validate' : null,
+  });
   const byId = new Map<number, LessonRecord>();
   for (const h of hits) byId.set(h.id, h);
-
-  if (spinFailureMsg && validateFailureMsg) {
-    const spinHits = await findSimilar({
-      text: [
-        spinFailureMsg.message,
-        (spinFailureMsg.extractedErrors || []).join('\n') || spinFailureMsg.logs,
-      ].filter(Boolean).join('\n'),
-      k: Math.ceil(k / 2),
-      phase: 'spin',
-      category: category as string | null,
-    });
-    const valHits = await findSimilar({
-      text: [validateFailureMsg.message, (validateFailureMsg.suggestions || []).join(' ')].join('\n'),
-      k: Math.ceil(k / 2),
-      phase: 'validate',
-      category: category as string | null,
-    });
-    for (const h of [...spinHits, ...valHits]) byId.set(h.id, h);
-  }
 
   const merged = [...byId.values()]
     .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999))
@@ -421,6 +384,16 @@ async function backfillEmbeddings({ limit = 50 }: { limit?: number } = {}): Prom
   return done;
 }
 
+async function deleteAll(): Promise<number> {
+  try {
+    const { rowCount } = await pool.query(`DELETE FROM lessons`);
+    return rowCount ?? 0;
+  } catch (e) {
+    console.warn(`[lessons] deleteAll failed: ${(e as Error).message}`);
+    throw e;
+  }
+}
+
 module.exports = {
   record,
   findForRetry,
@@ -428,4 +401,5 @@ module.exports = {
   count,
   listPaginated,
   backfillEmbeddings,
+  deleteAll,
 };

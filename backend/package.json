@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node dist/server.js",
     "dev": "tsx watch server.ts",
-    "build": "tsc",
+    "build": "tsc && cp -R pipeline/skills/code-agent dist/pipeline/skills/code-agent",
     "typecheck": "tsc --noEmit",
     "postinstall": "node -e \"const fs=require('fs'),p=require('path'); for (const d of ['darwin-arm64','darwin-x64','linux-arm64','linux-x64']) { const f=p.join('node_modules','node-pty','prebuilds',d,'spawn-helper'); if (fs.existsSync(f)) { try { fs.chmodSync(f,0o755); } catch(_) {} } }\""
   },
@@ -18,6 +18,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.79",
     "@ai-sdk/openai": "^3.0.65",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.191",
     "@anthropic-ai/sdk": "^0.95.2",
     "ai": "^6.0.191",
     "bcryptjs": "^2.4.3",

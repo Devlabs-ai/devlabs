@@ -23,6 +23,9 @@ const {
 } = require('../pipeline/shape/shapeContract');
 const { normalizeDraft, isDraftReady } = require('../pipeline/draft/draftSchema');
 const { normalizeBucket } = require('../challenges/buckets');
+const {
+  ChatDisplayStreamFilter,
+} = require('../pipeline/helpers/chatDisplaySanitizer');
 
 const router = express.Router();
 
@@ -241,12 +244,19 @@ router.post('/:sessionId/chat', async (req: import("express").Request, res: impo
 
   const send = openSse(res);
   let assistantText = '';
+  const displayFilter = new ChatDisplayStreamFilter();
 
   try {
     const { extracted } = await designAgent.streamDesignTurn({
       messages: d.messages.map((m: Record<string, unknown>) => ({ role: m.role, content: m.content })),
       onEvent: (ev: unknown) => {
-        if ((ev as Record<string, unknown>).type === 'text') assistantText += (ev as Record<string, unknown>).delta;
+        const event = ev as Record<string, unknown>;
+        if (event.type === 'text') {
+          assistantText += event.delta as string;
+          const visible = displayFilter.pushDelta(event.delta as string);
+          if (visible) send({ type: 'text', delta: visible });
+          return;
+        }
         send(ev);
       },
     });
@@ -334,12 +344,19 @@ router.post('/:sessionId/generate-schema', async (req: import("express").Request
 
   const send = openSse(res);
   let assistantText = '';
+  const displayFilter = new ChatDisplayStreamFilter();
 
   try {
     const { raw } = await schemaAgent.generateSchema({
       sessionDraft: d.draft,
       onEvent: (ev: unknown) => {
-        if ((ev as Record<string, unknown>).type === 'text') assistantText += (ev as Record<string, unknown>).delta;
+        const event = ev as Record<string, unknown>;
+        if (event.type === 'text') {
+          assistantText += event.delta as string;
+          const visible = displayFilter.pushDelta(event.delta as string);
+          if (visible) send({ type: 'text', delta: visible });
+          return;
+        }
         send(ev);
       },
     });

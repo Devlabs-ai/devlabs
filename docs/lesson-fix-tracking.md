@@ -2,6 +2,8 @@
 
 **Status:** Proposed — review and confirm before implementation.
 
+**Related:** [SPIN failure logs](spin-failure-logs.md), [VALIDATE failure logs](validation-failure-logs.md) — anchor fields for each phase.
+
 ## Problem
 
 Today, `lessonStore.record()` runs when SPIN or VALIDATE **succeeds after prior failures** in the same build. It stores:
