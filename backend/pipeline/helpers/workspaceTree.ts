@@ -375,8 +375,9 @@ export function buildFailureContext({
   if (phase === 'SPIN') {
     if (Array.isArray(d?.extractedErrors)) {
       textParts.push(...(d.extractedErrors as string[]));
-    } else if (d?.composeStderr) {
-      textParts.push(String(d.composeStderr));
+    }
+    if (typeof d?.psSnapshot === 'string' && d.psSnapshot) {
+      textParts.push(d.psSnapshot);
     }
   } else if (phase === 'VALIDATE') {
     if (Array.isArray(d?.suggestions)) {
@@ -435,6 +436,18 @@ export function buildFailureContext({
     actionHint = 'Fix Decimal JSON serialization in the failing GET handler (likely services/api-service/app.py) — validation cannot observe the cache bug until GET returns 200.';
   } else if (phase === 'VALIDATE' && failedNodes.length) {
     actionHint = `Edit the service handler for failed node "${failedNodes[0].label}" — prefer Edit on the existing app file; do not only read files.`;
+  } else if (
+    phase === 'CODE'
+    && /validationSpec\.graphs|graph\.entry|setup\/perturb|scaffold rules failed.*validationSpec/i.test(message || '')
+  ) {
+    actionHint = 'Use validationSpecTemplate from the CODE payload — copy into challenge.json validationSpec. HTTP nodes need service + path (not url/HOST_PORT); exec uses cmd array.';
+    likelyFiles.add('challenge.json');
+  } else if (
+    phase === 'VALIDATE'
+    && (/service "undefined"|GET undefined\//i.test(message || '') || /no allocated host port for service "undefined"/i.test(corpus))
+  ) {
+    actionHint = 'validationSpec.graph HTTP nodes must use service + path (not url or HOST_PORT placeholders). Edit challenge.json graph.nodes — e.g. { "service": "products-service", "path": "/products/1" }.';
+    likelyFiles.add('challenge.json');
   }
 
   const priorCodeNoEdit = phase === 'CODE'

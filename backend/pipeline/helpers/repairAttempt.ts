@@ -34,15 +34,17 @@ function slimValidateEvidence(evidence: unknown): unknown[] {
 }
 
 function slimSpinDetails(attempt: BuildAttempt, d: Record<string, unknown>): Record<string, unknown> {
+  const failureKind = d.failureKind === 'SERVICE_RUNTIME' ? 'SERVICE_RUNTIME' : 'COMPOSE_UP';
   const shaped = spinFailureForRepair({
+    failureKind,
     message: attempt.message,
+    exitCode: typeof d.exitCode === 'number' || d.exitCode === null ? d.exitCode as number | null : undefined,
+    psSnapshot: typeof d.psSnapshot === 'string' ? d.psSnapshot : null,
+    psFile: typeof d.psFile === 'string' ? d.psFile : null,
     extractedErrors: Array.isArray(d.extractedErrors) ? d.extractedErrors as string[] : [],
     logFile: typeof d.logFile === 'string' ? d.logFile : null,
-    logBytes: typeof d.logBytes === 'number' ? d.logBytes : undefined,
-    logLineCount: typeof d.logLineCount === 'number' ? d.logLineCount : undefined,
-    composeStdout: null,
-    composeStderr: null,
-    logs: null,
+    logBytes: typeof d.logBytes === 'number' ? d.logBytes : 0,
+    logLineCount: typeof d.logLineCount === 'number' ? d.logLineCount : 0,
   });
   return shaped as Record<string, unknown>;
 }
@@ -107,11 +109,11 @@ export function failureTextForLessons(attempt: BuildAttempt | null | undefined):
   const phase = String(attempt.phase).toUpperCase();
 
   if (phase === 'SPIN') {
-    if (d?.composeStderr) parts.push(String(d.composeStderr));
     if (Array.isArray(d?.extractedErrors) && (d.extractedErrors as string[]).length) {
       parts.push((d.extractedErrors as string[]).join('\n'));
-    } else if (d?.logs) {
-      parts.push(String(d.logs));
+    }
+    if (typeof d?.psSnapshot === 'string' && d.psSnapshot) {
+      parts.push(String(d.psSnapshot));
     }
   } else if (phase === 'VALIDATE') {
     if (Array.isArray(d?.suggestions)) {

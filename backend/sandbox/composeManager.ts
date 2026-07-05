@@ -249,6 +249,27 @@ async function resolvePortMap(buildDir: string, composeYaml: string, ownerId: st
 // readyServices (optional): when provided, SPIN only gates on those named services.
 // All other services (one-shots, crash-looping workers) are ignored entirely.
 // When absent, all services must reach a settled state.
+/** Parse `docker compose ps -a --format json` into service records. */
+async function listPsServices(buildDir: string, portMap: PortMap): Promise<Record<string, unknown>[]> {
+  const { stdout } = await runCompose(['ps', '--all', '--format', 'json'], {
+    cwd: buildDir,
+    env: envWithPorts(portMap),
+  });
+  let services: Record<string, unknown>[] = [];
+  const lines = (stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    try {
+      services.push(JSON.parse(line));
+    } catch (_e) {
+      try {
+        const arr = JSON.parse(stdout || '');
+        if (Array.isArray(arr)) { services = arr; break; }
+      } catch (_ee) { /* ignore */ }
+    }
+  }
+  return services;
+}
+
 async function waitForServices(buildDir: string, portMap: PortMap, maxWaitMs = 60000, readyServices: string[] | null = null): Promise<boolean> {
   const POLL_INTERVAL_MS = 3000;
   const STABLE_POLLS_REQUIRED = 3; // ~9s of consecutive stable state
@@ -270,22 +291,7 @@ async function waitForServices(buildDir: string, portMap: PortMap, maxWaitMs = 6
   while (Date.now() - start < maxWaitMs) {
     let services: Record<string, unknown>[] = [];
     try {
-      const { stdout } = await runCompose(['ps', '--all', '--format', 'json'], {
-        cwd: buildDir,
-        env: envWithPorts(portMap),
-      });
-      const lines = (stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
-      for (const line of lines) {
-        try {
-          services.push(JSON.parse(line));
-        } catch (_e) {
-          // older Compose versions emit a single JSON array on one line
-          try {
-            const arr = JSON.parse(stdout || '');
-            if (Array.isArray(arr)) { services = arr; break; }
-          } catch (_ee) { /* ignore */ }
-        }
-      }
+      services = await listPsServices(buildDir, portMap);
     } catch (e: unknown) {
       lastStatus = `ps error: ${(e as Error).message}`;
       stableCount = 0;
@@ -436,6 +442,7 @@ module.exports = {
   getPort,
   resolvePortMap,
   waitForServices,
+  listPsServices,
   readComposeFile,
   containerPortForService,
   serviceComposeBlock,

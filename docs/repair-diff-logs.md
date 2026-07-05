@@ -4,6 +4,8 @@
 
 **GitHub issue:** [#22 — Author/CodeAgent Diff across codebases changed by CodeAgent in repair mode](https://github.com/rithvik89/devlabs/issues/22)
 
+**Related:** [SPIN failure logs](spin-failure-logs.md) — how compose/runtime errors are persisted and passed to repair (separate from file diffs). [VALIDATE failure logs](validation-failure-logs.md) — judge feedback and inline evidence caps.
+
 ---
 
 ## Problem

@@ -4,6 +4,8 @@
 
 The user message JSON payload is authoritative:
 
+- `buildDir` / `workspaceRoot` — **the only directory** for Read/Write/Edit; server rejects paths outside it
+- `workspaceNote` — path rules (also below)
 - `draft.infra.services[]` — service names, image_hint (from Schema)
 - `draft.brokenState` — rootCause + validationSymptoms → validationSpec.graphs
 - `draft.sandboxSpec` — optional layout hints
@@ -11,11 +13,20 @@ The user message JSON payload is authoritative:
 - `draft.readyServices` — when present: SPIN gating hint
 - `lessonsBlock` — past failure/fix summaries on retry
 - `previousAttempt` — last failed phase (SPIN, VALIDATE, or CODE) with capped `details`
+- `validationSpecTemplate` — canonical validationSpec.graphs shape from draft symptoms (use when writing/fixing challenge.json)
 - `workspaceTree` / `failureContext` — repair iterations only
 
 Derive layout from the draft. Every challenge needs **docker-compose.yml** (root), **services/***, **init/***, **challenge.json**.
 
-Writable paths: `docker-compose.yml`, `challenge.json`, `services/*`, `init/*` (flat files only).
+## Build workspace (critical)
+
+- `workspaceRoot` in the user payload is the build sandbox on disk (same as `buildDir`).
+- **All Read / Write / Edit `file_path` values must resolve inside `workspaceRoot`.**
+- Use absolute paths under `workspaceRoot` (Claude Code Write prefers absolute) **or** paths relative to it (`docker-compose.yml`, `dags/order_pipeline.py`).
+- **Never** write to `/tmp`, `/work`, `/build`, or any path outside `workspaceRoot` — the server denies them and verification only checks `workspaceRoot`.
+- Create bind-mount directories (e.g. `./dags`, `./logs`) under `workspaceRoot` before you stop.
+
+Writable paths (relative to workspace root): `docker-compose.yml`, `challenge.json`, `services/*`, `init/*`, plus any dirs referenced by compose volume mounts.
 
 ## challenge.json
 
@@ -25,10 +36,14 @@ Required top-level: title, description, difficulty, category, tags, problemState
 
 - `graphs.length` MUST equal `validationSymptoms.length` (same ids, same order)
 - Copy symptom id → `symptomId`, check text → `symptomCheck` verbatim
-- Each graph: setup → perturb → observe for that symptom only
-- Node types: http, exec, wait, fork, join, background, stop
-- Prefix node ids with `s{N}_` inside each graph
-- Action nodes capture snapshots; judge compares before/after per symptom
+- Each entry MUST wrap a DAG: `graph: { entry: "<nodeId>", expectBroken: true, nodes: { ... } }`
+- Do **not** use top-level `setup` / `perturb` / `observe` / `judge` keys — those are design concepts; the executor only reads `graph.entry` + `graph.nodes`
+- Node types inside `graph.nodes`: http, exec, wait, fork, join, background, stop
+- **HTTP nodes:** `service` (compose service name) + `path` (e.g. `/products/1`) — never `url` or `${HOST_PORT_*}` (the runner resolves host ports from compose)
+- **Exec nodes:** `cmd` as string array — never `command`
+- **Wait nodes:** `ms` (milliseconds) — not `timeout`
+- Chain nodes with `next: ["<nodeId>"]`; prefix node ids with `s{N}_` per symptom
+- Action nodes capture snapshots; the validation judge compares before/after per symptom
 
 `readyServices` = compose services labelled `devlabs.role: infra` (databases, brokers, caches, HTTP APIs).
 

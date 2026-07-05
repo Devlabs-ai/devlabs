@@ -4,7 +4,7 @@
 
 **GitHub issue:** [#21 — Author/CodeAgent (In Repair mode looking for faster bug resolution and unnecessary tool calls)](https://github.com/rithvik89/devlabs/issues/21)
 
-**Related:** [#22 repair diff logs](repair-diff-logs.md) (implemented — diffs for operator audit), [#24 lesson embeddings](lesson-fix-tracking.md) (out of scope here).
+**Related:** [SPIN failure logs](spin-failure-logs.md) (implemented — disk vs repair payload), [VALIDATE failure logs](validation-failure-logs.md) (current behavior — inline evidence + judge), [#24 lesson embeddings](lesson-fix-tracking.md) (out of scope here).
 
 ---
 
@@ -244,20 +244,19 @@ When paths are missing (common for vague VALIDATE feedback), `likelyFiles` may b
 
 ### 1d. Error context — structured extraction, not blind truncation
 
-**Do not** blindly cap `composeStdout` / `composeStderr` inline — that can truncate critical paths or stack traces.
+See **[SPIN failure logs](spin-failure-logs.md)** for the full spec (COMPOSE_UP vs SERVICE_RUNTIME, disk layout, repair payload shape).
 
-**Revised strategy:**
+Summary for repair payloads:
 
 | Field | Treatment |
 | ----- | --------- |
-| `message` | Never cap |
-| `extractedErrors[]` | Primary SPIN signal — keep; never drop lines containing path-like tokens (`services/`, `.py`, `Dockerfile`, `/`) |
-| `composeStdout` / `composeStderr` | **Remove from inline repair payload** — redundant with on-disk log |
-| `logFile`, `logBytes`, `logLineCount`, `hint` | Keep — agent reads `.devlabs/spin-failure.log` only when extracted errors are insufficient |
+| `message` | Keep (capped at capture) |
+| `extractedErrors[]` | Primary SPIN signal — path-prioritized extraction |
+| Raw stdout/stderr/container logs | **Never inline** — on disk under `.devlabs/` |
+| `logFile`, `logBytes`, `logLineCount`, `note` | Metadata + pointer for agent `read_file` / grep |
+| `failureKind`, `exitCode`, `psSnapshot`, `psFile` | Kind-specific fields (see spin-failure-logs doc) |
 | `validateFailureMsg.message` / `suggestions` | Never cap |
 | `validateFailureMsg.evidence[]` | Already capped per-field in `buildPipeline.ts` — keep as-is |
-
-Full logs remain on disk at `.devlabs/spin-failure.log` via `prepareSpinFailureContext()`.
 
 ---
 

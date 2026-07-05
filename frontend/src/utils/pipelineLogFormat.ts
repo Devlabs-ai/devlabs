@@ -71,6 +71,18 @@ export function parseLogLine(line: string): PipelineLogEntry {
         };
       }
     }
+    const plainStep = body.match(/^Step (\d+) · (.+)$/);
+    if (plainStep) {
+      return {
+        kind: 'codeStep',
+        step: parseInt(plainStep[1], 10) - 1,
+        tools: plainStep[2],
+        ms: 0,
+        cost: '—',
+        tokens: '—',
+        summary: line,
+      };
+    }
   }
   if (line.startsWith('---')) {
     return { kind: 'separator', text: line };

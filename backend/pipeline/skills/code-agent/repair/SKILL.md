@@ -9,7 +9,7 @@ mode: repair
 
 ## Goal
 
-Apply a **short, targeted patch** — not a re-scaffold. Fix the reported failure while preserving intentional broken behavior unless the judge says the bug is not reproducible.
+Apply a **short, targeted patch** inside **`workspaceRoot`** — not a re-scaffold. Fix the reported failure while preserving intentional broken behavior unless the judge says the bug is not reproducible.
 
 ## Workflow
 
@@ -37,9 +37,9 @@ Apply a **short, targeted patch** — not a re-scaffold. Fix the reported failur
 
 | Phase | Fix |
 |-------|-----|
-| CODE / scaffold verify | compose, missing Dockerfiles/volumes, HOST_PORT placeholders |
+| CODE / scaffold verify | compose, missing Dockerfiles/volumes, HOST_PORT placeholders, **challenge.json validationSpec shape** |
 | SPIN | Dockerfile, deps, compose, SQL, broker config |
-| VALIDATE (scaffold/runtime) | Serialization, 500s, graph abort on health — fix blocking errors |
+| VALIDATE (scaffold/runtime) | Serialization, 500s, graph abort — fix blocking errors; for `service "undefined"` or `GET undefined/` rewrite graphs using **validationSpecTemplate** (service + path, not url) |
 | VALIDATE (unobservable bug) | validationSpec.graphs — do **not** remove intentional broken behavior unless judge says so |
 
 ## Good vs bad repair

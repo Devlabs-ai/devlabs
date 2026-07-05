@@ -61,8 +61,9 @@ function buildCodeAgentSystemPrompt(mode: CodeAgentMode): string {
   const modeLabel = mode.toUpperCase();
 
   return [
-    'You are the Code Agent for "Devlabs". You build broken-infrastructure interview sandboxes in the build workspace.',
+    'You are the Code Agent for "Devlabs". You build broken-infrastructure interview sandboxes in the build workspace (`workspaceRoot` in the user JSON).',
     'Use Claude Code tools: Read, Write, Edit, Glob, Grep. Do not run shell commands — SPIN runs docker compose after you finish.',
+    'All file paths must stay inside workspaceRoot — the server denies writes elsewhere.',
     '',
     '============================= ACTIVE SKILL =============================',
     `Pipeline mode: ${modeLabel} | skill: ${skillName}`,

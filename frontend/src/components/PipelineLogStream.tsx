@@ -45,19 +45,31 @@ function LogEntryView({ entry }: { entry: PipelineLogEntry }): JSX.Element {
     const [toolsMain, hint] = entry.tools.includes(' — ')
       ? entry.tools.split(' — ', 2)
       : [entry.tools, null];
+    const showMeta = entry.ms > 0 || (entry.cost !== '—' && entry.tokens !== '—');
+    const longPlainStep = !hint && !showMeta && toolsMain.length > 48;
     return (
       <div className="log-entry log-code-step">
         <div className="log-code-step-head">
           <span className="log-code-step-badge">Step {entry.step + 1}</span>
-          <span className="log-code-step-tools">{toolsMain}</span>
-          <span className="log-code-step-meta">
-            {(entry.ms / 1000).toFixed(1)}s · {entry.cost} · {entry.tokens}
-          </span>
+          {!longPlainStep && (
+            <span className="log-code-step-tools">{toolsMain}</span>
+          )}
+          {showMeta && (
+            <span className="log-code-step-meta">
+              {(entry.ms / 1000).toFixed(1)}s · {entry.cost} · {entry.tokens}
+            </span>
+          )}
         </div>
+        {longPlainStep && (
+          <div className="log-code-step-body">{toolsMain}</div>
+        )}
         {hint && (
           <div className={`log-code-step-hint${hint.includes('⚠') ? ' log-code-step-hint-warn' : ''}`}>
             {hint}
           </div>
+        )}
+        {!hint && !longPlainStep && toolsMain.length > 80 && (
+          <div className="log-code-step-body">{toolsMain}</div>
         )}
       </div>
     );

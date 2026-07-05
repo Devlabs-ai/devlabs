@@ -60,11 +60,13 @@ function buildAnchorFailureInput(anchor: LessonAnchorFailure, phase: LessonPhase
     `Attempt: ${anchor.attempt}`,
     `Message: ${anchor.message || '(none)'}`,
   ];
-  if (anchor.composeStderr) lines.push(`Stderr: ${cap(anchor.composeStderr, 1500)}`);
+  if (anchor.failureKind) {
+    lines.push(`Failure kind: ${anchor.failureKind}`);
+  }
   if (anchor.extractedErrors?.length) {
     lines.push(`Extracted errors:\n${anchor.extractedErrors.slice(0, 12).join('\n')}`);
-  } else if (anchor.logs) {
-    lines.push(`Logs: ${cap(anchor.logs, 1500)}`);
+  } else if (anchor.psSnapshot) {
+    lines.push(`Service state:\n${cap(anchor.psSnapshot, 1500)}`);
   }
   if (anchor.feedback) lines.push(`Validation feedback: ${cap(anchor.feedback, 800)}`);
   if (anchor.suggestions?.length) {
@@ -78,7 +80,7 @@ function fallbackFailureSummary(anchor: LessonAnchorFailure, phase: LessonPhase)
     `${phase.toUpperCase()} failure (attempt ${anchor.attempt}): ${anchor.message || 'unknown error'}`,
   ];
   const extra = anchor.extractedErrors?.[0]
-    || (anchor.composeStderr ? String(anchor.composeStderr).split('\n').find((l) => l.trim()) : null)
+    || (anchor.psSnapshot ? String(anchor.psSnapshot).split('\n').find((l) => l.trim()) : null)
     || anchor.suggestions?.[0]
     || null;
   if (extra) parts.push(String(extra).trim());

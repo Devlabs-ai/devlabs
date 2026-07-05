@@ -169,6 +169,7 @@ export interface ChallengeDraft {
   brokenState?: DraftBrokenState;
   sandboxSpec?: Record<string, unknown>;
   problemStatement?: Record<string, unknown> | string | null;
+  readyServices?: string[];
 }
 
 export interface HttpError extends Error {
@@ -182,10 +183,9 @@ export interface HttpError extends Error {
   lastFailure?: string | null;
   lastAttempt?: BuildAttempt | null;
   availableCategories?: unknown;
-  composeStdout?: string | null;
-  composeStderr?: string | null;
-  logs?: unknown;
 }
+
+export type SpinFailureKind = 'COMPOSE_UP' | 'SERVICE_RUNTIME';
 
 export type BuildPhase = 'CODE' | 'SPIN' | 'VALIDATE';
 
@@ -353,8 +353,8 @@ export interface LessonAnchorFailure {
   attempt: number;
   phase: string;
   message: string | null;
-  composeStderr?: string | null;
-  logs?: string | null;
+  failureKind?: string | null;
+  psSnapshot?: string | null;
   feedback?: string | null;
   suggestions?: string[];
   extractedErrors?: string[];

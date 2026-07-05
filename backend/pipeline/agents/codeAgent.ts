@@ -23,6 +23,8 @@ const { verifyBuildComplete } = require('../validation/buildVerification');
 const { cloneAssets, diffAssets } = require('../helpers/assetDiff');
 const { buildWorkspaceTree, buildFailureContext } = require('../helpers/workspaceTree');
 const { sanitizePreviousAttemptForRepair } = require('../helpers/repairAttempt');
+const { buildValidationSpecTemplate } = require('../helpers/validationGraphTemplate');
+const { workspacePayloadFields } = require('../helpers/buildWorkspacePaths');
 
 const MAX_TURNS_SCAFFOLD = 20;
 const MAX_TURNS_REPAIR = 15;
@@ -75,15 +77,20 @@ function buildCodeUserPayload({
 }: {
   mode: 'scaffold' | 'repair';
   draft: ChallengeDraft;
-  buildDir?: string;
+  buildDir: string;
   lessonsBlock: LessonsBlock;
   previousAttempt?: BuildAttempt | null;
 }): Record<string, unknown> {
   const slimDraft = slimDraftSlice(draft);
+  const validationSpecTemplate = buildValidationSpecTemplate(draft);
+  const workspace = workspacePayloadFields(buildDir);
+
   if (mode === 'scaffold') {
     return {
       mode,
+      ...workspace,
       draft: slimDraft,
+      validationSpecTemplate,
       lessonsBlock,
     };
   }
@@ -98,7 +105,9 @@ function buildCodeUserPayload({
 
   const payload: Record<string, unknown> = {
     mode,
+    ...workspace,
     draft: slimDraft,
+    validationSpecTemplate,
     workspaceTree,
     lessonsBlock,
     previousAttempt: sanitizedPrev,
@@ -308,12 +317,18 @@ async function runCodePhase({
     mode === 'repair'
     && !agentResult.hasWritten
     && previousAttempt
-    && (String(previousAttempt.phase).toUpperCase() === 'SPIN'
-      || String(previousAttempt.phase).toUpperCase() === 'VALIDATE')
   ) {
-    throw new Error(
-      'CODE repair finished without editing any files — use Edit or Write on failureContext.likelyFiles (e.g. services/*/app.py) to fix the reported failure',
-    );
+    const prevPhase = String(previousAttempt.phase).toUpperCase();
+    if (prevPhase === 'SPIN' || prevPhase === 'VALIDATE') {
+      throw new Error(
+        'CODE repair finished without editing any files — use Edit or Write on failureContext.likelyFiles (e.g. services/*/app.py) to fix the reported failure',
+      );
+    }
+    if (prevPhase === 'CODE' && /scaffold rules failed|validationSpec\.graphs|verifyBuildComplete/i.test(previousAttempt.message || '')) {
+      throw new Error(
+        'CODE repair finished without editing any files — scaffold verification failed (likely challenge.json validationSpec.graphs shape). Use Write/Edit on challenge.json to fix graph DAG format',
+      );
+    }
   }
 
   emitCodeLog(onEvent, 'CODE verify…');

@@ -7,9 +7,12 @@
  * Built-in Read / Write / Edit / Glob / Grep run in cwd with permissionMode acceptEdits.
  */
 
+import * as path from 'path';
+
 import type { BuildEventHandler } from '../../types/domain';
 
 const { modelIdFor, providerOf, splitId, isKeyConfiguredFor } = require('../../llm/models');
+const { validateWorkspaceToolPath, toolFilePath } = require('./buildWorkspacePaths');
 const { formatCostUsd } = require('../../llm/cost');
 
 const CODE_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep'];
@@ -28,6 +31,7 @@ const DISALLOWED_TOOLS = [
 ];
 
 const WRITE_TOOLS = new Set(['Write', 'Edit']);
+const PATH_JAILED_TOOLS = new Set(['Read', 'Write', 'Edit', 'Glob', 'Grep']);
 
 type SdkModule = typeof import('@anthropic-ai/claude-agent-sdk');
 
@@ -122,8 +126,28 @@ function summarizeToolBatch(toolUses: ToolUseSummary[]): string {
 }
 
 function toolPath(input: Record<string, unknown>): string | null {
-  const p = input.file_path ?? input.path;
-  return typeof p === 'string' ? p : null;
+  return toolFilePath(input);
+}
+
+function buildWorkspaceCanUseTool(buildDir: string, onEvent?: BuildEventHandler) {
+  const root = path.resolve(buildDir);
+  return async (toolName: string, input: Record<string, unknown>) => {
+    if (!PATH_JAILED_TOOLS.has(toolName)) {
+      return { behavior: 'allow' as const };
+    }
+    const check = validateWorkspaceToolPath(root, toolName, input);
+    if (!check.allowed) {
+      emitCodeLog(onEvent, `Rejected ${toolName}: ${check.reason}`);
+      return {
+        behavior: 'deny' as const,
+        message: check.reason || `Path must be inside ${root}`,
+      };
+    }
+    if (check.normalizedInput) {
+      return { behavior: 'allow' as const, updatedInput: check.normalizedInput };
+    }
+    return { behavior: 'allow' as const };
+  };
 }
 
 function toolStepHint(toolUses: ToolUseSummary[]): string {
@@ -177,7 +201,11 @@ async function runCodeAgentHarness({
   const { query } = await loadSdk();
   const { model, modelId } = resolveClaudeModel();
 
-  emitCodeLog(onEvent, `Claude Code harness (${label}, max ${maxTurns} turns) — ${modelId}, cwd=${buildDir}`);
+  const workspaceRoot = path.resolve(buildDir);
+  emitCodeLog(
+    onEvent,
+    `Claude Code harness (${label}, max ${maxTurns} turns) — ${modelId}, cwd=${workspaceRoot} (writes jailed to workspace)`,
+  );
 
   const loopStart = Date.now();
   let stepIndex = 0;
@@ -190,13 +218,14 @@ async function runCodeAgentHarness({
   const stream = query({
     prompt,
     options: {
-      cwd: buildDir,
+      cwd: workspaceRoot,
       model,
       systemPrompt,
       maxTurns,
       tools: CODE_TOOLS,
       allowedTools: CODE_TOOLS,
       disallowedTools: DISALLOWED_TOOLS,
+      canUseTool: buildWorkspaceCanUseTool(workspaceRoot, onEvent),
       permissionMode: 'acceptEdits',
       settingSources: [],
       env: {
@@ -239,7 +268,7 @@ async function runCodeAgentHarness({
 
           const persistLine = toolUses.length
             ? `⚡ Step ${stepIndex + 1} · ${toolsSummary}${hint ? ` — ${hint}` : ''}`
-            : `⚡ Step ${stepIndex + 1} · ${text ? text.slice(0, 120) : 'done'}`;
+            : `⚡ Step ${stepIndex + 1} · ${text ? text.trim() : 'done'}`;
           emitCodeLog(onEvent, persistLine);
           stepIndex += 1;
         }

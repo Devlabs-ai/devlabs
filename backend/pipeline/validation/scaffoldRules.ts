@@ -38,6 +38,83 @@ function customServiceNames(composeYaml: string): string[] {
   );
 }
 
+/** Per-graph shape checks — returns human-readable issues (empty when graphs ok or absent). */
+function validateValidationGraphs(vs: Record<string, unknown> | undefined): string[] {
+  const issues: string[] = [];
+  if (!vs || !Array.isArray(vs.graphs) || vs.graphs.length === 0) return issues;
+
+  vs.graphs.forEach((raw, i) => {
+    if (!raw || typeof raw !== 'object') {
+      issues.push(`challenge.json: validationSpec.graphs[${i}] is not an object`);
+      return;
+    }
+    const entry = raw as Record<string, unknown>;
+    const graph = entry.graph as Record<string, unknown> | undefined;
+    const extraKeys = Object.keys(entry).filter((k) => !['symptomId', 'symptomCheck', 'graph'].includes(k));
+    if (extraKeys.some((k) => ['setup', 'perturb', 'observe', 'judge'].includes(k))) {
+      issues.push(
+        `challenge.json: validationSpec.graphs[${i}] uses setup/perturb/observe/judge — `
+        + 'rewrite as graph: { entry, nodes } DAG (see backend/pipeline/validation/examples/stale-cache-validation.graph.json)',
+      );
+      return;
+    }
+    if (!graph || typeof graph !== 'object') {
+      issues.push(`challenge.json: validationSpec.graphs[${i}] missing graph object with entry + nodes`);
+      return;
+    }
+    if (!graph.entry) {
+      issues.push(`challenge.json: validationSpec.graphs[${i}].graph.entry is required`);
+    }
+    if (!graph.nodes || typeof graph.nodes !== 'object') {
+      issues.push(`challenge.json: validationSpec.graphs[${i}].graph.nodes is required`);
+      return;
+    }
+    issues.push(...validateGraphNodes(i, graph.nodes as Record<string, unknown>));
+  });
+
+  return issues;
+}
+
+function validateGraphNodes(graphIndex: number, nodes: Record<string, unknown>): string[] {
+  const issues: string[] = [];
+  for (const [nodeId, raw] of Object.entries(nodes)) {
+    if (!raw || typeof raw !== 'object') continue;
+    const node = raw as Record<string, unknown>;
+    const prefix = `challenge.json: validationSpec.graphs[${graphIndex}].graph.nodes.${nodeId}`;
+
+    if (node.type === 'http') {
+      if (node.url) {
+        issues.push(
+          `${prefix}: use service + path (not url). Example: { "service": "products-service", "path": "/products/1" }`,
+        );
+      }
+      if (!node.service || typeof node.service !== 'string') {
+        issues.push(`${prefix}: http node missing service (compose service name)`);
+      }
+      if (node.path == null || typeof node.path !== 'string') {
+        issues.push(`${prefix}: http node missing path (e.g. "/products/1")`);
+      }
+    }
+
+    if (node.type === 'exec') {
+      if (node.command && !node.cmd) {
+        issues.push(`${prefix}: use cmd (array), not command — e.g. "cmd": ["redis-cli", "GET", "key"]`);
+      }
+      if (!node.cmd) {
+        issues.push(`${prefix}: exec node missing cmd array`);
+      }
+      if (!node.service || typeof node.service !== 'string') {
+        issues.push(`${prefix}: exec node missing service`);
+      }
+    }
+
+    if (node.type === 'wait' && node.timeout != null && node.ms == null) {
+      issues.push(`${prefix}: wait node uses timeout — use ms (milliseconds), e.g. "ms": 150`);
+    }
+  }
+  return issues;
+}
+
 /**
  * Programmatic scaffold rule checks — replaces LLM self-verification greps.
  * Throws with a human-readable list of violations.
@@ -118,6 +195,10 @@ export function verifyScaffoldRules(buildDir: string): void {
   // challenge.json validationSpec
   const vs = challenge.validationSpec as Record<string, unknown> | undefined;
   const hasSteps = !!(vs && Array.isArray(vs.steps) && vs.steps.length > 0);
+  const graphIssues = validateValidationGraphs(vs);
+  if (graphIssues.length) {
+    issues.push(...graphIssues);
+  }
   const hasGraphs = !!(vs && Array.isArray(vs.graphs) && vs.graphs.length > 0
     && (vs.graphs as Array<{ graph?: { entry?: string; nodes?: unknown } }>).every(
       (g) => g?.graph?.entry && g.graph.nodes,
@@ -125,7 +206,7 @@ export function verifyScaffoldRules(buildDir: string): void {
   const hasSingleGraph = !!(vs && vs.graph && typeof vs.graph === 'object'
     && (vs.graph as Record<string, unknown>).entry
     && (vs.graph as Record<string, unknown>).nodes);
-  if (!hasSteps && !hasGraphs && !hasSingleGraph) {
+  if (!hasSteps && !hasGraphs && !hasSingleGraph && graphIssues.length === 0) {
     issues.push('challenge.json: validationSpec.steps or validationSpec.graphs (one DAG per symptom) is required');
   }
   if (!vs?.readyServices || !Array.isArray(vs.readyServices) || vs.readyServices.length === 0) {
