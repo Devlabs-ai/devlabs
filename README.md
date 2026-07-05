@@ -1,87 +1,51 @@
 # Devlabs
 
-A technical interview platform where interviewers author broken-infrastructure challenges and candidates debug them live inside real Docker sandboxes.
+> *Ladies and Gentlemen, You are not ready for this!!*
 
-## Prerequisites
+A technical interview platform built for new age candidate evaluation. Interviewers author production-style incidents — broken infrastructure, live metrics, real Docker stacks using existing Agentic pipelines — and candidates debug them inside live sandboxes. Not toy puzzles. Not whiteboard hypotheticals. The same kind of ambiguity, signals, and blast radius you get when something is actually on fire.
 
-- Docker + Docker Compose (v2)
-- Node.js 18+ (the backend uses the global `fetch` API)
-- npm 9+
-- Linux hosts running Elasticsearch/OpenSearch challenges: `vm.max_map_count` ≥ 262144 — see [docs/host-requirements.md](docs/host-requirements.md)
+---
 
-## Quick Start
+## What Devlabs is
 
-### 1. Start Postgres + Redis
+Devlabs has two sides:
 
-```bash
-docker compose -f docker-compose.infra.yml up -d
-```
+**Authoring** — shape a challenge from intent to verified sandbox: design the incident, materialize the stack, build and validate that it breaks (and recovers) the way you intended.
 
-### 2. Backend (port 4000)
+**Play** — run a candidate through that challenge: incident brief, live terminal and metrics, observable session.
 
-```bash
-cd backend
-cp .env.example .env
-npm install
-npm run dev
-```
+The product promise is realism end to end. Authoring produces trustworthy incidents. Play proves whether a candidate can run one.
 
-On startup the backend runs idempotent Postgres migrations, restores any in-flight sessions from the database, and seeds the `challenges` table from every `sandbox/verified/<slug>/challenge.json` it finds.
+---
 
-On first boot when the `catalogue` table is empty, the backend auto-seeds handbook rows from `backend/pipeline/catalogue/seeds/catalogue.js` (~30 curated Docker recipes: Postgres, Kafka, Nginx, etc.). The build pipeline injects matching `catalogueBrief` entries (dos, donts, conf) on every GENERATE pass. Learned fixes are stored in `lessons` (requires `OPENAI_API_KEY` for embeddings) after a SPIN or VALIDATE phase succeeds following prior failures in that build. Run `make seed-catalogue-if-empty` manually; seeding is insert-only and never overwrites existing rows.
+## Roadmap
 
-### 3. Frontend (port 5173)
+**Currently in development: V0.1**
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+### Devlabs V0.1 — Authoring *(current)*
 
-Open <http://localhost:5173>.
+Make challenge creation stable, efficient, and operator-flexible.
 
-## Logging In
+Authoring is treated as a complete, independent capability on the platform — not an afterthought bolted onto Play. An operator can run it **HITL** (human in the loop): shape the design, approve the contract, review the build, sign off before promote. Or **AITL** (agent in the loop): agents drive design, schema, and build with human gates only where you want them.
 
-Dev uses OTP login with shared seed tenants in `backend/auth/seeds/devTenants.ts`. On first boot when the `companies` table is empty, the backend auto-seeds a Devlabs company and two users.
+Focus for this phase:
 
-Set a fixed OTP in `backend/.env` (see `.env.example`):
+- Reliable design → build → review → promote loop
+- Token-aware pipeline — fast, predictable builds without sacrificing correctness
+- Clear failure visibility for operators
+- Ready for both human-led and agent-led authoring workflows
 
-```bash
-DEV_OTP=123456
-```
+### Devlabs V0.2 — Evaluation & Play *(planned)*
 
-| Field | Value |
-|-------|-------|
-| Email | `admin@devlabs.app` (admin) or `interviewer@devlabs.app` |
-| OTP | `123456` (when `DEV_OTP` is set) |
+Define what good looks like when a candidate takes a challenge — and how AI assistance fits in.
 
-Request a code from the sign-in modal, then enter the OTP. Without `DEV_OTP`, the code is printed to the backend console (SMTP is optional in dev).
+Play already delivers live sandboxes and recovery signals. V0.2 adds the evaluation layer: criteria scoped to each challenge, observable candidate behavior, and explicit policies for AI tool access (none, scoped, or full — per challenge or invite).
 
-Interviewers can create one-time candidate invites from the **Invites** panel. A candidate visits `http://localhost:5173/?candidate=<token>` to play without a JWT.
+Focus for this phase:
 
-## Sample Challenge
+- Evaluation criteria aligned with how challenges are authored (symptoms, recovery, process)
+- Session artifacts interviewers can actually use — not just elapsed time
+- Play experience consistent with the incident brief and metrics the author defined
+- Fair assessment under chosen AI-assistance rules
 
-`sandbox/verified/broken-postgres/` ships out of the box. The candidate sees high latency from an `orders-service` that runs `SELECT … WHERE user_id = $1` against an unindexed 50k-row table. Running
-
-```sql
-CREATE INDEX idx_orders_user_id ON orders(user_id);
-```
-
-inside the postgres container drops latency to ~5–15 ms. After 10 consecutive readings under 50 ms the session is marked `recovered = true`.
-
-## Project Layout
-
-```
-backend/      Node/Express + WS server
-frontend/     Vite + React UI
-sandbox/      Per-challenge Docker compose bundles
-  verified/   Permanent, finalised challenges
-  builds/     Ephemeral build artifacts (reserved for AI build pipeline)
-  sessions/   Per-game working copies (auto-cleaned)
-```
-
-## Excluded From This MVP
-
-- AI-driven Problem Setter and build pipeline (`routes/problems.js`, `routes/reviews.js`, `pipeline/*`).
-- Frontend pages: `ProblemSetterPage`, `PipelinePage`, `ReviewPage`.
-- Legacy `dockerode`-based sandbox path. All challenges must ship a `verifiedDir`.
+V0.2 builds on V0.1. You can't evaluate fairly on challenges that aren't trustworthy.
