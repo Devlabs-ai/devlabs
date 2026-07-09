@@ -6,6 +6,22 @@ This documents the setup path we validated: **Colima + k3s** (CLI-only, headless
 
 ---
 
+## Current status
+
+| Item | Status |
+| ---- | ------ |
+| `devlabs` user + SSH from MacBook | Done |
+| Disk cleaned (~80 GB free) | Done |
+| Colima + k3s on Mac Mini (manual start) | Done |
+| **Remote kubectl from MacBook (SSH tunnel)** | **Not yet achieved** |
+| **Colima auto-start after Mac Mini reboot** | **Not yet achieved** |
+| Devlabs platforms deployed | Not started |
+| UPS / DHCP reservation | Not started |
+
+Until remote kubectl works, run `kubectl` over SSH on the Mac Mini. After every reboot, run `colima start --cpu 4 --memory 8 --kubernetes` manually until auto-start is configured.
+
+---
+
 ## Goals
 
 | Goal | Notes |
@@ -175,27 +191,93 @@ grep server ~/.kube/config
 # Example: server: https://127.0.0.1:53067
 ```
 
-### Auto-start on boot (deferred)
+### Auto-start on boot — **not yet configured**
 
-LaunchAgent via `launchctl bootstrap gui/$UID` often fails over pure SSH (error 5 — no GUI session). Options for later:
+**Status:** Colima does **not** start automatically when the Mac Mini reboots. You must run `colima start` manually after each restart until one of the options below is implemented.
 
-| Method | Notes |
-| ------ | ----- |
-| **LaunchDaemon** (`/Library/LaunchDaemons/`) | Best for headless; needs sudo |
-| **crontab `@reboot`** | Simple; `sleep 60 && colima start ...` |
-| **LaunchAgent from Screen Sharing** | Load plist from GUI Terminal while logged in as `devlabs` |
+LaunchAgent via `launchctl bootstrap gui/$UID` failed over pure SSH (`Bootstrap failed: 5: Input/output error`) — LaunchAgents need an active GUI session.
 
-Manual start after reboot until auto-start is configured:
+| Method | Notes | Status |
+| ------ | ----- | ------ |
+| **LaunchDaemon** (`/Library/LaunchDaemons/`) | Best for headless; needs sudo | Recommended next |
+| **crontab `@reboot`** | Simple; no sudo | Good fallback |
+| **LaunchAgent from Screen Sharing** | Load plist from GUI Terminal as `devlabs` | Optional |
+
+**Manual start after every reboot (current workaround):**
 
 ```bash
+ssh devlabs@192.168.1.3
 colima start --cpu 4 --memory 8 --kubernetes
+colima status
+kubectl get nodes
+```
+
+#### Option A — LaunchDaemon (headless, needs admin)
+
+On Mac Mini as `devlabs` (with sudo):
+
+```bash
+COLIMA_PATH=$(which colima)
+
+sudo tee /Library/LaunchDaemons/dev.colima.start.plist > /dev/null << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.colima.start</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>${COLIMA_PATH} start --cpu 4 --memory 8 --kubernetes || ${COLIMA_PATH} start --cpu 4 --memory 8 --kubernetes</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>UserName</key>
+  <string>devlabs</string>
+  <key>StandardOutPath</key>
+  <string>/Users/devlabs/Library/Logs/colima-start.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/devlabs/Library/Logs/colima-start.err</string>
+</dict>
+</plist>
+EOF
+
+sudo chown root:wheel /Library/LaunchDaemons/dev.colima.start.plist
+sudo chmod 644 /Library/LaunchDaemons/dev.colima.start.plist
+sudo launchctl bootstrap system /Library/LaunchDaemons/dev.colima.start.plist
+```
+
+Verify after reboot: `tail ~/Library/Logs/colima-start.log` and `colima status`.
+
+#### Option B — crontab (no sudo)
+
+```bash
+crontab -e
+```
+
+Add (adjust path from `which colima`):
+
+```cron
+@reboot sleep 60 && /opt/homebrew/bin/colima start --cpu 4 --memory 8 --kubernetes
 ```
 
 ---
 
-## Remote kubectl from MacBook
+## Remote kubectl from MacBook — **not yet achieved**
 
-The Kubernetes API listens on **localhost on the Mac Mini**, not on the LAN. Use an SSH tunnel.
+**Status:** Documented below as the **target setup**. Cluster works locally on the Mac Mini (`ssh devlabs@192.168.1.3` → `kubectl get nodes`), but remote control from the MacBook via SSH tunnel is not verified yet.
+
+**Workaround until tunnel works:** run all `kubectl` commands over SSH on the Mac Mini:
+
+```bash
+ssh devlabs@192.168.1.3
+kubectl get nodes
+kubectl get pods -A
+```
+
+The Kubernetes API listens on **localhost on the Mac Mini**, not on the LAN. Remote access requires an SSH tunnel.
 
 ### 1. Install kubectl on MacBook
 
@@ -244,7 +326,7 @@ server: https://127.0.0.1:53067
 
 Keep `certificate-authority-data` and other auth fields unchanged.
 
-### 4. Two-terminal workflow
+### 4. Two-terminal workflow (verify when completing this step)
 
 **Terminal 1 (MacBook)** — keep open:
 
@@ -260,15 +342,22 @@ kubectl get nodes
 # or: k get nodes
 ```
 
+**Verification checklist (mark done when all pass):**
+
+- [ ] `ssh devlabs-mini` connects without error
+- [ ] `curl -k https://127.0.0.1:53067/version` returns JSON (Terminal 2, tunnel open)
+- [ ] `kubectl get nodes` shows `Ready` (Terminal 2)
+- [ ] `alias k='kubectl --kubeconfig=~/.kube/devlabs-mini-config'` in `~/.zshrc` (optional)
+
 Test tunnel:
 
 ```bash
 curl -k https://127.0.0.1:53067/version
 ```
 
-### Alternative: kubectl only over SSH
+### Alternative: kubectl only over SSH (current approach)
 
-No MacBook install or tunnel — run on the Mac Mini:
+No MacBook tunnel required — run on the Mac Mini:
 
 ```bash
 ssh devlabs@192.168.1.3
@@ -393,12 +482,13 @@ open -a OrbStack   # often needs Screen Sharing once
 ```text
 MacBook (dev machine)
     │
-    │ SSH (22) + kubectl tunnel (e.g. 53067)
+    │ SSH (22) — working
+    │ kubectl tunnel (53067) — not yet configured
     ▼
 Mac Mini M4 — devlabs@192.168.1.3
     │
     ├── macOS 26.x
-    ├── Colima VM (4 CPU, 8 GB RAM)
+    ├── Colima VM (4 CPU, 8 GB RAM) — manual start after reboot
     │     ├── Docker / Compose  →  make platforms-up
     │     └── k3s (Kubernetes)
     │
@@ -413,19 +503,25 @@ Mac Mini M4 — devlabs@192.168.1.3
 
 ## Checklist
 
-### Done (reference setup)
+### Done
 
 - [x] `devlabs` user + SSH from MacBook
 - [x] Disk cleaned (~80 GB free)
 - [x] Resource audit (16 GB RAM, M4, 10 cores)
 - [x] OrbStack abandoned; Colima chosen
-- [x] Kubernetes cluster up on Mac Mini
-- [x] Remote kubectl via SSH tunnel (port 53067)
-- [x] `kubectl` alias `k` on MacBook
+- [x] Kubernetes cluster up on Mac Mini (manual `colima start`)
+- [x] `kubectl` works locally on Mac Mini over SSH
+
+### Not yet done
+
+- [ ] **Remote kubectl from MacBook** (SSH tunnel + kubeconfig on MacBook; port 53067)
+- [ ] **`kubectl` alias `k` on MacBook** (optional, after remote kubectl works)
+- [ ] **Colima auto-start on Mac Mini reboot** (LaunchDaemon or crontab)
 
 ### Next steps
 
-- [ ] Auto-start Colima on boot (LaunchDaemon or crontab)
+- [ ] Complete remote kubectl verification checklist (see above)
+- [ ] Configure Colima auto-start (LaunchDaemon recommended)
 - [ ] UPS + graceful shutdown
 - [ ] DHCP reservation for `192.168.1.3`
 - [ ] Deploy platforms: Compose (`make platforms-up`) or k8s Helm
