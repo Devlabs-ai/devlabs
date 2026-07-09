@@ -15,7 +15,7 @@ This documents the setup path we validated: **Colima + k3s** (CLI-only, headless
 | Colima + k3s on Mac Mini (manual start) | Done |
 | **Remote kubectl from MacBook (SSH tunnel)** | **Not yet achieved** |
 | **Colima auto-start after Mac Mini reboot** | **Not yet achieved** |
-| Devlabs platforms deployed | Not started |
+| Devlabs platforms deployed | Spark Platform (Operator + portal) deployed |
 | UPS / DHCP reservation | Not started |
 
 Until remote kubectl works, run `kubectl` over SSH on the Mac Mini. After every reboot, run `colima start --cpu 4 --memory 8 --kubernetes` manually until auto-start is configured.
@@ -560,3 +560,19 @@ kubectl top nodes
 
 - [Host requirements (Linux / EC2)](host-requirements.md) — production EC2 tuning
 - [Platforms README](../sandbox/platforms/README.md) — Compose layout and RAM caps
+- [Spark Platform on k8s](../deploy/spark-platform/README.md) — job portal, API, History Server
+
+---
+
+## Spark Platform (deployed)
+
+| URL | Purpose |
+|-----|---------|
+| http://192.168.1.3:30088 | Job portal (submit, status, logs) |
+| http://192.168.1.3:30080 | Spark History Server (completed jobs) |
+
+Deploy or upgrade from repo root on the Mac Mini:
+
+```bash
+MAC_MINI_IP=192.168.1.3 deploy/spark-platform/scripts/deploy.sh
+```
