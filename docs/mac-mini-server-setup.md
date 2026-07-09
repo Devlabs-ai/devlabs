@@ -560,7 +560,8 @@ kubectl top nodes
 
 - [Host requirements (Linux / EC2)](host-requirements.md) — production EC2 tuning
 - [Platforms README](../sandbox/platforms/README.md) — Compose layout and RAM caps
-- [Spark Platform on k8s](../deploy/spark-platform/README.md) — job portal, API, History Server
+- [Spark Platform on k8s](spark-platform-kubernetes.md) — full implementation guide (Operator, API, UI, History Server)
+- [Spark Platform deploy README](../deploy/spark-platform/README.md) — quick deploy commands
 
 ---
 
