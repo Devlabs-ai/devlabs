@@ -15,10 +15,12 @@ This documents the setup path we validated: **Colima + k3s** (CLI-only, headless
 | Colima + k3s on Mac Mini (manual start) | Done |
 | **Remote kubectl from MacBook (SSH tunnel)** | **Not yet achieved** |
 | **Colima auto-start after Mac Mini reboot** | **Not yet achieved** |
-| Devlabs platforms deployed | Spark Platform (Operator + portal) deployed |
+| Devlabs platforms deployed | Spark + MinIO + Airflow + Postgres Platform deployed |
 | UPS / DHCP reservation | Not started |
 
-Until remote kubectl works, run `kubectl` over SSH on the Mac Mini. After every reboot, run `colima start --cpu 4 --memory 8 --kubernetes` manually until auto-start is configured.
+Until remote kubectl works, run `kubectl` over SSH on the Mac Mini. After every reboot, run `colima start --cpu 6 --memory 12 --kubernetes` manually until auto-start is configured.
+
+**Flaky browser URLs (“can’t be reached”)?** See [Platform reliability on Mac Mini](../platforms/devlabs-dashboard/docs/mac-mini-platform-reliability.md) — this is usually **host OOM / pod restarts**, not internet or DNS.
 
 ---
 
@@ -398,6 +400,27 @@ Optional terminal UI: `brew install k9s`
 
 ## Devlabs platforms
 
+Platform Kubernetes deploy trees live in **separate git repos** under the `devlabs-ai` org folder (sibling to `devlabs/`). This repo keeps Compose stacks under `sandbox/platforms/` for local dev.
+
+```text
+~/Documents/devlabs-ai/          # org folder — not a git repo
+├── devlabs/                     # this repo
+└── platforms/
+    ├── spark-platform/
+    ├── airflow-platform/
+    ├── minio-platform/
+    ├── postgres-platform/
+    └── devlabs-dashboard/
+```
+
+**Deploy from MacBook** (example — Spark):
+
+```bash
+cd ~/Documents/devlabs-ai
+rsync -az platforms/spark-platform/ devlabs-mini:~/spark-platform/
+ssh devlabs-mini 'bash -lc "MAC_MINI_IP=192.168.1.3 ~/spark-platform/scripts/deploy.sh"'
+```
+
 ### Compose path (matches repo today)
 
 Platforms live under `sandbox/platforms/`. Start all four stacks on a shared Docker network:
@@ -560,8 +583,15 @@ kubectl top nodes
 
 - [Host requirements (Linux / EC2)](host-requirements.md) — production EC2 tuning
 - [Platforms README](../sandbox/platforms/README.md) — Compose layout and RAM caps
-- [Spark Platform on k8s](spark-platform-kubernetes.md) — full implementation guide (Operator, API, UI, History Server)
-- [Spark Platform deploy README](../deploy/spark-platform/README.md) — quick deploy commands
+- [Spark Platform on k8s](../platforms/spark-platform/docs/spark-platform-kubernetes.md) — full implementation guide (Operator, API, UI, History Server)
+- [Spark Platform README](../platforms/spark-platform/README.md) — quick deploy commands
+- [MinIO Platform on k8s](../platforms/minio-platform/docs/minio-platform-kubernetes.md) — S3-compatible object storage
+- [MinIO Platform README](../platforms/minio-platform/README.md) — quick deploy commands
+- [Airflow Platform on k8s](../platforms/airflow-platform/docs/airflow-platform-kubernetes.md) — Airflow as a service (portal + scheduler)
+- [Airflow Platform README](../platforms/airflow-platform/README.md) — quick deploy commands
+- [PostgreSQL Platform on k8s](../platforms/postgres-platform/docs/postgres-platform-kubernetes.md) — shared Postgres (official image, no Bitnami)
+- [PostgreSQL Platform README](../platforms/postgres-platform/README.md) — quick deploy commands
+- [Platform reliability (flaky URLs, OOM)](../platforms/devlabs-dashboard/docs/mac-mini-platform-reliability.md) — why LAN URLs fail intermittently on 16 GB
 
 ---
 
@@ -572,8 +602,75 @@ kubectl top nodes
 | http://192.168.1.3:30088 | Job portal (submit, status, logs) |
 | http://192.168.1.3:30080 | Spark History Server (completed jobs) |
 
-Deploy or upgrade from repo root on the Mac Mini:
+Deploy or upgrade on the Mac Mini (after `rsync` to `~/spark-platform/`):
 
 ```bash
-MAC_MINI_IP=192.168.1.3 deploy/spark-platform/scripts/deploy.sh
+MAC_MINI_IP=192.168.1.3 ~/spark-platform/scripts/deploy.sh
 ```
+
+---
+
+## MinIO Platform (deployed)
+
+| URL | Purpose |
+|-----|---------|
+| http://192.168.1.3:30900 | S3 API |
+| http://192.168.1.3:30901 | MinIO web console |
+
+Deploy or upgrade on the Mac Mini:
+
+```bash
+MAC_MINI_IP=192.168.1.3 ~/minio-platform/scripts/deploy.sh
+```
+
+Default buckets: `spark-logs`, `devlabs-data`. See [MinIO guide](../platforms/minio-platform/docs/minio-platform-kubernetes.md) for credentials and `mc` examples.
+
+---
+
+## Airflow Platform (deployed)
+
+| URL | Purpose |
+|-----|---------|
+| http://192.168.1.3:30089 | Job portal (trigger DAGs, runs, task logs) |
+| http://192.168.1.3:30081 | Native Airflow UI (`admin` / `admin`) |
+
+Deploy or upgrade on the Mac Mini:
+
+```bash
+MAC_MINI_IP=192.168.1.3 ~/airflow-platform/scripts/deploy.sh
+```
+
+Sample DAGs: `hello_platform`, `etl_orders_sample`. First install takes 10–15 minutes.
+
+---
+
+## PostgreSQL Platform
+
+| URL / connection | Purpose |
+|------------------|---------|
+| `postgresql://devlabs@192.168.1.3:30432/devlabs` | LAN access (NodePort **30432**) |
+| `postgres.postgres.svc.cluster.local:5432` | In-cluster |
+
+Deploy or upgrade on the Mac Mini:
+
+```bash
+MAC_MINI_IP=192.168.1.3 ~/postgres-platform/scripts/deploy.sh
+```
+
+Uses official **`postgres:16-alpine`** — no Bitnami. Default password: `devlabs-postgres-change-me`. See [PostgreSQL guide](../platforms/postgres-platform/docs/postgres-platform-kubernetes.md) for bootstrap databases and `psql` examples.
+
+---
+
+## Devlabs Platform Dashboard
+
+| URL | Purpose |
+|-----|---------|
+| http://192.168.1.3:30090 | Unified platform status, component health, CPU/RAM allocations |
+
+Deploy or upgrade:
+
+```bash
+MAC_MINI_IP=192.168.1.3 ~/devlabs-dashboard/scripts/deploy.sh
+```
+
+Monitors Spark, Airflow, MinIO, and PostgreSQL platforms. See [dashboard README](../platforms/devlabs-dashboard/README.md).

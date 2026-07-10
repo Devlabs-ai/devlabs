@@ -13,5 +13,6 @@ build/
 # Ephemeral sandbox state
 sandbox/builds/*/
 sandbox/sessions/*/
+sandbox/platforms/.stack/
 !sandbox/builds/.gitkeep
 !sandbox/sessions/.gitkeep

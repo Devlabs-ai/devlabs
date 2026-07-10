@@ -236,6 +236,10 @@ Without keys, Play still works; Authoring chat/build and semantic memory retriev
 
 Elasticsearch and OpenSearch challenges require `vm.max_map_count=262144` on the Linux host. Why, which challenges are affected, and how to verify: **[docs/host-requirements.md](../docs/host-requirements.md)**.
 
+## Mac Mini Kubernetes platforms
+
+Managed platform deploy trees live in separate repos under the `devlabs-ai` org folder (sibling to this repo). See **[../platforms/README.md](../platforms/README.md)** and **[docs/mac-mini-server-setup.md](../docs/mac-mini-server-setup.md)**.
+
 ## Known gaps (before go-live)
 
 1. **Default admin password** (`admin` / `admin123`) — rotate before sharing the public IP.
