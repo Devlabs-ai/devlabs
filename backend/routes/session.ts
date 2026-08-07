@@ -189,7 +189,6 @@ router.post('/start', requireSessionAccess, async (req: ExpressRequest, res: Exp
       status: session.status,
       terminalWsUrl: `ws://${BACKEND_HOST}/ws/terminal?sessionId=${session.id}`,
       metricsWsUrl: `ws://${BACKEND_HOST}/ws/metrics?sessionId=${session.id}`,
-      agentObserverWsUrl: `ws://${BACKEND_HOST}/ws/agent-observer?sessionId=${session.id}`,
       services: pub.services,
       terminalService: pub.terminalService,
       challenge: pub.challenge,

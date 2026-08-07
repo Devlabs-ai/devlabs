@@ -5,7 +5,6 @@ import type { Redis as RedisClient } from 'ioredis';
 const Redis = require('ioredis');
 
 const RUNTIME_TTL_S = 4 * 60 * 60;
-const BUILD_TTL_S = 24 * 60 * 60;
 
 let client: RedisClient | null = null;
 let healthy = false;
@@ -105,7 +104,7 @@ async function sHasPort(port: number | string): Promise<boolean> {
 
 async function hSetPort(sessionId: string, field: string, port: number | string): Promise<void> {
   await safe(() => client!.hset(`ports:allocated:${sessionId}`, field, String(port)));
-  await safe(() => client!.expire(`ports:allocated:${sessionId}`, BUILD_TTL_S));
+  await safe(() => client!.expire(`ports:allocated:${sessionId}`, RUNTIME_TTL_S));
 }
 
 async function hGetAllPorts(sessionId: string): Promise<Record<string, string> | null> {
@@ -131,50 +130,6 @@ async function sHasPortIn(pool: string, port: number | string): Promise<boolean>
   return r === 1;
 }
 
-// --- build pipeline helpers ----------------------------------------------
-
-async function setBuildStatus(buildId: string, status: string): Promise<string | null> {
-  return safe(() => client!.set(`build:status:${buildId}`, status, 'EX', BUILD_TTL_S));
-}
-
-async function getBuildStatus(buildId: string): Promise<string | null> {
-  return safe(() => client!.get(`build:status:${buildId}`));
-}
-
-async function setBuildPhase(buildId: string, phase: string): Promise<string | null> {
-  return safe(() => client!.set(`build:phase:${buildId}`, phase, 'EX', BUILD_TTL_S));
-}
-
-async function getBuildPhase(buildId: string): Promise<string | null> {
-  return safe(() => client!.get(`build:phase:${buildId}`));
-}
-
-async function setBuildAttempt(buildId: string, attempt: number): Promise<string | null> {
-  return safe(() => client!.set(`build:attempt:${buildId}`, String(attempt), 'EX', BUILD_TTL_S));
-}
-
-async function getBuildAttempt(buildId: string): Promise<number | null> {
-  const v = await safe(() => client!.get(`build:attempt:${buildId}`));
-  return v ? parseInt(v, 10) : null;
-}
-
-async function setBuildDir(buildId: string, dir: string): Promise<string | null> {
-  return safe(() => client!.set(`build:dir:${buildId}`, dir, 'EX', BUILD_TTL_S));
-}
-
-async function getBuildDir(buildId: string): Promise<string | null> {
-  return safe(() => client!.get(`build:dir:${buildId}`));
-}
-
-async function pushBuildLog(buildId: string, line: string): Promise<void> {
-  await safe(() => client!.rpush(`build:logs:${buildId}`, line));
-  await safe(() => client!.expire(`build:logs:${buildId}`, BUILD_TTL_S));
-}
-
-async function getBuildLogs(buildId: string, start = 0, end = -1): Promise<string[] | null> {
-  return safe(() => client!.lrange(`build:logs:${buildId}`, start, end));
-}
-
 module.exports = {
   client: (): RedisClient | null => client,
   isReady,
@@ -190,14 +145,4 @@ module.exports = {
   hSetPort,
   hGetAllPorts,
   hDelSessionPorts,
-  setBuildStatus,
-  getBuildStatus,
-  setBuildPhase,
-  getBuildPhase,
-  setBuildAttempt,
-  getBuildAttempt,
-  setBuildDir,
-  getBuildDir,
-  pushBuildLog,
-  getBuildLogs,
 };

@@ -18,7 +18,7 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 .PHONY: help install infra-up infra-down infra-reset backend frontend dev stop \
-        build clean reset seed-catalogue seed-catalogue-if-empty seed-catalogue-dry \
+        build clean reset \
         seed-dev-tenants seed-dev-tenants-dry \
         prod-build prod-pull prod-up prod-deploy prod-restart prod-down prod-logs
 
@@ -40,9 +40,8 @@ help:
 	@printf "  %-14s %s\n" "prod-restart"  "pull latest images + recreate containers"
 	@printf "  %-14s %s\n" "prod-down"     "stop production compose stack"
 	@printf "  %-14s %s\n" "prod-logs"     "tail production compose logs"
-	@printf "  %-22s %s\n" "seed-catalogue"   "seed catalogue table from seeds/catalogue.js (insert-only)"
 	@printf "  %-22s %s\n" "seed-dev-tenants" "seed dev company/users when companies is empty"
-	@printf "  %-14s %s\n" "clean"       "remove node_modules, dist, ephemeral sandbox dirs"
+	@printf "  %-14s %s\n" "clean"       "remove node_modules and frontend dist"
 	@printf "  %-14s %s\n" "reset"       "clean + infra-reset (full wipe)"
 	@printf "\n"
 
@@ -144,23 +143,6 @@ prod-logs:
 	docker compose -f docker-compose.prod.yml logs -f
 
 # ---------------------------------------------------------------------------
-# catalogue seeding
-# ---------------------------------------------------------------------------
-#
-# Seeds the catalogue table from backend/pipeline/catalogue/seeds/catalogue.js.
-# Insert-only unless the table is empty (use --if-empty on boot).
-# ARGS=... (e.g. `make seed-catalogue ARGS="--category=postgres"`).
-
-seed-catalogue:
-	cd backend && node scripts/seedCatalogue.js $(ARGS)
-
-seed-catalogue-if-empty:
-	cd backend && node scripts/seedCatalogue.js --if-empty $(ARGS)
-
-seed-catalogue-dry:
-	cd backend && node scripts/seedCatalogue.js --dry-run $(ARGS)
-
-# ---------------------------------------------------------------------------
 # dev tenant seeding (companies + users for local OTP login)
 # ---------------------------------------------------------------------------
 
@@ -176,9 +158,6 @@ seed-dev-tenants-dry:
 
 clean:
 	@echo "==> removing node_modules + build output"
-	rm -rf backend/node_modules frontend/node_modules frontend/dist
-	@echo "==> removing ephemeral sandbox dirs"
-	find sandbox/builds   -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf {} + 2>/dev/null || true
-	find sandbox/sessions -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf {} + 2>/dev/null || true
+	rm -rf backend/node_modules backend/dist frontend/node_modules frontend/dist
 
 reset: clean infra-reset

@@ -1,116 +1,44 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import ProblemStatement from './ProblemStatement';
 import TerminalWorkspace from './TerminalWorkspace';
 import CodeEditor from './CodeEditor';
 import BrowserTab from './BrowserTab';
-import MetricsDashboard, { useMetricsState } from './MetricsDashboard';
-import type { ChallengePublic, ChallengeFull, ActiveSession, MetricsSeriesPoint } from '../types/domain';
-
-interface ExternalMetrics {
-  series?: MetricsSeriesPoint[];
-  latest?: MetricsSeriesPoint | null;
-  recovered?: boolean;
-}
-
-interface UseMetricsStreamResult {
-  series: MetricsSeriesPoint[];
-  latest: MetricsSeriesPoint | null;
-  recovered: boolean;
-}
-
-function useMetricsStream(
-  wsUrl: string | null | undefined,
-  external: ExternalMetrics | null | undefined,
-): UseMetricsStreamResult {
-  const internal = useMetricsState();
-  const useExternal = !!(external && (external.series != null || external.latest != null));
-
-  useEffect(() => {
-    if (useExternal || !wsUrl) return undefined;
-    const ws = new WebSocket(wsUrl);
-    ws.onmessage = (ev: MessageEvent): void => {
-      try { internal.handleMessage(JSON.parse(ev.data as string)); } catch (_e) { /* ignore */ }
-    };
-    return () => { try { ws.close(); } catch (_e) { /* noop */ } };
-  }, [wsUrl, useExternal, internal.handleMessage]);
-
-  if (useExternal) {
-    return {
-      series: external?.series || [],
-      latest: external?.latest ?? null,
-      recovered: external?.recovered ?? false,
-    };
-  }
-  return {
-    series: internal.series,
-    latest: internal.latest,
-    recovered: internal.recovered,
-  };
-}
+import type { ChallengePublic, ChallengeFull, ActiveSession } from '../types/domain';
 
 export interface SandboxWorkspaceProps {
   challenge: ChallengePublic | ChallengeFull | null | undefined;
   session: ActiveSession | null;
-  mode?: 'play' | 'review' | string;
-  metrics?: ExternalMetrics | null;
   onClose?: () => void;
   closing?: boolean;
 }
 
-/**
- * Shared Play / Review sandbox layout: brief, metrics, terminal, editor, browser.
- */
+/** Play compose sandbox: brief, terminal, editor, browser. */
 export default function SandboxWorkspace({
   challenge,
   session,
-  mode = 'play',
-  metrics: externalMetrics,
   onClose,
   closing,
 }: SandboxWorkspaceProps): JSX.Element | null {
   const [rightTab, setRightTab] = useState<string>('terminal');
-  const { series, latest, recovered } = useMetricsStream(session?.metricsWsUrl, externalMetrics);
 
   if (!session) return null;
-
-  const isReview = mode === 'review';
 
   return (
     <div className="workspace workspace-2col sandbox-workspace">
       <div className="col">
-        <div className={`panel${isReview ? '' : ' sandbox-brief-panel--solo'}`} style={{ flex: 1 }}>
+        <div className="panel sandbox-brief-panel--solo" style={{ flex: 1 }}>
           <div className="panel-header">
             <div className="title">
               <span className="icon">◆</span> Inc Brief
             </div>
             <span className="meta">
-              {isReview && <span className="pill review-mode-pill">Review</span>}
-              {challenge?.difficulty && (
-                <span className={isReview ? 'review-mode-difficulty' : undefined}>
-                  {challenge.difficulty}
-                </span>
-              )}
+              {challenge?.difficulty && <span>{challenge.difficulty}</span>}
             </span>
           </div>
           <div className="panel-body">
             <ProblemStatement challenge={challenge} />
           </div>
         </div>
-        {isReview && (
-          <div className="panel sandbox-metrics-panel">
-            <div className="panel-header">
-              <div className="title">Metrics</div>
-            </div>
-            <div className="panel-body">
-              <MetricsDashboard
-                series={series}
-                latest={latest}
-                recovered={recovered}
-                portMap={session.portMap}
-              />
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="col col-main">
@@ -152,11 +80,11 @@ export default function SandboxWorkspace({
                   {' · '}
                   <button
                     type="button"
-                    className="ghost sm review-sandbox-back"
+                    className="ghost sm"
                     onClick={onClose}
                     disabled={closing}
                   >
-                    {closing ? 'Closing…' : '← Back to queue'}
+                    {closing ? 'Closing…' : '← Back'}
                   </button>
                 </>
               )}

@@ -5,7 +5,6 @@ import { getAuthHeader } from './authApi';
 interface RawSessionPayload {
   terminalWsUrl?: string | null;
   metricsWsUrl?: string | null;
-  agentObserverWsUrl?: string | null;
   [key: string]: unknown;
 }
 
@@ -58,7 +57,6 @@ function normalize(payload: RawSessionPayload): RawSessionPayload {
     ...payload,
     terminalWsUrl: rewriteWs(payload.terminalWsUrl),
     metricsWsUrl: rewriteWs(payload.metricsWsUrl),
-    agentObserverWsUrl: rewriteWs(payload.agentObserverWsUrl),
   };
 }
 

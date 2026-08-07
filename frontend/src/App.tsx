@@ -9,9 +9,6 @@ import {
 } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
 import PlayPage from './pages/PlayPage';
-import AuthoringPage from './pages/AuthoringPage';
-import ReviewRoutePage from './pages/ReviewRoutePage';
-import ReviewSandboxPage from './pages/ReviewSandboxPage';
 import ProfilePage from './pages/ProfilePage';
 import DbExplorerPage from './pages/DbExplorerPage';
 import AppLayout from './layouts/AppLayout';
@@ -339,13 +336,6 @@ export default function App(): React.JSX.Element {
     }
   }, [authMode, location.pathname, navigate]);
 
-  const refreshChallenges = async (): Promise<void> => {
-    try {
-      const list = await fetchChallenges();
-      setChallenges(list);
-    } catch (_e) { /* noop */ }
-  };
-
   const appState = useMemo<AppState>(() => ({
     authMode,
     currentUser,
@@ -363,7 +353,6 @@ export default function App(): React.JSX.Element {
     onBackToLibrary: handleBackToLibrary,
     onEnd: handleEnd,
     onLogout: handleLogout,
-    onPromoted: refreshChallenges,
   }), [
     authMode,
     currentUser,
@@ -400,8 +389,6 @@ export default function App(): React.JSX.Element {
     );
   }
 
-  const isInterviewer = authMode === 'interviewer';
-
   return (
     <AppStateProvider value={appState}>
       <Routes>
@@ -410,23 +397,9 @@ export default function App(): React.JSX.Element {
           <Route path="play" element={<PlayPage />} />
           <Route path="play/:domainId" element={<PlayPage />} />
           <Route path="play/:domainId/:panelId" element={<PlayPage />} />
-          {isInterviewer ? (
-            <>
-              <Route path="authoring" element={<AuthoringPage />} />
-              <Route path="authoring/:draftId" element={<AuthoringPage />} />
-              <Route path="authoring/:draftId/:tab" element={<AuthoringPage />} />
-              <Route path="review/:sessionId/sandbox" element={<ReviewSandboxPage />} />
-              <Route path="review" element={<ReviewRoutePage />} />
-              <Route path="profile" element={<ProfilePage />} />
-              {import.meta.env.DEV && (
-                <Route path="dev/db" element={<DbExplorerPage />} />
-              )}
-            </>
-          ) : (
-            <>
-              <Route path="authoring" element={<Navigate to="/play" replace />} />
-              <Route path="authoring/*" element={<Navigate to="/play" replace />} />
-            </>
+          <Route path="profile" element={<ProfilePage />} />
+          {import.meta.env.DEV && (
+            <Route path="dev/db" element={<DbExplorerPage />} />
           )}
         </Route>
         <Route path="*" element={<Navigate to="/play" replace />} />

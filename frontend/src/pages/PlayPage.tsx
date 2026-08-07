@@ -313,7 +313,6 @@ export default function PlayPage(): JSX.Element | null {
     }
     return (
       <SandboxWorkspace
-        mode="play"
         challenge={activeChallenge}
         session={activeSession}
       />

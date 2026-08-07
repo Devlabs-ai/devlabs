@@ -121,9 +121,8 @@ function AppLayoutInner(): React.JSX.Element {
   } = useAppState();
 
   const location = useLocation();
-  const reviewSandboxOpen = /^\/review\/[^/]+\/sandbox/.test(location.pathname);
   const challengeOpen = playState === 'active' && Boolean(activeSession);
-  const showNav = authMode === 'interviewer' && playState !== 'active' && !reviewSandboxOpen;
+  const showNav = authMode === 'interviewer' && playState !== 'active';
 
   return (
     <div className={`app${challengeOpen ? ' app--challenge' : ''}`}>
@@ -155,16 +154,6 @@ function AppLayoutInner(): React.JSX.Element {
                   >
                     Play
                   </NavLink>
-                  <NavLink to="/authoring" className={({ isActive }) => `topnav-pill${isActive ? ' active' : ''}`}>Author</NavLink>
-                  <NavLink
-                    to="/review"
-                    className={({ isActive }) => {
-                      const onReview = isActive || location.pathname.startsWith('/review/');
-                      return `topnav-pill${onReview ? ' active' : ''}`;
-                    }}
-                  >
-                    Review
-                  </NavLink>
 
                   <span className="topnav-sep" />
 
@@ -184,7 +173,7 @@ function AppLayoutInner(): React.JSX.Element {
         </div>
       )}
 
-      <div className={`app-body${reviewSandboxOpen ? ' app-body--review-sandbox' : ''}${challengeOpen ? ' app-body--challenge' : ''}`}>
+      <div className={`app-body${challengeOpen ? ' app-body--challenge' : ''}`}>
         <Outlet />
       </div>
     </div>

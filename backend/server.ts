@@ -7,32 +7,23 @@ import type { Socket } from 'net';
 require('dotenv').config({ override: true });
 
 const http = require('http');
-const path = require('path');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 
 const { runMigrations } = require('./db/migrate');
-const { seedCatalogueIfEmpty } = require('./pipeline/catalogue/seeds/runCatalogueSeed');
 const sessionStore = require('./db/sessionStore');
-const draftStore = require('./pipeline/stores/problemDraftStore');
 const { loadChallengesFromDB, seedChallengesFromDisk } = require('./challenges/loader');
 const { seedManualCatalog } = require('./challenges/seedManualCatalog');
-const { maybeArchiveLegacyChallengesAndPurgeDrafts } = require('./boot/maintenance');
 const { VERIFIED_ROOT } = require('./sandbox/paths');
 
 const contactRoutes = require('./routes/contact');
 const authRoutes = require('./routes/auth');
 const challengeRoutes = require('./routes/challenges');
 const sessionRoutes = require('./routes/session');
-const problemRoutes = require('./routes/problems');
-const sparkAgentRoutes = require('./routes/sparkAgents');
-const reviewRoutes = require('./routes/reviews');
-const memoryRoutes = require('./routes/memories');
 const devDbRoutes = require('./routes/devDb');
 
 const terminalService = require('./observability/terminalService');
 const metricsService = require('./observability/metricsService');
-const agentObserverService = require('./observability/agentObserverService');
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
 
@@ -50,10 +41,6 @@ app.use('/api/contact', contactRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/challenges', challengeRoutes);
 app.use('/api/session', sessionRoutes);
-app.use('/api/problems', problemRoutes);
-app.use('/api/spark/agents', sparkAgentRoutes);
-app.use('/api/reviews', reviewRoutes);
-app.use('/api/memories', memoryRoutes);
 app.use('/api/dev/db', devDbRoutes);
 
 app.use((err: Error & { status?: number }, _req: ExpressRequest, res: ExpressResponse, _next: ExpressNextFunction) => {
@@ -77,7 +64,6 @@ server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
   const handlers: Record<string, (ws: unknown, req: IncomingMessage) => void> = {
     '/ws/terminal': terminalService.handleConnection,
     '/ws/metrics': metricsService.handleConnection,
-    '/ws/agent-observer': agentObserverService.handleConnection,
   };
 
   const handler = handlers[pathname];
@@ -103,19 +89,8 @@ async function start(): Promise<void> {
     console.warn('[boot] spark workspace cleanup skipped:', (e as Error).message);
   }
 
-  const catalogueSeeded = await seedCatalogueIfEmpty({ onLog: (msg: string) => console.log(`[boot] ${msg}`) });
-  if (catalogueSeeded > 0) console.log(`[boot] catalogue seeded ${catalogueSeeded} entries`);
-
   console.log('[boot] restoring active sessions from db...');
   await sessionStore.restoreFromDB();
-
-  console.log('[boot] one-time legacy archive + draft purge (if needed)...');
-  await maybeArchiveLegacyChallengesAndPurgeDrafts().catch((e: Error) => {
-    console.warn('[boot] legacy maintenance failed:', e.message);
-  });
-
-  console.log('[boot] restoring draft sessions from db...');
-  await draftStore.restoreFromDB().catch((e: Error) => console.warn('[boot] draftStore restore failed:', e.message));
 
   console.log('[boot] disk challenge seed (no-op under catalog v2)...');
   await seedChallengesFromDisk(VERIFIED_ROOT);

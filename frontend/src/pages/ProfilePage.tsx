@@ -16,7 +16,7 @@ export default function ProfilePage(): JSX.Element {
       <section className="profile-evals-section">
         <h2 className="profile-section-title">Account</h2>
         <p className="profile-section-lead">
-          Signed-in account used for Play and authoring.
+          Signed-in account used for Play.
         </p>
         <dl className="profile-account-dl">
           <div>

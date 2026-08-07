@@ -36,8 +36,6 @@ Challenges that include **Elasticsearch** or **OpenSearch** services will fail o
 max virtual memory areas vm.max_map_count [65530] is too low, increase to at least [262144]
 ```
 
-The build pipeline’s catalogue handbook documents the same requirement for OpenSearch images (`backend/pipeline/catalogue/seeds/catalogue.js`).
-
 Challenges that use only Postgres, Redis, Kafka, nginx, etc. **do not** need this setting. We still document and apply it on deploy hosts so **any** catalog challenge can run without silent failures when someone picks a search-engine scenario.
 
 ### Apply on Amazon Linux 2023 (persistent)
@@ -62,7 +60,6 @@ sysctl vm.max_map_count
 | -------- | ------------------- |
 | Play **broken-postgres**, Kafka-only, nginx, etc. | Usually works |
 | Session with **Elasticsearch** or **OpenSearch** service | Container fails or stays unhealthy |
-| Authoring build that promotes an ES/OpenSearch stack | Build validation may fail |
 
 ### References
 
@@ -76,7 +73,7 @@ sysctl vm.max_map_count
 | Topic | Notes |
 | ----- | ----- |
 | **Docker socket** | Backend container mounts `/var/run/docker.sock` so it can start per-session compose stacks. |
-| **Ports 6000–7999** | Build pipeline (`6000–6999`) and live sessions (`7000–7999`) bind on the host; security group must allow them if browsers reach sandbox HTTP endpoints remotely. |
-| **Disk** | Docker images and `sandbox/sessions` grow quickly; 40–80 GB root volume recommended on EC2. |
+| **Ports 7000–7999** | Live compose sessions bind on the host; security group must allow them if browsers reach sandbox HTTP endpoints remotely. |
+| **Disk** | Docker images and session workspaces grow quickly; 40–80 GB root volume recommended on EC2. |
 
 See [deploy/README.md](../deploy/README.md) for full EC2 setup steps.

@@ -1,6 +1,6 @@
 # Devlabs — AWS EC2 deployment (single host)
 
-Target: one **Amazon Linux 2023** EC2 instance running the **full platform** (Play, Authoring, Pipeline, Review, Memories) with **Postgres + Redis in Docker**, **no custom domain** (access via Elastic IP over HTTP).
+Target: one **Amazon Linux 2023** EC2 instance running **Play** with **Postgres + Redis in Docker**, **no custom domain** (access via Elastic IP over HTTP).
 
 ## Architecture
 
@@ -135,7 +135,7 @@ git checkout main
 
 # Secrets
 cp deploy/env.production.example .env
-nano .env   # set PGPASSWORD, JWT_SECRET, PUBLIC_HOST=<elastic-ip>, LLM keys
+nano .env   # set PGPASSWORD, JWT_SECRET, PUBLIC_HOST=<elastic-ip>
 
 # Frontend static build (still built on the VM — not in Docker Hub)
 cd frontend && npm ci && npm run build && cd ..
@@ -143,9 +143,6 @@ cd frontend && npm ci && npm run build && cd ..
 # Pull platform images (backend from Docker Hub; postgres/redis/nginx from Hub)
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
-
-# Optional: seed catalogue handbook (insert-only when empty)
-docker compose -f docker-compose.prod.yml exec backend node scripts/seedCatalogue.js --if-empty
 ```
 
 Pin a specific backend build (optional):
@@ -212,24 +209,11 @@ Ephemeral session dirs accumulate under the `devlabs_sandbox_sessions` volume. P
 docker system prune -f
 ```
 
-## 6. Full platform env
-
-Set in `.env` on the server:
-
-
-| Variable                                                 | Required for                        |
-| -------------------------------------------------------- | ----------------------------------- |
-| `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` + `LLM_PROVIDER` | Problem Setter chat, build pipeline |
-| `OPENAI_API_KEY`                                         | Lesson embeddings (Memories search) |
-
-
-Without keys, Play still works; Authoring chat/build and semantic memory retrieval are degraded (see root `README.md`).
-
-## 7. When you add a domain later
+## 6. When you add a domain later
 
 1. Point DNS A record → Elastic IP.
 2. Terminate TLS at nginx (Certbot on the instance, or ACM + ALB in front).
-3. Switch invites and bookmarks to `https://your.domain`.
+3. Switch bookmarks to `https://your.domain`.
 4. Browser WS rewrite already follows page scheme (`ws` / `wss`).
 
 ## Host tuning
@@ -244,16 +228,14 @@ Managed platform deploy trees live in separate repos under the `devlabs-ai` org 
 
 1. **Default admin password** (`admin` / `admin123`) — rotate before sharing the public IP.
 2. **No TLS** without a domain — fine for private demos; add HTTPS when DNS is ready.
-3. **Authoring build ports (6000–6999)** must be reachable if you validate builds from a remote browser.
+3. **Play session ports (7000–7999)** must be reachable if browsers hit compose sandbox HTTP endpoints remotely.
 
 ## Smoke test (after deploy)
 
 - `curl http://<PUBLIC_HOST>/health` → `{"ok":true,...}`
-- Login as interviewer → Challenge Library loads
-- Start **broken-postgres** → terminal connects, metrics stream
-- Authoring → Problem Setter responds (if LLM key set)
-- Create candidate invite → open link in incognito → session starts
-- End session → score returned, containers torn down
+- Login → Challenge Library loads
+- Start a Spark (or compose) challenge → workspace / terminal works
+- End session → containers / workspace torn down
 
 ---
 

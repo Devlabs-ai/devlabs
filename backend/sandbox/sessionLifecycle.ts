@@ -109,88 +109,6 @@ async function start({ challengeId }: StartOpts = {}): Promise<{ session: GameSe
   return { session, challenge };
 }
 
-function challengeFromBuilt(built: Record<string, unknown> | null | undefined, reviewSessionId: string): Record<string, unknown> {
-  const b = built || {};
-  const meta = (b.meta as Record<string, unknown>) || {};
-  return {
-    id: `preview:${reviewSessionId}`,
-    title: b.title || meta.name || 'Preview',
-    description: b.description || '',
-    difficulty: b.difficulty || meta.difficulty || null,
-    category: b.category || meta.category || null,
-    tags: b.tags || meta.tags || [],
-    problemStatement: b.problemStatement || null,
-    validationSpec: b.validationSpec || null,
-  };
-}
-
-interface StartPreviewOpts {
-  buildDir: string;
-  builtChallenge?: Record<string, unknown> | null;
-  reviewSessionId: string;
-}
-
-/** Spin a candidate-style sandbox from pending build artefacts (review gate). */
-async function startPreview({ buildDir, builtChallenge, reviewSessionId }: StartPreviewOpts): Promise<{ session: GameSession; challenge: Record<string, unknown> }> {
-  if (!buildDir || !fs.existsSync(buildDir)) {
-    const e = new Error('build directory not found');
-    (e as any).status = 404;
-    throw e;
-  }
-  const composePath = path.join(buildDir, 'docker-compose.yml');
-  if (!fs.existsSync(composePath)) {
-    const e = new Error('docker-compose.yml missing in build directory');
-    (e as any).status = 400;
-    throw e;
-  }
-
-  const sessionId = uuidv4();
-  const { content: composeYaml } = composeManager.readComposeFile(buildDir);
-  const portMap = await composeManager.resolvePortMap(buildDir, composeYaml, sessionId);
-  const services = composeManager.extractServiceNames(composeYaml);
-  const spec = (builtChallenge?.validationSpec as Record<string, unknown>) || {};
-
-  const session: GameSession & Record<string, unknown> = sessionStore.makeSession({
-    id: sessionId,
-    challengeId: `preview:${reviewSessionId}`,
-    candidateName: 'Author preview',
-    status: 'active',
-  });
-  session.buildDir = path.resolve(buildDir);
-  session.portMap = portMap;
-  session.services = services;
-  session.metricsService = (spec.metricsService as string | null) || null;
-  session.terminalService = (spec.terminalService as string | null) || (services[0] || null);
-  session.isReviewPreview = true;
-  session.reviewSessionId = reviewSessionId;
-  sessionStore.set(sessionId, session);
-
-  await sessionStore.persistRow(session);
-
-  try {
-    await composeManager.down(buildDir).catch(() => {});
-    await composeManager.up(buildDir, portMap);
-    await composeManager.waitForServices(buildDir, portMap, 90_000);
-  } catch (e: unknown) {
-    const err = e as Error;
-    console.error(`[lifecycle] preview startup failed for ${sessionId}: ${err.message}`);
-    await composeManager.down(buildDir).catch(() => {});
-    await portAllocator.release(sessionId);
-    session.status = 'ended';
-    session.endTime = Date.now();
-    sessionStore.set(sessionId, session);
-    await sessionStore.persistRow(session);
-    const newErr = new Error(`failed to start preview sandbox: ${err.message}`);
-    (newErr as any).status = 500;
-    throw newErr;
-  }
-
-  await sessionStore.persistRuntime(session);
-
-  const challenge = challengeFromBuilt(builtChallenge, reviewSessionId);
-  return { session, challenge };
-}
-
 async function end(sessionId: string): Promise<GameSession> {
   const session: (GameSession & Record<string, unknown>) | null = sessionStore.get(sessionId);
   if (!session) {
@@ -209,9 +127,7 @@ async function end(sessionId: string): Promise<GameSession> {
     } catch (e: unknown) {
       console.warn(`[lifecycle] compose down failed: ${(e as Error).message}`);
     }
-    if (!session.isReviewPreview) {
-      rmDirSync(session.buildDir as string);
-    }
+    rmDirSync(session.buildDir as string);
   }
 
   try {
@@ -229,4 +145,4 @@ async function end(sessionId: string): Promise<GameSession> {
   return session;
 }
 
-module.exports = { start, startPreview, end, challengeFromBuilt };
+module.exports = { start, end };

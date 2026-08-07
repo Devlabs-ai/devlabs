@@ -8,10 +8,10 @@ interface LandingPageProps {
 
 /** Adds .is-inview when scrolled into view (for staggered slide-in). */
 function useInView<T extends HTMLElement>(rootMargin = '0px 0px -12% 0px'): {
-  ref: React.RefObject<T | null>;
+  ref: React.RefObject<T>;
   inView: boolean;
 } {
-  const ref = useRef<T | null>(null);
+  const ref = useRef<T>(null as unknown as T);
   const [inView, setInView] = useState(false);
 
   useEffect(() => {
