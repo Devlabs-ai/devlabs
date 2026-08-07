@@ -1,7 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useNavigationType,
+} from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
-import AboutPage from './pages/AboutPage';
 import PlayPage from './pages/PlayPage';
 import AuthoringPage from './pages/AuthoringPage';
 import ReviewRoutePage from './pages/ReviewRoutePage';
@@ -10,9 +16,13 @@ import ProfilePage from './pages/ProfilePage';
 import DbExplorerPage from './pages/DbExplorerPage';
 import AppLayout from './layouts/AppLayout';
 import { AppStateProvider } from './context/AppStateContext';
-import { getToken, getCurrentUser, logout, resolveInvite } from './services/authApi';
+import { getToken, getCurrentUser, logout } from './services/authApi';
 import { fetchChallenges, fetchChallenge } from './services/challengeApi';
 import { startSession, endSession, restoreSession } from './services/sessionApi';
+import { startSparkSession } from './services/workspaceApi';
+import { buildDailyProductSalesProject } from './fixtures/dailyProductSalesL1';
+import { isSparkPlatformChallenge } from './components/SparkPlatformWorkspace';
+import { catalogPathForChallenge, isPlayDomainId, looksLikePlaySessionId } from './constants/playCatalog';
 import type {
   AuthMode,
   PlayState,
@@ -20,39 +30,19 @@ import type {
   ActiveSession,
   ChallengePublic,
   ChallengeFull,
-  InviteRecord,
   UserRecord,
   EndSessionResult,
   AppState,
 } from './types/domain';
 
-const CANDIDATE_PARAM = 'candidate';
-
-function readCandidateToken(): string | null {
-  try {
-    const url = new URL(window.location.href);
-    return url.searchParams.get(CANDIDATE_PARAM);
-  } catch (_e) {
-    return null;
-  }
-}
-
-function clearCandidateParam(): void {
-  try {
-    const url = new URL(window.location.href);
-    url.searchParams.delete(CANDIDATE_PARAM);
-    window.history.replaceState({}, '', url.pathname + url.search);
-  } catch (_e) { /* noop */ }
-}
-
 export default function App(): React.JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationType = useNavigationType();
+  const openingSessionRef = useRef<string | null>(null);
 
   const [authMode, setAuthMode] = useState<AuthMode>('resolving');
   const [currentUser, setCurrentUser] = useState<UserRecord | null>(null);
-  const [candidateInvite, setCandidateInvite] = useState<InviteRecord | null>(null);
-  const [candidateError, setCandidateError] = useState<string | null>(null);
   const [challenges, setChallenges] = useState<ChallengePublic[]>([]);
   const [challengesError, setChallengesError] = useState<string | null>(null);
 
@@ -65,21 +55,6 @@ export default function App(): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('problem');
 
   useEffect(() => {
-    const candidateToken = readCandidateToken();
-    if (candidateToken) {
-      (async () => {
-        try {
-          const inv = await resolveInvite(candidateToken);
-          setCandidateInvite(inv);
-          setAuthMode('candidate');
-        } catch (e) {
-          const err = e as { response?: { data?: { error?: string } }; message?: string };
-          setCandidateError(err?.response?.data?.error || err.message || 'Unknown error');
-          setAuthMode('unauthenticated');
-        }
-      })();
-      return;
-    }
     if (getToken()) {
       setCurrentUser(getCurrentUser());
       setAuthMode('interviewer');
@@ -96,30 +71,66 @@ export default function App(): React.JSX.Element {
           setChallenges(list);
         } catch (e) {
           const err = e as { response?: { data?: { error?: string } }; message?: string };
-          setChallengesError(err?.response?.data?.error || err.message || 'Unknown error');
-        }
-      })();
-    } else if (authMode === 'candidate' && candidateInvite?.challengeId) {
-      (async () => {
-        try {
-          const c = await fetchChallenge(candidateInvite.challengeId);
-          setChallenges([c]);
-        } catch (e) {
-          const err = e as { response?: { data?: { error?: string } }; message?: string };
+          setChallenges([]);
           setChallengesError(err?.response?.data?.error || err.message || 'Unknown error');
         }
       })();
     }
-  }, [authMode, candidateInvite]);
+  }, [authMode]);
 
   const handleSelectChallenge = async (challenge: ChallengePublic | ChallengeFull): Promise<void> => {
     setStartError(null);
     setPlayState('loading');
     setActiveChallenge(challenge);
-    navigate('/play');
+
+    // Spark-platform: create DB session + seed workspace in MinIO.
+    if (isSparkPlatformChallenge(challenge)) {
+      try {
+        const full =
+          (challenge as ChallengeFull).sparkPlatform
+            ? (challenge as ChallengeFull)
+            : await fetchChallenge(challenge.id);
+        const platform = full.sparkPlatform;
+        if (!platform) throw new Error('Missing sparkPlatform spec');
+        const starterFiles = buildDailyProductSalesProject(platform);
+        const res = await startSparkSession(
+          full.id,
+          starterFiles,
+          platform.starterFileName || 'src/main.py',
+        );
+        setActiveSession({
+          id: res.sessionId,
+          startTime: Date.now(),
+          recovered: false,
+          terminalWsUrl: null,
+          metricsWsUrl: null,
+          portMap: null,
+          services: [],
+          terminalService: null,
+          runtime: 'spark-platform',
+        });
+        setActiveChallenge(full);
+        setActiveTab('editor');
+        openingSessionRef.current = res.sessionId;
+        setPlayState('active');
+        navigate(`/play/${res.sessionId}`);
+      } catch (e) {
+        const err = e as { response?: { data?: { error?: string } }; message?: string };
+        setActiveChallenge(null);
+        setActiveSession(null);
+        setPlayState('library');
+        navigate(catalogPathForChallenge(challenge.id), { replace: true });
+        setStartError(
+          err?.response?.data?.error
+            || err.message
+            || 'Failed to start spark session (MinIO unreachable)',
+        );
+      }
+      return;
+    }
+
     try {
-      const candidateToken = authMode === 'candidate' ? (candidateInvite?.token ?? null) : null;
-      const res = await startSession(challenge.id, candidateToken);
+      const res = await startSession(challenge.id);
       const rawSession = res.session as {
         startTime?: number;
         portMap?: Record<string, string | number> | null;
@@ -133,33 +144,82 @@ export default function App(): React.JSX.Element {
         portMap: rawSession?.portMap ?? null,
         services: res.services || [],
         terminalService: res.terminalService ?? null,
+        runtime: 'compose',
       });
       setActiveChallenge((res.challenge as ChallengePublic | null) || challenge);
       setActiveTab('problem');
+      openingSessionRef.current = res.sessionId;
       setPlayState('active');
-      navigate(`/play/${res.sessionId}`, { replace: true });
-      if (authMode === 'candidate') clearCandidateParam();
+      navigate(`/play/${res.sessionId}`);
     } catch (e) {
       const err = e as { response?: { data?: { error?: string } }; message?: string };
       setStartError(err?.response?.data?.error || err.message || 'Unknown error');
       setPlayState('library');
+      navigate(catalogPathForChallenge(challenge.id), { replace: true });
     }
   };
 
-  // Restore an in-progress session when the user navigates directly to /play/:sessionId
+  // Keep play UI in sync with the URL (browser Back/Forward, deep links).
   useEffect(() => {
-    if (playState !== 'library' || authMode === 'resolving') return;
-    const match = location.pathname.match(/^\/play\/([a-zA-Z0-9-]+)$/);
-    if (!match) return;
-    const sessionId = match[1];
+    if (authMode === 'resolving' || authMode === 'unauthenticated') return;
+
+    const path = location.pathname.replace(/\/$/, '') || '/';
+    const segments = path.split('/').filter(Boolean); // ['play', ...]
+    const underPlay = segments[0] === 'play';
+    if (!underPlay) return;
+
+    const a = segments[1] || null;
+    const b = segments[2] || null;
+
+    // Catalog: /play | /play/:domain | /play/:domain/:panel
+    if (!a || isPlayDomainId(a)) {
+      if (playState === 'loading') return;
+      if (openingSessionRef.current) return;
+      if (playState === 'active' || playState === 'ended') {
+        setPlayState('library');
+        setActiveSession(null);
+        setActiveChallenge(null);
+        setEndResult(null);
+      }
+      return;
+    }
+
+    // Session: /play/:sessionId (UUID / opaque id — not a catalog domain slug)
+    if (b) return;
+    const sessionId = a;
+
+    if (!looksLikePlaySessionId(sessionId)) {
+      navigate('/play', { replace: true });
+      return;
+    }
+
+    if (openingSessionRef.current === sessionId) {
+      openingSessionRef.current = null;
+    }
+
+    if (playState === 'active' && activeSession?.id === sessionId) return;
+    if (playState === 'loading') return;
+
     setPlayState('loading');
-    restoreSession(sessionId)
-      .then((res) => {
-        if (!res || (res as { status?: string }).status === 'ended') {
-          setPlayState('library');
-          navigate('/play', { replace: true });
+
+    void (async () => {
+      try {
+        const res = await restoreSession(sessionId);
+        if (!res || res.status === 'ended') {
+          await restoreSparkWorkspace(sessionId, null);
           return;
         }
+
+        const runtime =
+          (res.session as { runtime?: string } | null | undefined)?.runtime ||
+          (res as { runtime?: string }).runtime ||
+          null;
+
+        if (runtime === 'spark-platform' || sessionId.startsWith('spark-')) {
+          await restoreSparkWorkspace(sessionId, res);
+          return;
+        }
+
         setActiveSession({
           id: res.sessionId,
           startTime: res.startTime || Date.now(),
@@ -169,38 +229,77 @@ export default function App(): React.JSX.Element {
           portMap: res.portMap || null,
           services: res.services || [],
           terminalService: res.terminalService || null,
+          runtime: 'compose',
         });
         setActiveChallenge(res.challenge || null);
         setActiveTab('problem');
         setPlayState('active');
-      })
-      .catch(() => {
-        setPlayState('library');
-        navigate('/play', { replace: true });
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authMode]);
-
-  useEffect(() => {
-    if (
-      authMode === 'candidate' &&
-      candidateInvite?.challengeId &&
-      challenges.length > 0 &&
-      playState === 'library' &&
-      !candidateInvite.used
-    ) {
-      const c = challenges.find((x) => x.id === candidateInvite.challengeId);
-      if (c && c.finalized) {
-        handleSelectChallenge(c);
+      } catch {
+        try {
+          await restoreSparkWorkspace(sessionId, null);
+        } catch {
+          setPlayState('library');
+          setActiveSession(null);
+          setActiveChallenge(null);
+          navigate('/play', { replace: true });
+        }
       }
+    })();
+
+    async function restoreSparkWorkspace(
+      sid: string,
+      sessionRes: Awaited<ReturnType<typeof restoreSession>>,
+    ): Promise<void> {
+      const challengeId =
+        (sessionRes?.session as { challengeId?: string } | null | undefined)?.challengeId ||
+        sessionRes?.challenge?.id ||
+        null;
+
+      let full: ChallengeFull | null = null;
+      if (challengeId) {
+        full = await fetchChallenge(challengeId);
+      } else {
+        // Workspace exists without a recoverable challenge id — probe MinIO then default lab.
+        const { fetchWorkspace } = await import('./services/workspaceApi');
+        await fetchWorkspace(sid);
+        full = await fetchChallenge('daily-product-sales-pipeline-l1');
+      }
+
+      if (!full?.sparkPlatform && full) {
+        // Ensure spark fields exist even if list payload was thin.
+        full = await fetchChallenge(full.id);
+      }
+
+      setActiveSession({
+        id: sid,
+        startTime: sessionRes?.startTime || Date.now(),
+        recovered: true,
+        terminalWsUrl: null,
+        metricsWsUrl: null,
+        portMap: null,
+        services: [],
+        terminalService: null,
+        runtime: 'spark-platform',
+      });
+      setActiveChallenge(full);
+      setActiveTab('editor');
+      setPlayState('active');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authMode, candidateInvite, challenges]);
+  }, [location.pathname, authMode, navigationType]);
 
   const handleEnd = async (): Promise<void> => {
     if (!activeSession) return;
     setEnding(true);
     try {
+      if (activeSession.runtime === 'spark-platform' || activeSession.id.startsWith('spark-')) {
+        setEndResult({
+          sessionId: activeSession.id,
+          elapsed: Date.now() - activeSession.startTime,
+        });
+        setPlayState('ended');
+        return;
+      }
       const res = await endSession(activeSession.id);
       setEndResult(res as EndSessionResult);
       setPlayState('ended');
@@ -213,11 +312,12 @@ export default function App(): React.JSX.Element {
   };
 
   const handleBackToLibrary = (): void => {
+    const dest = catalogPathForChallenge(activeChallenge?.id);
     setPlayState('library');
     setActiveSession(null);
     setActiveChallenge(null);
     setEndResult(null);
-    navigate('/play');
+    navigate(dest);
   };
 
   const handleLogout = (): void => {
@@ -249,7 +349,6 @@ export default function App(): React.JSX.Element {
   const appState = useMemo<AppState>(() => ({
     authMode,
     currentUser,
-    candidateInvite,
     playState,
     challenges,
     challengesError,
@@ -268,7 +367,6 @@ export default function App(): React.JSX.Element {
   }), [
     authMode,
     currentUser,
-    candidateInvite,
     playState,
     challenges,
     challengesError,
@@ -294,19 +392,7 @@ export default function App(): React.JSX.Element {
         <Route
           path="/"
           element={
-            <LandingPage
-              candidateError={candidateError}
-              onLoggedIn={handleLoggedIn}
-            />
-          }
-        />
-        <Route
-          path="/about"
-          element={
-            <AboutPage
-              candidateError={candidateError}
-              onLoggedIn={handleLoggedIn}
-            />
+            <LandingPage onLoggedIn={handleLoggedIn} />
           }
         />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -322,7 +408,8 @@ export default function App(): React.JSX.Element {
         <Route path="/" element={<Navigate to="/play" replace />} />
         <Route element={<AppLayout />}>
           <Route path="play" element={<PlayPage />} />
-          <Route path="play/:sessionId" element={<PlayPage />} />
+          <Route path="play/:domainId" element={<PlayPage />} />
+          <Route path="play/:domainId/:panelId" element={<PlayPage />} />
           {isInterviewer ? (
             <>
               <Route path="authoring" element={<AuthoringPage />} />

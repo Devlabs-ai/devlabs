@@ -37,8 +37,7 @@ async function archiveLegacyVerifiedOnDisk(): Promise<{ moved: number }> {
     // eslint-disable-next-line no-await-in-loop
     await pool.query(
       `UPDATE challenges
-          SET archived = true,
-              verified_dir = $1,
+          SET verified_dir = $1,
               updated_at = $2
         WHERE verified_dir = $3
            OR verified_dir = $4
@@ -48,13 +47,6 @@ async function archiveLegacyVerifiedOnDisk(): Promise<{ moved: number }> {
 
     moved += 1;
     console.log(`[archive] moved ${slug} → sandbox/archive/`);
-  }
-
-  if (moved > 0) {
-    await pool.query(
-      `UPDATE challenges SET archived = true, updated_at = $1 WHERE archived = false`,
-      [now],
-    );
   }
 
   return { moved };

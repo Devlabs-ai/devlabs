@@ -62,10 +62,9 @@ function normalize(payload: RawSessionPayload): RawSessionPayload {
   };
 }
 
-export async function startSession(challengeId: string, candidateToken: string | null = null): Promise<SessionStartResult> {
-  const headers = candidateToken ? {} : getAuthHeader();
+export async function startSession(challengeId: string): Promise<SessionStartResult> {
+  const headers = getAuthHeader();
   const body: Record<string, string> = { challengeId };
-  if (candidateToken) body.candidateToken = candidateToken;
   const { data } = await axios.post('/api/session/start', body, { headers });
   return normalize(data as RawSessionPayload) as SessionStartResult;
 }

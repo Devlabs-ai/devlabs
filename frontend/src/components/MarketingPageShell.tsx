@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import LoginModal from './LoginModal';
 import ContactSalesModal from './ContactSalesModal';
@@ -20,18 +20,12 @@ export function useMarketing(): MarketingContextValue {
 interface MarketingPageShellProps {
   children: React.ReactNode;
   onLoggedIn: (user: UserRecord) => void;
-  candidateError?: string | null;
 }
 
-export default function MarketingPageShell({ children, onLoggedIn, candidateError }: MarketingPageShellProps): JSX.Element {
+export default function MarketingPageShell({ children, onLoggedIn }: MarketingPageShellProps): JSX.Element {
   const [loginOpen, setLoginOpen] = useState<boolean>(false);
   const [salesOpen, setSalesOpen] = useState<boolean>(false);
 
-  useEffect(() => {
-    if (candidateError) setLoginOpen(true);
-  }, [candidateError]);
-
-  const inviteError = candidateError ? `Candidate invite error: ${candidateError}` : null;
   const modalOpen = loginOpen || salesOpen;
 
   const value = useMemo<MarketingContextValue>(() => ({
@@ -51,28 +45,23 @@ export default function MarketingPageShell({ children, onLoggedIn, candidateErro
         <header className="landing-header">
           <Link to="/" className="landing-brand">
             <span className="logo-dot" />
-            Devlabs
+            DevLabs
+            <span className="landing-brand-ver">v0.2</span>
           </Link>
-          <nav className="landing-nav" aria-label="Marketing">
-            <Link to="/about">About</Link>
-          </nav>
         </header>
 
         <main className="landing-main">{children}</main>
 
         <footer className="landing-footer">
-          <span>Devlabs v0.1</span>
+          <span>DevLabs v0.2</span>
           <span className="landing-footer-sep">·</span>
-          <Link to="/about">About</Link>
-          <span className="landing-footer-sep">·</span>
-          <span>Interview platform for infrastructure debugging</span>
+          <span>Hands-on labs for modern engineering</span>
         </footer>
 
         <LoginModal
           open={loginOpen}
           onClose={() => setLoginOpen(false)}
           onLoggedIn={onLoggedIn}
-          initialError={inviteError}
         />
 
         <ContactSalesModal

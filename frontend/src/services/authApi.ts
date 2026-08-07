@@ -1,12 +1,8 @@
 import axios from 'axios';
-import type { UserRecord, InviteRecord, AuthRole } from '../types/domain';
+import type { UserRecord } from '../types/domain';
 
 const TOKEN_KEY = 'devlabs_jwt';
-const USER_KEY  = 'devlabs_user';
-
-// ---------------------------------------------------------------------------
-// Token / user helpers
-// ---------------------------------------------------------------------------
+const USER_KEY = 'devlabs_user';
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -40,17 +36,8 @@ function saveUser(user: UserRecord): void {
   if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
-// ---------------------------------------------------------------------------
-// OTP login (new primary flow)
-// ---------------------------------------------------------------------------
-
-export async function requestOtp(email: string): Promise<unknown> {
-  const { data } = await axios.post('/api/auth/request-otp', { email });
-  return data;
-}
-
-export async function verifyOtp(email: string, code: string): Promise<{ token: string; user: UserRecord }> {
-  const { data } = await axios.post('/api/auth/verify-otp', { email, code });
+export async function loginWithEmail(email: string): Promise<{ token: string; user: UserRecord }> {
+  const { data } = await axios.post('/api/auth/login-email', { email });
   const res = data as { token: string; user: UserRecord };
   setToken(res.token);
   saveUser(res.user);
@@ -64,45 +51,14 @@ export async function fetchMe(): Promise<{ user?: UserRecord }> {
   return res;
 }
 
-// ---------------------------------------------------------------------------
-// Legacy username/password login — kept during migration
-// ---------------------------------------------------------------------------
-
-export async function login(username: string, password: string): Promise<{ token: string; role?: string }> {
+export async function login(username: string, password: string): Promise<{ token: string }> {
   const { data } = await axios.post('/api/auth/login', { username, password });
-  const res = data as { token: string; role?: string };
+  const res = data as { token: string };
   setToken(res.token);
-  saveUser({ role: (res.role || 'interviewer') as AuthRole } as UserRecord);
+  saveUser({ id: username, email: `${username}@local` });
   return res;
 }
 
 export function logout(): void {
   clearToken();
-}
-
-// ---------------------------------------------------------------------------
-// Invites
-// ---------------------------------------------------------------------------
-
-export async function createInvite({ challengeId, name, email }: {
-  challengeId?: string;
-  name?: string;
-  email?: string;
-} = {}): Promise<InviteRecord> {
-  const { data } = await axios.post(
-    '/api/auth/invites',
-    { challengeId, name, email },
-    { headers: getAuthHeader() },
-  );
-  return (data as { invite: InviteRecord }).invite;
-}
-
-export async function fetchInvites(): Promise<InviteRecord[]> {
-  const { data } = await axios.get('/api/auth/invites', { headers: getAuthHeader() });
-  return (data as { invites: InviteRecord[] }).invites;
-}
-
-export async function resolveInvite(token: string): Promise<InviteRecord> {
-  const { data } = await axios.get(`/api/auth/invite/${token}`);
-  return data as InviteRecord;
 }

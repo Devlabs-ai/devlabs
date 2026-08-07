@@ -1,13 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { PhaseTracker } from '../components/PhaseTracker';
+import { PhaseTracker, SPARK_PIPELINE_PHASES } from '../components/PhaseTracker';
 import AuthorReviewFeedbackBanner from '../components/AuthorReviewFeedbackBanner';
-import { streamBuild, getProblemSession } from '../services/problemApi';
+import { streamBuild, getProblemSession, pushToSandbox } from '../services/problemApi';
 import { logsForAttempt } from '../utils/buildLogFilter';
 import { buildCostLabel } from '../utils/buildCost';
-import { formatCodeDiffLines } from '../utils/pipelineLogFormat';
+import { formatCodeDiffLines, agentNameFromTag } from '../utils/pipelineLogFormat';
 import PipelineLogStream from '../components/PipelineLogStream';
 import type { ProblemSession } from '../types/domain';
+
+function isSparkSession(draft: ProblemSession | null | undefined): boolean {
+  return (draft?.authoringKind || draft?.draft?.authoringKind) === 'spark-platform';
+}
+
+/** Prevent Strict Mode / remount double-start for the same navigation. */
+const consumedAutoStartNavKeys = new Set<string>();
 
 interface LlmConfig {
   llmConfigured: boolean;
@@ -193,6 +200,8 @@ export default function PipelinePage({
   const [liveThinking, setLiveThinking] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [viewAttempt, setViewAttempt] = useState<number | null>(null);
+  const [publishBusy, setPublishBusy] = useState(false);
+  const [publishedId, setPublishedId] = useState<string | null>(null);
 
   const allLogs = running ? logs : (draft?.buildLogs || logs);
 
@@ -216,7 +225,12 @@ export default function PipelinePage({
     draft?.buildChecklists?.length,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const locationState = location.state as { focusAttempt?: number } | null;
+  const locationState = location.state as {
+    focusAttempt?: number;
+    autoStart?: boolean;
+    autoStartMode?: 'retry' | 'fresh';
+  } | null;
+  const runBuildRef = useRef<(mode: 'retry' | 'fresh') => Promise<void>>(async () => {});
 
   useEffect(() => {
     const focus = locationState?.focusAttempt ?? null;
@@ -252,20 +266,35 @@ export default function PipelinePage({
     );
   }
 
-  const draftReady = draft.draftReady ?? (
-    !!(draft.draft?.brokenState?.rootCause)
-    && !!(draft.draft?.infra?.services?.length)
-    && !!(draft.draft?.description?.trim())
-  );
+  const draftReady = isSparkSession(draft)
+    ? !!draft.designApproved
+    : (draft.draftReady ?? (
+      !!(draft.draft?.brokenState?.rootCause)
+      && !!(draft.draft?.infra?.services?.length)
+      && !!(draft.draft?.description?.trim())
+    ));
+  const spark = isSparkSession(draft);
   const llmReady = !!llmConfig?.llmConfigured;
-  const maxAttempts = llmConfig?.maxIterations ?? 2;
+  const maxAttempts = spark ? 2 : (llmConfig?.maxIterations ?? 2);
   const hasWorkspace = !!(draft.buildFailedDir || draft.buildDir);
-  const canRetry = effectiveStatus === 'failed'
+  const canRetry = (effectiveStatus === 'failed' || effectiveStatus === 'changes_requested')
     && !running
-    && hasWorkspace;
-  const canStartFresh = hasWorkspace && !running;
-  const showStartBuild = !hasWorkspace && !running;
+    && (spark || hasWorkspace);
   const startDisabled = running || !draftReady || !llmReady;
+
+  const handlePublish = async (): Promise<void> => {
+    if (!spark || !buildSucceeded || publishBusy) return;
+    setPublishBusy(true);
+    setErr(null);
+    try {
+      const res = await pushToSandbox(draft.id) as { challengeId?: string; slug?: string };
+      setPublishedId(res.challengeId || res.slug || 'published');
+    } catch (e: unknown) {
+      setErr((e as Error).message || 'Publish failed');
+    } finally {
+      setPublishBusy(false);
+    }
+  };
 
   const runBuild = async (mode: 'retry' | 'fresh'): Promise<void> => {
     const isRetry = mode === 'retry';
@@ -279,7 +308,7 @@ export default function PipelinePage({
       setLatestChecklist(null);
       setChecklistHistory([]);
     } else {
-      setLogs((prev) => [...prev, '--- Retrying build in same workspace ---']);
+      setLogs((prev) => [...prev, '--- Retrying in repair mode (same workspace) ---']);
     }
     setStatus('building');
     setLiveThinking(null);
@@ -297,8 +326,9 @@ export default function PipelinePage({
             return next.length > 1000 ? next.slice(next.length - 1000) : next;
           });
         } else if (event.type === 'thinking') {
-          const label = typeof event.label === 'string' ? event.label : 'Thinking';
-          setLiveThinking(label);
+          const fromTag = agentNameFromTag(event.tag);
+          const base = typeof event.label === 'string' ? event.label : 'Thinking';
+          setLiveThinking(fromTag && !base.includes(fromTag) ? `${fromTag} · ${base}` : base);
         } else if (event.type === 'codeStep') {
           setLiveThinking(null);
         } else if (event.type === 'codeDiff' && typeof event.diff === 'string') {
@@ -344,6 +374,51 @@ export default function PipelinePage({
       abortRef.current = null;
     }
   };
+
+  runBuildRef.current = runBuild;
+
+  // Intent "Build pipeline" → land here with autoStart and begin immediately.
+  useEffect(() => {
+    if (!locationState?.autoStart || !draft || running) return;
+    if (consumedAutoStartNavKeys.has(location.key)) return;
+
+    const ready = isSparkSession(draft)
+      ? !!draft.designApproved
+      : (draft.draftReady ?? (
+        !!(draft.draft?.brokenState?.rootCause)
+        && !!(draft.draft?.infra?.services?.length)
+        && !!(draft.draft?.description?.trim())
+      ));
+    if (!ready || !llmConfig?.llmConfigured) return;
+    if (draft.buildStatus === 'building') {
+      consumedAutoStartNavKeys.add(location.key);
+      navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
+      return;
+    }
+
+    const mode: 'retry' | 'fresh' = locationState.autoStartMode === 'retry'
+      || draft.buildStatus === 'failed'
+      ? 'retry'
+      : 'fresh';
+
+    consumedAutoStartNavKeys.add(location.key);
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
+    void runBuildRef.current(mode);
+  }, [
+    location.key,
+    location.pathname,
+    location.search,
+    locationState?.autoStart,
+    locationState?.autoStartMode,
+    draft,
+    draft?.id,
+    draft?.designApproved,
+    draft?.draftReady,
+    draft?.buildStatus,
+    llmConfig?.llmConfigured,
+    running,
+    navigate,
+  ]);
 
   const checklistSummary = activeChecklist ? outcomeSummary(activeChecklist) : null;
 
@@ -402,42 +477,15 @@ export default function PipelinePage({
                 type="button"
                 onClick={() => runBuild('retry')}
                 disabled={startDisabled}
-                title={!draftReady ? 'Draft incomplete' : !llmReady ? 'LLM not configured' : 'Continue in the same build folder'}
-              >
-                Retry build
-              </button>
-            )}
-            {canStartFresh && (
-              <button
-                type="button"
-                className={canRetry ? 'ghost sm' : undefined}
-                onClick={() => runBuild('fresh')}
-                disabled={startDisabled}
                 title={
                   !draftReady
-                    ? 'Draft incomplete (description, rootCause, infra.services)'
+                    ? 'Draft incomplete'
                     : !llmReady
                       ? 'LLM not configured'
-                      : 'Discard current workspace and run in a new build folder'
+                      : 'Repair in the same workspace using the last failure'
                 }
               >
-                Start fresh
-              </button>
-            )}
-            {showStartBuild && (
-              <button
-                type="button"
-                onClick={() => runBuild('fresh')}
-                disabled={startDisabled}
-                title={
-                  !draftReady
-                    ? 'Draft incomplete (description, rootCause, infra.services)'
-                    : !llmReady
-                      ? 'LLM not configured'
-                      : ''
-                }
-              >
-                Start build
+                Retry
               </button>
             )}
           </div>
@@ -454,6 +502,7 @@ export default function PipelinePage({
               status={effectiveStatus}
               validation={validation}
               running={running}
+              phaseOrder={spark ? SPARK_PIPELINE_PHASES : undefined}
             />
           </div>
           {isLiveBuild ? (
@@ -469,26 +518,42 @@ export default function PipelinePage({
             </>
           ) : (
             <>
-              {buildSucceeded && !inLogsView && onGoReview && (
+              {buildSucceeded && !inLogsView && (
                 <div className="pipeline-build-success" role="status">
                   <div className="pipeline-build-success-copy">
                     <strong>Build passed</strong>
                     <span className="dim">
-                      Validation succeeded. Open Review to inspect the sandbox before shipping.
+                      {spark
+                        ? 'Eval succeeded. Publish to ship this lab to Play.'
+                        : 'Validation succeeded. Open Review to inspect the sandbox before shipping.'}
                     </span>
+                    {publishedId && (
+                      <span className="dim">Published <code>{publishedId}</code></span>
+                    )}
                   </div>
-                  <button type="button" className="primary sm" onClick={onGoReview}>
-                    Open review →
-                  </button>
+                  {spark ? (
+                    <button
+                      type="button"
+                      className="primary sm"
+                      disabled={publishBusy || !!publishedId}
+                      onClick={() => void handlePublish()}
+                    >
+                      {publishBusy ? 'Publishing…' : publishedId ? 'Published' : 'Publish to Play'}
+                    </button>
+                  ) : onGoReview ? (
+                    <button type="button" className="primary sm" onClick={onGoReview}>
+                      Open review →
+                    </button>
+                  ) : null}
                 </div>
               )}
               {effectiveStatus === 'changes_requested' && !running && (
                 <div className="alert info pipeline-compact-alert">
-                  Reviewer sent this build back with notes above. Update the draft or infra, then run{' '}
-                  <strong>Start fresh</strong>.
+                  Reviewer sent this build back with notes above. Update the draft, then run{' '}
+                  <strong>Retry</strong> to repair in the same workspace.
                 </div>
               )}
-              {hasWorkspace && !running && !buildSucceeded && (
+              {(effectiveStatus === 'failed' || (hasWorkspace && !running && !buildSucceeded)) && !running && (
                 <div className="alert info pipeline-compact-alert">
                   {effectiveStatus === 'failed' ? (
                     <>
@@ -499,11 +564,12 @@ export default function PipelinePage({
                       {draft.buildFailedMsg && (
                         <span className="pipeline-failure-hint"> — {draft.buildFailedMsg}</span>
                       )}
+                      <span className="dim"> — Retry repairs from this error.</span>
                     </>
                   ) : effectiveStatus === 'building' ? (
-                    <>Build may still be running — use Cancel or Start fresh.</>
+                    <>Build may still be running — use Cancel or Stop.</>
                   ) : (
-                    <>Workspace on disk — Start fresh for a new folder.</>
+                    <>Workspace on disk — start from Intent when ready.</>
                   )}
                 </div>
               )}

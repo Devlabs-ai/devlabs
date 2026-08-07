@@ -9,7 +9,6 @@ const reviewStore = require('../pipeline/stores/reviewStore');
 const draftStore = require('../pipeline/stores/problemDraftStore');
 const buildPipeline = require('../pipeline/pipelines/buildPipeline');
 const { promote } = require('../pipeline/promoteToVerified');
-const { normalizeBucket } = require('../challenges/buckets');
 const lifecycle = require('../sandbox/sessionLifecycle');
 const sessionStore = require('../db/sessionStore');
 
@@ -114,17 +113,6 @@ router.post('/:sessionId/push', async (req: ExpressRequest, res: ExpressResponse
     const review = await reviewStore.get(req.params.sessionId);
     if (!review) return res.status(404).json({ error: 'review not found' });
 
-    const requestedBucket = (req.body as Record<string, unknown>)?.bucket
-      || review.builtChallenge?.bucket
-      || review.builtChallenge?.meta?.bucket;
-    if (!requestedBucket) {
-      return res.status(400).json({ error: 'bucket is required to push a review' });
-    }
-    const bucket = normalizeBucket(requestedBucket);
-    if (!bucket) {
-      return res.status(400).json({ error: `unknown bucket: ${requestedBucket}` });
-    }
-
     let draft = draftStore.get(req.params.sessionId);
     if (!draft) {
       draft = draftStore.makeDraft({ id: req.params.sessionId });
@@ -138,8 +126,6 @@ router.post('/:sessionId/push', async (req: ExpressRequest, res: ExpressResponse
       buildDir: draft.buildDir,
       builtChallenge: draft.builtChallenge,
       fallbackTitle: review.title || draft.id,
-      bucket,
-      authoredBy: req.user?.sub || null,
     });
 
     await endPreviewForReview(req.params.sessionId);

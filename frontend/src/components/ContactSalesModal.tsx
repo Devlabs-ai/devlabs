@@ -192,7 +192,7 @@ export default function ContactSalesModal({ open, onClose }: ContactSalesModalPr
               </div>
 
               <footer className="login-card-foot otp-foot">
-                <span>Already registered? Use &ldquo;Get started&rdquo; to sign in with your company email.</span>
+                <span>Already registered? Use &ldquo;Get started&rdquo; to sign in with your email.</span>
               </footer>
             </form>
           )}

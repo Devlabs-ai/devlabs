@@ -1,34 +1,3 @@
-import type { ReviewRecord } from '../types/domain';
-import { bucketLabel } from '../constants/buckets';
-
-export function bucketFromReview(r: ReviewRecord | null | undefined): string | null {
-  const bc = r?.builtChallenge as { bucket?: string; meta?: { bucket?: string } } | undefined;
-  return bc?.bucket || (bc?.meta as { bucket?: string } | undefined)?.bucket || null;
-}
-
-const CATEGORY_BUCKET: Record<string, string> = {
-  kafka: 'data-engineer',
-  spark: 'data-engineer',
-  airflow: 'data-engineer',
-  postgres: 'platform-engineer',
-  redis: 'platform-engineer',
-  python: 'software-engineer',
-  networking: 'devops',
-  general: 'software-engineer',
-};
-
-export function resolvePushBucket(r: ReviewRecord | null | undefined): string {
-  const preset = bucketFromReview(r);
-  if (preset) return preset;
-  const bc = r?.builtChallenge as { category?: string; meta?: { category?: string } } | undefined;
-  const cat = (bc?.category || (bc?.meta as { category?: string } | undefined)?.category || '')
-    .toLowerCase()
-    .trim();
-  return CATEGORY_BUCKET[cat] || 'software-engineer';
-}
-
-export { bucketLabel };
-
 const SIGNOFF_KEY = 'devlabs-review-signoff';
 
 interface ReviewSignoff {

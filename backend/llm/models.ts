@@ -28,6 +28,12 @@ const DEFAULTS: Record<string, string> = {
   code:       'anthropic:claude-haiku-4-5',
   validation: 'openai:gpt-4o-mini',
   embedding:  'openai:text-embedding-3-small',
+  // Spark authoring (Claude Agent SDK for code-gen stages)
+  spark_design:     'anthropic:claude-haiku-4-5',
+  spark_data:       'anthropic:claude-haiku-4-5',
+  spark_code:       'anthropic:claude-haiku-4-5',
+  spark_validation: 'openai:gpt-4o-mini',
+  spark_eval_repair: 'anthropic:claude-haiku-4-5',
 };
 
 /** Default Anthropic model for all text agents (cost-efficient). */
@@ -38,9 +44,26 @@ const SONNET_46_ALIASES = new Set([
   'claude-sonnet-4-6',
 ]);
 
-const PIPELINE_AGENTS = new Set(['schema', 'code', 'validation']);
+const PIPELINE_AGENTS = new Set([
+  'schema',
+  'code',
+  'validation',
+  'spark_data',
+  'spark_code',
+  'spark_eval_repair',
+]);
 
-const TEXT_AGENTS: string[] = ['design', 'schema', 'code', 'validation'];
+const TEXT_AGENTS: string[] = [
+  'design',
+  'schema',
+  'code',
+  'validation',
+  'spark_design',
+  'spark_data',
+  'spark_code',
+  'spark_validation',
+  'spark_eval_repair',
+];
 
 /** @deprecated use `code` — LLM_MODEL_BUILD still honored in modelIdFor */
 const BUILD_AGENT_ALIAS = 'build';

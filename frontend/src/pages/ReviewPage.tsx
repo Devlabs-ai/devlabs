@@ -10,10 +10,8 @@ import ReviewActionBar from '../components/ReviewActionBar';
 import ReviewFeedbackPanel from '../components/ReviewFeedbackPanel';
 import MarkdownProse from '../components/MarkdownProse';
 import {
-  bucketLabel,
   clearReviewSignoff,
   getReviewSignoff,
-  resolvePushBucket,
   setReviewSignoff,
 } from '../utils/reviewHelpers';
 import type { ReviewRecord, ReviewFeedbackPayload } from '../types/domain';
@@ -26,7 +24,6 @@ interface ReviewRowProps {
 
 function ReviewRow({ r, active, onClick }: ReviewRowProps): JSX.Element {
   const passed = !!r.buildValidation?.passed;
-  const bucket = resolvePushBucket(r);
   const builtChallenge = r.builtChallenge as { title?: string; difficulty?: string } | undefined;
   const title = r.title || builtChallenge?.title || '(untitled)';
   const signoff = getReviewSignoff(r.sessionId);
@@ -40,9 +37,6 @@ function ReviewRow({ r, active, onClick }: ReviewRowProps): JSX.Element {
         {signoff.touched && <span className="pill sm preview">sandbox</span>}
         {builtChallenge?.difficulty && (
           <span className="dim">{builtChallenge.difficulty}</span>
-        )}
-        {bucketLabel(bucket) && (
-          <span className="dim">{bucketLabel(bucket)}</span>
         )}
         {r.savedAt && <span className="dim">{new Date(r.savedAt).toLocaleString()}</span>}
       </div>
@@ -85,7 +79,6 @@ function ReviewDetail({ r, onSendBack, feedbackBusy }: ReviewDetailProps): JSX.E
   }
 
   const c = r.builtChallenge as { description?: string; category?: string; [key: string]: unknown } | undefined;
-  const bucket = resolvePushBucket(r);
 
   return (
     <div className="review-detail review-detail--clean">
@@ -116,10 +109,10 @@ function ReviewDetail({ r, onSendBack, feedbackBusy }: ReviewDetailProps): JSX.E
         <summary>Technical details</summary>
         <div className="review-panel-body">
           <dl className="review-facts">
-            {bucketLabel(bucket) && (
+            {c?.category && (
               <div>
-                <dt>Library</dt>
-                <dd>{bucketLabel(bucket)}</dd>
+                <dt>Category</dt>
+                <dd>{String(c.category)}</dd>
               </div>
             )}
             {r.buildDir && (
@@ -214,16 +207,10 @@ export default function ReviewPage({
   };
 
   const handlePush = async (id: string): Promise<void> => {
-    const review = reviews.find((r) => r.sessionId === id);
-    const bucket = review ? resolvePushBucket(review) : null;
-    if (!bucket) {
-      setErr('Could not determine library bucket for this challenge.');
-      return;
-    }
     setBusy(true);
     setErr(null);
     try {
-      const out = await pushReview(id, { bucket }) as { slug?: string };
+      const out = await pushReview(id) as { slug?: string };
       clearReviewSignoff(id);
       if (onPromoted) onPromoted(out.slug);
       await reload();

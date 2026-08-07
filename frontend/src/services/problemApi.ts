@@ -143,6 +143,19 @@ export async function approveDesign(sessionId: string): Promise<unknown> {
   return data;
 }
 
+/** Upload / apply a Spark shape contract JSON (Preview path; does not auto-approve). */
+export async function uploadSparkShape(
+  sessionId: string,
+  contract: unknown,
+): Promise<unknown> {
+  const { data } = await axios.post(
+    `/api/problems/${sessionId}/spark-shape`,
+    { contract },
+    { headers: getAuthHeader() },
+  );
+  return data;
+}
+
 export async function reviseDesign(sessionId: string): Promise<unknown> {
   const { data } = await axios.post(
     `/api/problems/${sessionId}/revise-design`,

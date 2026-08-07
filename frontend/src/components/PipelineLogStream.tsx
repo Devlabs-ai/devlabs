@@ -16,6 +16,11 @@ function entryClass(entry: PipelineLogEntry): string {
   return 'log-line';
 }
 
+function AgentBadge({ agent }: { agent?: string }): JSX.Element | null {
+  if (!agent) return null;
+  return <span className="log-agent-badge">{agent}</span>;
+}
+
 function CodeDiffView({ entry }: { entry: Extract<PipelineLogEntry, { kind: 'codeDiff' }> }): JSX.Element {
   const title = entry.summary
     ? 'Repair summary — all file changes'
@@ -23,6 +28,7 @@ function CodeDiffView({ entry }: { entry: Extract<PipelineLogEntry, { kind: 'cod
   return (
     <details className="log-entry log-code-diff" open={!entry.summary}>
       <summary className="log-code-diff-summary">
+        <AgentBadge agent={entry.agent} />
         <span className="log-code-diff-badge">{entry.summary ? 'Summary' : 'Diff'}</span>
         <span className="log-code-diff-title">{title}</span>
       </summary>
@@ -36,6 +42,7 @@ function LogEntryView({ entry }: { entry: PipelineLogEntry }): JSX.Element {
     return (
       <div className="log-entry log-thinking">
         <span className="log-thinking-dot" aria-hidden />
+        <AgentBadge agent={entry.agent} />
         <span className="log-thinking-label">{entry.label}</span>
         <span className="log-thinking-meta">step {entry.step + 1}</span>
       </div>
@@ -50,6 +57,7 @@ function LogEntryView({ entry }: { entry: PipelineLogEntry }): JSX.Element {
     return (
       <div className="log-entry log-code-step">
         <div className="log-code-step-head">
+          <AgentBadge agent={entry.agent} />
           <span className="log-code-step-badge">Step {entry.step + 1}</span>
           {!longPlainStep && (
             <span className="log-code-step-tools">{toolsMain}</span>
@@ -80,7 +88,12 @@ function LogEntryView({ entry }: { entry: PipelineLogEntry }): JSX.Element {
   if (entry.kind === 'separator') {
     return <div className="log-entry log-separator">{entry.text}</div>;
   }
-  return <div className={`log-entry ${entryClass(entry)}`}>{entry.text}</div>;
+  return (
+    <div className={`log-entry ${entryClass(entry)}`}>
+      <AgentBadge agent={entry.agent} />
+      <span className="log-entry-text">{entry.text}</span>
+    </div>
+  );
 }
 
 export default function PipelineLogStream({

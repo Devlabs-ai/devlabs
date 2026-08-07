@@ -8,9 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const loader = require('../challenges/loader');
-const { normalizeBucket } = require('../challenges/buckets');
 const { VERIFIED_ROOT } = require('../sandbox/paths');
-const pool = require('../db/pool');
 
 function slugify(s: string | null | undefined): string {
   return String(s || 'challenge')
@@ -34,24 +32,13 @@ async function promote({
   buildDir,
   builtChallenge,
   fallbackTitle,
-  bucket,
-  authoredBy = null,
 }: {
   buildDir: string;
   builtChallenge?: Record<string, unknown>;
   fallbackTitle?: string | null;
-  bucket?: string | null;
-  authoredBy?: string | null;
 }): Promise<{ slug: string; verifiedDir: string; challenge: Record<string, unknown> }> {
   if (!buildDir || !fs.existsSync(buildDir)) {
     const e = new Error('build directory missing on disk; rebuild before promoting') as Error & { status?: number };
-    e.status = 400;
-    throw e;
-  }
-
-  const normalizedBucket = normalizeBucket(bucket);
-  if (bucket && !normalizedBucket) {
-    const e = new Error(`unknown bucket: ${bucket}`) as Error & { status?: number };
     e.status = 400;
     throw e;
   }
@@ -79,11 +66,6 @@ async function promote({
     description: built.description || cur.description,
     difficulty: built.difficulty || (built.meta as Record<string, unknown>)?.difficulty || cur.difficulty || 'Medium',
     category: built.category || (built.meta as Record<string, unknown>)?.category || cur.category || 'General',
-    bucket: normalizedBucket
-      || normalizeBucket(built.bucket as string)
-      || normalizeBucket((built.meta as Record<string, unknown>)?.bucket as string)
-      || normalizeBucket(cur.bucket as string)
-      || null,
     tags: built.tags || (built.meta as Record<string, unknown>)?.tags || cur.tags || [],
     finalized: true,
     sandboxType: 'compose',
@@ -92,6 +74,7 @@ async function promote({
     problemStatement: built.problemStatement || cur.problemStatement || null,
     validationSpec: built.validationSpec || cur.validationSpec || null,
   };
+  delete merged.bucket;
   if ((merged.metrics as Record<string, unknown>)?.recovery && merged.validationSpec) {
     (merged.validationSpec as ValidationSpec).metricLogFormat = (merged.metrics as Record<string, unknown>).format as string
       || (merged.validationSpec as ValidationSpec).metricLogFormat;
@@ -102,13 +85,6 @@ async function promote({
 
   await loader.seedChallengesFromDisk(VERIFIED_ROOT);
   await loader.loadChallengesFromDB();
-
-  if (authoredBy) {
-    await pool.query(
-      `UPDATE challenges SET authored_by = $1 WHERE id = $2`,
-      [authoredBy, slug],
-    ).catch((e: Error) => console.warn('[promote] could not set authored_by:', e.message));
-  }
 
   return { slug, verifiedDir: dest, challenge: merged };
 }

@@ -1,18 +1,7 @@
-/** Canonical role bucket IDs for challenge library grouping. */
-export type BucketId =
-  | 'software-engineer'
-  | 'data-engineer'
-  | 'platform-engineer'
-  | 'devops';
-
-export type AuthRole = 'interviewer' | 'admin' | 'candidate';
-
 export interface JwtPayload {
   sub?: string;
   userId?: string;
   email?: string;
-  role: AuthRole;
-  companyId?: string | null;
   iat?: number;
   exp?: number;
 }
@@ -20,21 +9,7 @@ export interface JwtPayload {
 export interface UserRecord {
   id: string;
   email: string;
-  role: AuthRole;
-  companyId?: string | null;
   name?: string | null;
-}
-
-export interface InviteRecord {
-  token: string;
-  challengeId: string;
-  name?: string | null;
-  email?: string | null;
-  candidateEmail?: string | null;
-  challengeTitle?: string | null;
-  conductedByName?: string | null;
-  used?: boolean;
-  expired?: boolean;
 }
 
 export interface ChallengePublic {
@@ -44,19 +19,33 @@ export interface ChallengePublic {
   difficulty: string;
   tags: string[];
   category: string;
-  bucket: BucketId | null;
   finalized: boolean;
-  archived: boolean;
   sandboxType: string | null;
 }
 
+export interface SparkPlatformSpec {
+  inputPath: string;
+  outputPath?: string;
+  evalSolutionPath: string;
+  businessDate: string;
+  language: 'python';
+  starterFileName: string;
+  limits: {
+    driver: number;
+    executors: number;
+    executorCores: number;
+    executorMemory: string;
+  };
+  gradeChecks: string[];
+  [key: string]: unknown;
+}
+
 export interface ChallengeFull extends ChallengePublic {
-  authored_by: string | null;
-  visibility: string;
-  library_id: string | null;
   verifiedDir: string | null;
   problemStatement: Record<string, unknown> | string | null;
   validationSpec: ValidationSpec | null;
+  /** Mapped from platform_spec when sandboxType is spark-platform. */
+  sparkPlatform?: SparkPlatformSpec | null;
 }
 
 export interface ValidationSpec {
@@ -75,16 +64,12 @@ export interface ChallengeRow {
   difficulty: string;
   tags: string[] | null;
   category: string;
-  bucket: string | null;
   finalized: boolean;
-  archived: boolean;
   sandbox_type: string | null;
-  authored_by?: string | null;
-  visibility?: string;
-  library_id?: string | null;
   verified_dir?: string | null;
   problem_statement?: Record<string, unknown> | string | null;
   validation_spec?: ValidationSpec | null;
+  platform_spec?: Record<string, unknown> | SparkPlatformSpec | null;
 }
 
 export type SessionStatus = 'pending' | 'active' | 'ended';
@@ -108,6 +93,12 @@ export interface GameSession {
   services: string[];
   commandHistory: unknown[];
   challenge?: ChallengePublic | ChallengeFull | null;
+  /** compose | spark-platform */
+  runtime?: string | null;
+  userId?: string | null;
+  workspacePrefix?: string | null;
+  entrypoint?: string | null;
+  workspaceUpdatedAt?: number | null;
 }
 
 export type PortMap = Record<string, string | number>;
@@ -120,7 +111,6 @@ export interface DraftMeta {
   author?: string | null;
   tags?: string[];
   catalogueCategories?: string[];
-  bucket?: string | null;
 }
 
 export interface DraftInfraService {

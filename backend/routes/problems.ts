@@ -9,8 +9,12 @@ const { requireInterviewer } = require('../auth/middleware');
 const draftStore = require('../pipeline/stores/problemDraftStore');
 const reviewStore = require('../pipeline/stores/reviewStore');
 const designAgent = require('../pipeline/agents/designAgent');
+const sparkDesignAgent = require('../pipeline/spark/agents/designAgent');
 const schemaAgent = require('../pipeline/agents/schemaAgent');
 const buildPipeline = require('../pipeline/pipelines/buildPipeline');
+const { runSparkAuthoringPipeline, ensureSparkWorkspace } = require('../pipeline/spark');
+const { publishSparkChallenge } = require('../pipeline/spark/publish');
+const { normalizeSparkShapeContract } = require('../pipeline/spark/shapeContract');
 const { loadLatestBuildFailure, recordBuildFailure } = require('../pipeline/build/buildFailureRecord');
 const { promote } = require('../pipeline/promoteToVerified');
 const llm = require('../llm/client');
@@ -22,10 +26,21 @@ const {
   storedServicesMissingImageHints,
 } = require('../pipeline/shape/shapeContract');
 const { normalizeDraft, isDraftReady } = require('../pipeline/draft/draftSchema');
-const { normalizeBucket } = require('../challenges/buckets');
 const {
   ChatDisplayStreamFilter,
 } = require('../pipeline/helpers/chatDisplaySanitizer');
+const { withAgentLabel, agentDisplayName } = require('../pipeline/helpers/agentLogLabel');
+
+function emptySparkDraftPayload(): Record<string, unknown> {
+  return {
+    authoringKind: 'spark-platform',
+    schemaVersion: 1,
+    meta: { name: 'Untitled Spark lab' },
+    description: '',
+    sparkShape: null,
+    sparkShapeApproved: false,
+  };
+}
 
 const router = express.Router();
 
@@ -125,12 +140,21 @@ router.get('/config', (_req: import("express").Request, res: import("express").R
 
 router.get('/', (req: import("express").Request, res: import("express").Response) => {
   const uid = authorId(req);
-  res.json({ drafts: draftStore.list(uid).map(publicDraft) });
+  // Unified library: compose + Spark drafts (New draft creates Spark)
+  const drafts = draftStore.list(uid);
+  res.json({ drafts: drafts.map(publicDraft) });
 });
 
 router.post('/session', async (req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => {
   try {
-    const d = draftStore.makeDraft({ authoredBy: authorId(req) });
+    // New draft → Spark authoring (same UI; Spark agents). Pass { kind: 'compose' } for legacy compose.
+    const kind = req.body?.kind === 'compose' ? 'compose' : 'spark-platform';
+    const d = kind === 'spark-platform'
+      ? draftStore.makeDraft({
+        authoredBy: authorId(req),
+        draft: emptySparkDraftPayload() as never,
+      })
+      : draftStore.makeDraft({ authoredBy: authorId(req) });
     draftStore.set(d.id, d);
     await draftStore.persist(d);
     res.status(201).json({ sessionId: d.id, draft: publicDraft(d) });
@@ -185,35 +209,12 @@ router.delete('/:sessionId', async (req: import("express").Request, res: import(
   } catch (e) { next(e); }
 });
 
-// Patch a small, safe subset of draft.meta. Currently only `bucket` is allowed;
-// extend this allow-list deliberately rather than blanket-merging req.body so we
-// never let clients overwrite agent-emitted contract fields (name/category/etc).
+// Meta patch endpoint retained for compatibility; library buckets removed.
 router.patch('/:sessionId/meta', async (req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => {
   try {
     const d = draftStore.get(req.params.sessionId);
     if (!d) return res.status(404).json({ error: 'draft session not found' });
-
-    const patch: { bucket?: string | null } = {};
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'bucket')) {
-      const raw = req.body.bucket;
-      if (raw === null || raw === '') {
-        patch.bucket = null;
-      } else {
-        const bucket = normalizeBucket(raw);
-        if (!bucket) return res.status(400).json({ error: `unknown bucket: ${raw}` });
-        patch.bucket = bucket;
-      }
-    }
-
-    if (!Object.keys(patch).length) {
-      return res.status(400).json({ error: 'no editable meta fields in request body' });
-    }
-
-    d.draft = d.draft || {};
-    d.draft.meta = { ...(d.draft.meta || {}), ...patch };
-    draftStore.set(d.id, d);
-    await draftStore.persist(d);
-    res.json({ draft: publicDraft(d) });
+    return res.status(400).json({ error: 'no editable meta fields in request body' });
   } catch (e) { next(e); }
 });
 
@@ -225,10 +226,13 @@ router.post('/:sessionId/chat', async (req: import("express").Request, res: impo
 
   shapeState.syncShapePhase(d);
   if (!shapeState.canChatDesign(d)) {
+    const spark = shapeState.isSparkAuthoring(d);
     return res.status(409).json({
       error: d.shapePhase === 'ready'
         ? 'design contract is locked — draft is ready for build'
-        : 'design contract is approved — use Generate schema, or Edit contract to ask more questions in Phase 1',
+        : spark
+          ? 'design contract is approved — use Edit contract to revise, or open Build'
+          : 'design contract is approved — use Generate schema, or Edit contract to ask more questions in Phase 1',
       shapePhase: d.shapePhase,
       designApproved: d.designApproved,
     });
@@ -245,9 +249,13 @@ router.post('/:sessionId/chat', async (req: import("express").Request, res: impo
   const send = openSse(res);
   let assistantText = '';
   const displayFilter = new ChatDisplayStreamFilter();
+  const spark = shapeState.isSparkAuthoring(d);
 
   try {
-    const { extracted } = await designAgent.streamDesignTurn({
+    const turn = spark
+      ? sparkDesignAgent.streamSparkDesignTurn
+      : designAgent.streamDesignTurn;
+    const { extracted } = await turn({
       messages: d.messages.map((m: Record<string, unknown>) => ({ role: m.role, content: m.content })),
       onEvent: (ev: unknown) => {
         const event = ev as Record<string, unknown>;
@@ -274,12 +282,99 @@ router.post('/:sessionId/chat', async (req: import("express").Request, res: impo
   }
 });
 
+// --- Upload Spark shape contract JSON (same Preview path as chat extract) ---
+
+router.post('/:sessionId/spark-shape', async (req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => {
+  try {
+    const d = draftStore.get(req.params.sessionId);
+    if (!d) return res.status(404).json({ error: 'draft session not found' });
+
+    if (!shapeState.isSparkAuthoring(d)) {
+      return res.status(400).json({ error: 'spark-shape upload is only for Spark platform drafts' });
+    }
+
+    shapeState.syncShapePhase(d);
+    if (d.designApproved) {
+      return res.status(409).json({
+        error: 'design contract is locked — use Edit contract before uploading a new shape',
+        shapePhase: d.shapePhase,
+        designApproved: d.designApproved,
+      });
+    }
+
+    const body = req.body || {};
+    const raw = body.contract != null
+      ? body.contract
+      : (body.sparkShape != null ? body.sparkShape : body);
+
+    const normalized = normalizeSparkShapeContract(raw);
+    if (!normalized) {
+      return res.status(400).json({
+        error: 'invalid spark shape JSON — expected a spark_shape_contract object',
+        hint: 'Upload the contract JSON (with meta, brief, data, transform, platform, evalCollection) or wrap it as { "contract": { … } }',
+      });
+    }
+
+    shapeState.applyDesignExtraction(d, normalized as unknown as Record<string, unknown>);
+    // Keep unapproved so Preview → Approve matches the chat flow
+    d.designApproved = false;
+    d.schemaMaterialized = false;
+    d.shapePhase = 'design';
+    (d.draft as Record<string, unknown>).sparkShapeApproved = false;
+    (d.draft as Record<string, unknown>).sparkShape = normalized;
+
+    d.messages = d.messages || [];
+    d.messages.push({
+      role: 'user',
+      content: `[Uploaded spark shape contract JSON — slug: ${normalized.meta.slug}]`,
+    });
+    d.messages.push({
+      role: 'assistant',
+      content: `Loaded shape contract **${normalized.meta.name}** (\`${normalized.meta.slug}\`) into Preview. Review it on the left, then **Approve design** when ready — or keep chatting to refine.`,
+    });
+
+    draftStore.set(d.id, d);
+    await draftStore.persist(d);
+
+    res.json({
+      ok: true,
+      draft: publicDraft(d),
+      ...shapeState.publicShapeFields(d),
+    });
+  } catch (e) { next(e); }
+});
+
 // --- Approve design contract → Phase 2 -----------------------------------
 
 router.post('/:sessionId/approve-design', async (req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => {
   try {
     const d = draftStore.get(req.params.sessionId);
     if (!d) return res.status(404).json({ error: 'draft session not found' });
+
+    if (shapeState.isSparkAuthoring(d)) {
+      const missing = shapeState.sparkShapeMissing(d);
+      if (missing.length) {
+        return res.status(400).json({
+          error: 'spark shape incomplete — chat until the agent emits a full <spark_shape_contract>',
+          missing,
+        });
+      }
+      const draft = d.draft as Record<string, unknown>;
+      draft.sparkShapeApproved = true;
+      d.designApproved = true;
+      d.schemaMaterialized = true;
+      d.shapePhase = 'ready';
+      // Persist normalized shape so Build / Publish see a canonical contract
+      const normalized = normalizeSparkShapeContract(draft.sparkShape);
+      if (normalized) {
+        draft.sparkShape = normalized;
+        draft.meta = { ...(draft.meta as object || {}), name: normalized.meta.name, slug: normalized.meta.slug };
+        draft.description = normalized.brief.description;
+      }
+      draftStore.set(d.id, d);
+      await draftStore.persist(d);
+      return res.json({ ok: true, draft: publicDraft(d) });
+    }
 
     const validation = shapeState.validateShapeContract(d.draft);
     if (!validation.ok) {
@@ -302,6 +397,22 @@ router.post('/:sessionId/revise-design', async (req: import("express").Request, 
   try {
     const d = draftStore.get(req.params.sessionId);
     if (!d) return res.status(404).json({ error: 'draft session not found' });
+
+    if (shapeState.isSparkAuthoring(d)) {
+      if (d.buildStatus === 'review_ready') {
+        return res.status(409).json({
+          error: 'pipeline already passed — create a new draft to change the shape',
+        });
+      }
+      const draft = d.draft as Record<string, unknown>;
+      draft.sparkShapeApproved = false;
+      d.designApproved = false;
+      d.schemaMaterialized = false;
+      d.shapePhase = 'design';
+      draftStore.set(d.id, d);
+      await draftStore.persist(d);
+      return res.json({ ok: true, draft: publicDraft(d) });
+    }
 
     if (isDraftReady(d.draft)) {
       return res.status(409).json({
@@ -330,6 +441,12 @@ router.post('/:sessionId/revise-design', async (req: import("express").Request, 
 router.post('/:sessionId/generate-schema', async (req: import("express").Request, res: import("express").Response) => {
   const d = draftStore.get(req.params.sessionId);
   if (!d) return res.status(404).json({ error: 'draft session not found' });
+
+  if (shapeState.isSparkAuthoring(d)) {
+    return res.status(409).json({
+      error: 'Spark labs have no schema agent — approve the shape, then open Build',
+    });
+  }
 
   shapeState.syncShapePhase(d);
   if (!d.designApproved) {
@@ -407,6 +524,137 @@ router.post('/:sessionId/build', async (req: import("express").Request, res: imp
   if (!d.draft) {
     return res.status(400).json({ error: 'no draft on this session; complete Shape first' });
   }
+
+  // Spark authoring pipeline (Data∥Code → Validate → Eval)
+  if (shapeState.isSparkAuthoring(d)) {
+    if (!d.designApproved || shapeState.sparkShapeMissing(d).length) {
+      return res.status(400).json({
+        error: 'approve a complete spark shape before building',
+        missing: shapeState.sparkShapeMissing(d),
+      });
+    }
+
+    const contract = normalizeSparkShapeContract(
+      (d.draft as { sparkShape?: unknown }).sparkShape,
+    );
+    if (!contract) {
+      return res.status(400).json({ error: 'invalid sparkShape on draft' });
+    }
+
+    const send = openSse(res);
+    console.log(`[build] POST /api/problems/${req.params.sessionId}/build (spark)`);
+
+    const buildMode = req.body?.mode === 'retry' ? 'retry' : (req.body?.mode === 'fresh' ? 'fresh' : null);
+    const isRetry = buildMode === 'retry'
+      || (buildMode !== 'fresh' && d.buildStatus === 'failed');
+    const { loadSparkStageFailure } = require('../pipeline/spark/stageAttempt');
+    const layout = ensureSparkWorkspace(d.id);
+    const previousAttempt = isRetry
+      ? loadSparkStageFailure(layout.eval, {
+        phase: d.buildFailedPhase || null,
+        message: d.buildFailedMsg || null,
+      })
+      : null;
+
+    if (isRetry) {
+      if (d.buildLogs?.length) {
+        d.buildLogs.push('--- Retrying spark build in repair mode ---');
+      }
+    } else {
+      d.buildLogs = [];
+    }
+
+    d.buildStatus = 'building';
+    d.buildAttempts = 0;
+    d.buildCurrentPhase = null;
+    d.buildCurrentAttempt = 0;
+    d.buildLatestChecklist = null;
+    draftStore.set(d.id, d);
+
+    const appendBuildLog = (line: string) => {
+      d.buildLogs = d.buildLogs || [];
+      d.buildLogs.push(line);
+      if (d.buildLogs.length > 1000) d.buildLogs.splice(0, d.buildLogs.length - 1000);
+    };
+
+    const onEvent = (ev: unknown) => {
+      const evRec = ev as Record<string, unknown>;
+      if (evRec.type === 'log' && evRec.message) {
+        const msg = evRec.message as string;
+        const detail = evRec.detail;
+        const raw = detail != null && detail !== ''
+          ? `${msg} — ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`
+          : msg;
+        const line = withAgentLabel(evRec.tag || evRec.agent, raw);
+        evRec.message = line;
+        appendBuildLog(line);
+      }
+      if (evRec.type === 'thinking') {
+        const agent = agentDisplayName(evRec.tag || evRec.agent);
+        const base = typeof evRec.label === 'string' ? evRec.label : 'Working';
+        if (agent && !String(base).includes(agent)) {
+          evRec.label = `${agent} · ${base}`;
+        }
+      }
+      if (evRec.type === 'phase') {
+        d.buildCurrentPhase = evRec.phase as string;
+        d.buildCurrentAttempt = evRec.attempt as number;
+        d.buildAttempts = Math.max(d.buildAttempts || 0, (evRec.attempt as number) || 0);
+      }
+      if (evRec.type === 'error' && evRec.message) {
+        d.buildFailedMsg = evRec.message as string;
+      }
+      draftStore.set(d.id, d);
+      draftStore.snapshotBuildState(d).catch(() => {});
+      send(ev);
+    };
+
+    try {
+      const result = await runSparkAuthoringPipeline({
+        draftSessionId: d.id,
+        contract,
+        onEvent,
+        previousAttempt,
+      });
+      d.buildDir = layout.root;
+      d.buildStatus = result.passed ? 'review_ready' : 'failed';
+      d.buildValidation = { passed: !!result.passed };
+      if (!result.passed) {
+        d.buildFailedMsg = result.message || 'Spark pipeline failed';
+        d.buildFailedPhase = result.lastAttempt?.phase || d.buildCurrentPhase;
+      } else {
+        d.buildFailedMsg = null;
+        d.buildFailedPhase = null;
+        d.builtChallenge = {
+          id: contract.meta.slug,
+          title: contract.meta.name,
+          sandboxType: 'spark-platform',
+          evalPath: result.evalPath,
+        };
+        await reviewStore.upsert({
+          draftSessionId: d.id,
+          title: contract.meta.name,
+          builtChallenge: d.builtChallenge,
+          buildValidation: d.buildValidation,
+          buildDir: d.buildDir,
+        });
+      }
+      draftStore.set(d.id, d);
+      await draftStore.persist(d).catch(() => {});
+      // done/error already emitted by pipeline; ensure done on pass
+      if (result.passed) send({ type: 'done' });
+    } catch (e) {
+      d.buildStatus = 'failed';
+      d.buildFailedMsg = (e as Error).message;
+      draftStore.set(d.id, d);
+      await draftStore.persist(d).catch(() => {});
+      send({ type: 'error', message: (e as Error).message });
+    } finally {
+      try { res.end(); } catch (_e) { /* noop */ }
+    }
+    return;
+  }
+
   if (!isDraftReady(d.draft)) {
     return res.status(400).json({
       error: 'draft incomplete — generate schema from catalogue first (description, rootCause, infra.services)',
@@ -472,15 +720,22 @@ router.post('/:sessionId/build', async (req: import("express").Request, res: imp
     if (evRec.type === 'log' && evRec.message) {
       const msg = evRec.message as string;
       const detail = evRec.detail;
-      const line = detail != null && detail !== ''
+      const raw = detail != null && detail !== ''
         ? `${msg} — ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`
         : msg;
+      const line = withAgentLabel(evRec.tag || evRec.agent, raw);
+      evRec.message = line;
       appendBuildLog(line);
     }
     if (evRec.type === 'thinking') {
       const step = typeof evRec.step === 'number' ? evRec.step : 0;
-      const label = typeof evRec.label === 'string' ? evRec.label : 'Thinking';
-      appendBuildLog(`💭 ${label} (step ${step + 1})`);
+      const agent = agentDisplayName(evRec.tag || evRec.agent);
+      let label = typeof evRec.label === 'string' ? evRec.label : 'Thinking';
+      if (agent && !label.includes(agent)) {
+        label = `${agent} · ${label}`;
+        evRec.label = label;
+      }
+      appendBuildLog(withAgentLabel(evRec.tag || evRec.agent, `💭 ${label} (step ${step + 1})`));
     }
     if (evRec.type === 'codeDiff' && typeof evRec.diff === 'string') {
       const tool = typeof evRec.tool === 'string' ? evRec.tool : 'code';
@@ -488,7 +743,7 @@ router.post('/:sessionId/build', async (req: import("express").Request, res: imp
       const header = evRec.summary
         ? '📋 CODE repair summary'
         : `📋 CODE diff · ${tool} · ${filePath}`;
-      appendBuildLog(header);
+      appendBuildLog(withAgentLabel(evRec.tag || 'code', header));
       for (const diffLine of (evRec.diff as string).split('\n')) {
         appendBuildLog(`📋  ${diffLine}`);
       }
@@ -630,6 +885,36 @@ router.post('/:sessionId/push-to-sandbox', async (req: import("express").Request
   try {
     const d = draftStore.get(req.params.sessionId);
     if (!d) return res.status(404).json({ error: 'draft session not found' });
+
+    if (shapeState.isSparkAuthoring(d)) {
+      if (d.buildStatus !== 'review_ready') {
+        return res.status(400).json({ error: 'run Spark pipeline successfully before publishing' });
+      }
+      const contract = normalizeSparkShapeContract(
+        (d.draft as { sparkShape?: unknown }).sparkShape,
+      );
+      if (!contract) {
+        return res.status(400).json({ error: 'invalid sparkShape on draft' });
+      }
+      const layout = ensureSparkWorkspace(d.id);
+      const published = await publishSparkChallenge({ contract, layout });
+      d.builtChallenge = {
+        ...(d.builtChallenge || {}),
+        challengeId: published.challengeId,
+        id: published.challengeId,
+      };
+      draftStore.set(d.id, d);
+      await draftStore.persist(d).catch(() => {});
+      await draftStore.remove(d.id);
+      await reviewStore.remove(d.id);
+      return res.json({
+        ok: true,
+        slug: published.challengeId,
+        challengeId: published.challengeId,
+        challenge: { id: published.challengeId, sandboxType: 'spark-platform' },
+      });
+    }
+
     const result = await promote({
       buildDir: d.buildDir,
       builtChallenge: d.builtChallenge,

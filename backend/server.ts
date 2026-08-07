@@ -13,19 +13,19 @@ const { WebSocketServer } = require('ws');
 
 const { runMigrations } = require('./db/migrate');
 const { seedCatalogueIfEmpty } = require('./pipeline/catalogue/seeds/runCatalogueSeed');
-const { seedDevTenantsIfEmpty } = require('./auth/seeds/runDevTenantSeed');
 const sessionStore = require('./db/sessionStore');
 const draftStore = require('./pipeline/stores/problemDraftStore');
 const { loadChallengesFromDB, seedChallengesFromDisk } = require('./challenges/loader');
+const { seedManualCatalog } = require('./challenges/seedManualCatalog');
 const { maybeArchiveLegacyChallengesAndPurgeDrafts } = require('./boot/maintenance');
 const { VERIFIED_ROOT } = require('./sandbox/paths');
 
-const { ensurePublicLibrary } = require('./auth/companyStore');
 const contactRoutes = require('./routes/contact');
 const authRoutes = require('./routes/auth');
 const challengeRoutes = require('./routes/challenges');
 const sessionRoutes = require('./routes/session');
 const problemRoutes = require('./routes/problems');
+const sparkAgentRoutes = require('./routes/sparkAgents');
 const reviewRoutes = require('./routes/reviews');
 const memoryRoutes = require('./routes/memories');
 const devDbRoutes = require('./routes/devDb');
@@ -51,6 +51,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/challenges', challengeRoutes);
 app.use('/api/session', sessionRoutes);
 app.use('/api/problems', problemRoutes);
+app.use('/api/spark/agents', sparkAgentRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/memories', memoryRoutes);
 app.use('/api/dev/db', devDbRoutes);
@@ -94,11 +95,16 @@ async function start(): Promise<void> {
   console.log('[boot] running migrations...');
   await runMigrations();
 
+  try {
+    const { cleanupSparkWorkspaces } = require('./workspace/cleanupSparkWorkspaces');
+    console.log('[boot] consolidating spark workspaces (1 per user+challenge)...');
+    await cleanupSparkWorkspaces();
+  } catch (e: unknown) {
+    console.warn('[boot] spark workspace cleanup skipped:', (e as Error).message);
+  }
+
   const catalogueSeeded = await seedCatalogueIfEmpty({ onLog: (msg: string) => console.log(`[boot] ${msg}`) });
   if (catalogueSeeded > 0) console.log(`[boot] catalogue seeded ${catalogueSeeded} entries`);
-
-  const tenantsSeeded = await seedDevTenantsIfEmpty({ onLog: (msg: string) => console.log(`[boot] ${msg}`) });
-  if (tenantsSeeded > 0) console.log(`[boot] dev tenants seeded ${tenantsSeeded} company(ies)`);
 
   console.log('[boot] restoring active sessions from db...');
   await sessionStore.restoreFromDB();
@@ -111,11 +117,11 @@ async function start(): Promise<void> {
   console.log('[boot] restoring draft sessions from db...');
   await draftStore.restoreFromDB().catch((e: Error) => console.warn('[boot] draftStore restore failed:', e.message));
 
-  console.log(`[boot] seeding challenges from ${VERIFIED_ROOT}`);
+  console.log('[boot] disk challenge seed (no-op under catalog v2)...');
   await seedChallengesFromDisk(VERIFIED_ROOT);
 
-  console.log('[boot] ensuring public library exists...');
-  await ensurePublicLibrary().catch((e: Error) => console.warn('[boot] ensurePublicLibrary failed:', e.message));
+  console.log('[boot] seeding manual challenge catalog...');
+  await seedManualCatalog();
 
   console.log('[boot] loading challenges from db...');
   await loadChallengesFromDB();

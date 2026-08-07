@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "kind": "implementation",
+  "meta": {
+    "name": "Daily Product Sales Pipeline",
+    "slug": "daily-product-sales-pipeline-l1",
+    "difficulty": "medium",
+    "tags": ["spark", "batch", "parquet", "minio", "aggregation"],
+    "category": "batch-processing",
+    "play": {
+      "domainId": "data-engineer",
+      "panelId": "spark"
+    }
+  },
+  "brief": {
+    "description": "**Acme Retail** operates **50 retail stores** across the country. Each store generates sales transactions throughout the day and exports them as a **Parquet** dataset at the end of business hours.\n\nEvery night, these datasets are uploaded to the company's central data platform. Before the start of the next business day, the Business Intelligence team expects an aggregated **Product Sales Summary**.\n\nYour pipeline should:\n\n- Process all incoming sales datasets\n- Validate incoming records\n- Ignore malformed records while continuing processing\n- Compute product-level business metrics\n- Publish a daily summary dataset\n",
+    "problemStatement": {
+      "overview": "Build a Spark batch pipeline that reads nightly store Parquet exports, validates records, and computes a product-level daily summary.",
+      "symptoms": [
+        "BI needs a reliable daily_product_summary ready before the next business day.",
+        "Store exports can include malformed rows — reject them without failing the batch."
+      ],
+      "yourTask": "Implement a Spark application that discovers input Parquet files, validates rows, aggregates product metrics, and publishes daily_product_summary.",
+      "yourTaskSteps": [
+        "Discover all input Parquet files for the business date.",
+        "Validate each row; ignore malformed records and continue.",
+        "Aggregate product-level metrics for the day.",
+        "Publish daily_product_summary to the output path.",
+        "Use as many project files as you need; keep src/main.py as the entrypoint."
+      ],
+      "hints": [
+        "Cluster limits and s3a paths are in README.md.",
+        "Reject nulls and non-positive quantity / unit_price; keep processing.",
+        "Input is hive-partitioned by store_id — spark.read.parquet fills null store_id from the path.",
+        "total_revenue = sum(quantity × unit_price); stores_sold_in = distinct store_id per product."
+      ],
+      "inputSchema": [
+        { "column": "transaction_id", "type": "STRING" },
+        { "column": "store_id", "type": "INT" },
+        { "column": "product_id", "type": "INT" },
+        { "column": "customer_id", "type": "INT" },
+        { "column": "quantity", "type": "INT" },
+        { "column": "unit_price", "type": "DECIMAL(10,2)" },
+        { "column": "transaction_timestamp", "type": "TIMESTAMP" }
+      ],
+      "expectedOutput": [
+        { "column": "business_date", "description": "Processing date" },
+        { "column": "product_id", "description": "Product identifier" },
+        { "column": "total_units_sold", "description": "Sum of quantity sold" },
+        { "column": "total_revenue", "description": "Sum of quantity × unit_price" },
+        { "column": "transaction_count", "description": "Total number of transactions" },
+        { "column": "stores_sold_in", "description": "Distinct stores selling the product" }
+      ]
+    }
+  },
+  "kindSpec": {
+    "starterMode": "stub"
+  },
+  "data": {
+    "mode": "batch",
+    "businessDate": "2026-01-15",
+    "format": "parquet",
+    "partitions": ["business_date", "store_id"],
+    "scale": {
+      "stores": 50,
+      "approxRows": 2000000,
+      "productCardinality": 1000
+    },
+    "schema": [
+      { "name": "transaction_id", "type": "string", "nullable": false },
+      { "name": "store_id", "type": "int", "nullable": true },
+      { "name": "product_id", "type": "int", "nullable": true },
+      { "name": "customer_id", "type": "int", "nullable": false },
+      { "name": "quantity", "type": "int", "nullable": true },
+      { "name": "unit_price", "type": "decimal(10,2)", "nullable": true },
+      { "name": "transaction_timestamp", "type": "timestamp", "nullable": false }
+    ],
+    "malformed": {
+      "enabled": true,
+      "rate": 0.01,
+      "patterns": [
+        "null_product_id",
+        "null_store_id",
+        "non_positive_quantity",
+        "non_positive_unit_price"
+      ]
+    },
+    "inputLayout": {
+      "targetPrefixHint": "challenges/daily-product-sales-pipeline-l1/input/",
+      "hiveStyle": true
+    }
+  },
+  "transform": {
+    "pattern": "aggregate",
+    "validationRules": [
+      {
+        "id": "product_id_not_null",
+        "description": "Drop rows with null product_id",
+        "expr": "product_id IS NOT NULL"
+      },
+      {
+        "id": "store_id_not_null",
+        "description": "Drop rows with null store_id (after partition fill at read time)",
+        "expr": "store_id IS NOT NULL"
+      },
+      {
+        "id": "quantity_positive",
+        "description": "Drop null or non-positive quantity",
+        "expr": "quantity IS NOT NULL AND quantity > 0"
+      },
+      {
+        "id": "unit_price_positive",
+        "description": "Drop null or non-positive unit_price",
+        "expr": "unit_price IS NOT NULL AND unit_price > 0"
+      }
+    ],
+    "groupBy": ["product_id"],
+    "aggregations": [
+      { "output": "total_units_sold", "type": "int", "expr": "sum(quantity)" },
+      {
+        "output": "total_revenue",
+        "type": "float",
+        "atol": 0.0001,
+        "expr": "sum(quantity * unit_price)"
+      },
+      { "output": "transaction_count", "type": "int", "expr": "count(*)" },
+      {
+        "output": "stores_sold_in",
+        "type": "int",
+        "expr": "count(distinct store_id)"
+      }
+    ]
+  },
+  "platform": {
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "executors": 4,
+      "executorCores": 1,
+      "executorMemory": "1g"
+    },
+    "gradeChecks": [
+      "Discovers all incoming Parquet files for the business date",
+      "Validates rows and ignores malformed records without failing the batch",
+      "Writes daily_product_summary with the required columns",
+      "Computes correct product-level aggregates (units, revenue, counts, stores_sold_in)",
+      "Runs as a Spark application within cluster resource limits"
+    ]
+  },
+  "evalCollection": {
+    "fromJob": {
+      "artifact": "json",
+      "envOutputPath": "OUTPUT_PATH",
+      "wrapper": "rows"
+    },
+    "keys": ["business_date", "product_id"],
+    "columns": [
+      { "name": "business_date", "type": "string", "role": "key" },
+      { "name": "product_id", "type": "int", "role": "key" },
+      { "name": "total_units_sold", "type": "int", "role": "value" },
+      {
+        "name": "total_revenue",
+        "type": "float",
+        "atol": 0.0001,
+        "role": "value"
+      },
+      { "name": "transaction_count", "type": "int", "role": "value" },
+      { "name": "stores_sold_in", "type": "int", "role": "value" }
+    ],
+    "publishAs": "challenges/daily-product-sales-pipeline-l1/eval/solution.json"
+  }
+}

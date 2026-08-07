@@ -1,33 +1,9 @@
 // ── Shared primitive types ────────────────────────────────────────────────────
 
-export type AuthRole = 'interviewer' | 'admin' | 'candidate';
-
-export type BucketId =
-  | 'software-engineer'
-  | 'data-engineer'
-  | 'platform-engineer'
-  | 'devops';
-
-// ── Entity records ────────────────────────────────────────────────────────────
-
 export interface UserRecord {
   id: string;
   email: string;
-  role: AuthRole;
-  companyId?: string | null;
   name?: string | null;
-}
-
-export interface InviteRecord {
-  token: string;
-  challengeId: string;
-  name?: string | null;
-  email?: string | null;
-  candidateEmail?: string | null;
-  challengeTitle?: string | null;
-  conductedByName?: string | null;
-  used?: boolean;
-  expired?: boolean;
 }
 
 export interface ValidationSpec {
@@ -38,6 +14,30 @@ export interface ValidationSpec {
   [key: string]: unknown;
 }
 
+/** Play runtime. compose = per-session Docker sandbox; spark-platform = shared batch cluster. */
+export type SandboxType = 'compose' | 'spark-platform';
+
+export interface SparkPlatformLimits {
+  driver: number;
+  executors: number;
+  executorCores: number;
+  executorMemory: string;
+}
+
+/** Metadata for batch Spark challenges (Daily Product Sales, etc.). */
+export interface SparkPlatformSpec {
+  inputPath: string;
+  outputPath?: string;
+  /** Author golden — challenges/<challengeId>/eval/solution.json for Submit grading. */
+  evalSolutionPath: string;
+  businessDate: string;
+  language: 'python';
+  starterFileName: string;
+  limits: SparkPlatformLimits;
+  /** Checklist items shown in the brief (human-readable). */
+  gradeChecks: string[];
+}
+
 export interface ChallengePublic {
   id: string;
   title: string;
@@ -45,31 +45,67 @@ export interface ChallengePublic {
   difficulty: string;
   tags: string[];
   category: string;
-  bucket: BucketId | null;
   finalized: boolean;
-  archived: boolean;
-  sandboxType: string | null;
-  /** Present when the server returns full records to authenticated interviewers. */
-  authored_by?: string | null;
-  visibility?: string;
+  sandboxType: SandboxType | string | null;
+  problemStatement?: Record<string, unknown> | string | null;
+  sparkPlatform?: SparkPlatformSpec | null;
 }
 
 export interface ChallengeFull extends ChallengePublic {
-  authored_by: string | null;
-  visibility: string;
-  library_id: string | null;
   verifiedDir: string | null;
   problemStatement: Record<string, unknown> | string | null;
   validationSpec: ValidationSpec | null;
+  /** Present when sandboxType === 'spark-platform'. */
+  sparkPlatform?: SparkPlatformSpec | null;
 }
 
 // ── App-level state types ─────────────────────────────────────────────────────
 
-export type AuthMode = 'resolving' | 'unauthenticated' | 'interviewer' | 'candidate';
+export type AuthMode = 'resolving' | 'unauthenticated' | 'interviewer';
 
 export type PlayState = 'library' | 'loading' | 'active' | 'ended';
 
-export type WorkspaceTab = 'problem' | 'terminal' | 'editor' | 'browser' | 'metrics';
+export type WorkspaceTab =
+  | 'problem'
+  | 'terminal'
+  | 'editor'
+  | 'browser'
+  | 'metrics'
+  | 'jobs'
+  | 'data'
+  | 'grade';
+
+export type SparkJobStatus =
+  | 'idle'
+  | 'submitted'
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed';
+
+export interface SparkJobRecord {
+  id: string;
+  name: string;
+  status: SparkJobStatus;
+  mode?: 'run' | 'submit';
+  submittedAt: number;
+  finishedAt?: number | null;
+  logs: string[];
+  error?: string | null;
+  gradeStatus?: 'pending' | 'grading' | 'passed' | 'failed' | null;
+  gradeResult?: {
+    passed?: boolean;
+    kind?: string;
+    summary?: string;
+    checks?: Array<{ id: string; label: string; passed: boolean; detail?: string }>;
+  } | null;
+  gradedAt?: number | null;
+  /** Spark application id (e.g. spark-xxxx) once the cluster assigns it. */
+  applicationId?: string | null;
+  /** Deep link to this app on the History Server (or server root if id pending). */
+  historyUrl?: string | null;
+  historyServerUrl?: string | null;
+}
 
 export interface ActiveSession {
   id: string;
@@ -80,6 +116,8 @@ export interface ActiveSession {
   portMap: Record<string, string | number> | null;
   services: string[];
   terminalService: string | null;
+  /** Set for spark-platform sessions (no compose). */
+  runtime?: SandboxType | string | null;
 }
 
 export interface EndSessionResult {
@@ -91,7 +129,6 @@ export interface EndSessionResult {
 export interface AppState {
   authMode: AuthMode;
   currentUser: UserRecord | null;
-  candidateInvite: (InviteRecord & { token?: string }) | null;
   playState: PlayState;
   challenges: ChallengePublic[];
   challengesError: string | null;
@@ -250,6 +287,9 @@ export interface ChallengeDraft {
   brokenState?: DraftBrokenState;
   sandboxSpec?: Record<string, unknown>;
   problemStatement?: Record<string, unknown> | string | null;
+  authoringKind?: 'compose' | 'spark-platform' | string;
+  sparkShape?: Record<string, unknown> | null;
+  sparkShapeApproved?: boolean;
 }
 
 export interface ProblemSession {
@@ -276,6 +316,7 @@ export interface ProblemSession {
   schemaMaterialized?: boolean;
   shapeContractComplete?: boolean;
   shapeContractMissing?: string[];
+  authoringKind?: string | null;
   reviewFeedback?: ReviewFeedbackEntry | null;
   updatedAt?: string;
 }

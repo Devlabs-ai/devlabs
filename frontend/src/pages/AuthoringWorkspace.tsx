@@ -40,7 +40,11 @@ function statusLabel(status: string | null | undefined): string {
 }
 
 function draftTitle(d: ProblemSession | null | undefined): string {
-  return d?.draft?.meta?.name ?? d?.draft?.title ?? 'Untitled draft';
+  const spark = d?.draft as { sparkShape?: { meta?: { name?: string } }; authoringKind?: string } | undefined;
+  return spark?.sparkShape?.meta?.name
+    ?? d?.draft?.meta?.name
+    ?? d?.draft?.title
+    ?? 'Untitled draft';
 }
 
 function formatRelativeTime(iso: string | null | undefined): string {
@@ -247,9 +251,24 @@ export default function AuthoringWorkspace({ onPromoted: _onPromoted }: Authorin
   const draftLoading = Boolean(urlDraftId && !activeDraft);
   const stuckBuilding = activeDraft?.buildStatus === 'building';
 
-  const setTab = useCallback((t: string): void => {
-    if (activeDraftId) navigate(`/authoring/${activeDraftId}/${t}`, { replace: true });
-  }, [navigate, activeDraftId]);
+  /** Open Build tab without starting (e.g. Publish after success). */
+  const goPipeline = useCallback((): void => {
+    if (!activeDraftId) return;
+    navigate(`/authoring/${activeDraftId}/pipeline`, { replace: true });
+  }, [activeDraftId, navigate]);
+
+  /** Open Build tab and start (fresh first run, or repair retry after failure). */
+  const goBuildAndStart = useCallback((): void => {
+    if (!activeDraftId) return;
+    const failed = activeDraft?.buildStatus === 'failed';
+    navigate(`/authoring/${activeDraftId}/pipeline`, {
+      replace: true,
+      state: {
+        autoStart: true,
+        autoStartMode: failed ? 'retry' : 'fresh',
+      },
+    });
+  }, [activeDraftId, activeDraft?.buildStatus, navigate]);
 
   const goPipelineLogs = useCallback((attempt: number | null = null): void => {
     if (!activeDraftId) return;
@@ -471,7 +490,8 @@ export default function AuthoringWorkspace({ onPromoted: _onPromoted }: Authorin
                   draft={activeDraft}
                   llmConfig={llmConfig}
                   onGoPipelineLogs={goPipelineLogs}
-                  onGoBuild={() => setTab('pipeline')}
+                  onGoBuild={goBuildAndStart}
+                  onGoPipeline={goPipeline}
                   onGoReview={() => goReview(activeDraftId)}
                   onDraftChanged={handleDraftChanged}
                   onImportDraft={handleImportDraft}

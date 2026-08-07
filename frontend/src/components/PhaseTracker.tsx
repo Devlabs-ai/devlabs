@@ -3,12 +3,19 @@ import { buildCostLabel } from '../utils/buildCost';
 
 export const PIPELINE_PHASES = ['CODE', 'SPIN', 'VALIDATE'];
 
+/** Spark authoring phases (Data → Code → Validation → Eval). */
+export const SPARK_PIPELINE_PHASES = ['DATA', 'CODE', 'VALIDATION', 'EVAL'];
+
 const PHASE_META: Record<string, { title: string; subtitle: string }> = {
-  CODE: { title: 'Code', subtitle: 'Scaffold & edit files' },
+  CODE: { title: 'Code', subtitle: 'Starter & solution' },
   GENERATE: { title: 'Code', subtitle: 'Scaffold & edit files' },
   WRITE: { title: 'Code', subtitle: 'Scaffold & edit files' },
   SPIN: { title: 'Spin', subtitle: 'Compose & services' },
   VALIDATE: { title: 'Validate', subtitle: 'Checklist & judge' },
+  DATA: { title: 'Data', subtitle: 'Generation scripts' },
+  'DATA+CODE': { title: 'Data → Code', subtitle: 'Legacy combined phase' },
+  VALIDATION: { title: 'Validate', subtitle: 'Shape vs assets' },
+  EVAL: { title: 'Eval', subtitle: 'Run gen → solution → collect' },
 };
 
 const PHASE_ID_TO_KEY: Record<string, string> = {
@@ -128,14 +135,16 @@ function liveStepState(
   phase: string | null | undefined,
   validation: { passed?: boolean } | null | undefined,
   status: string | null | undefined,
+  phaseOrder: string[],
+  terminalPhase: string,
 ): StepState {
-  const key = PIPELINE_PHASES[idx];
+  const key = phaseOrder[idx];
   const active = normalizePipelinePhase(phase);
   let done = phaseIdx > idx;
   let isCurrent = !finished && key === active;
 
   if (finished) {
-    if (key === 'VALIDATE') {
+    if (key === terminalPhase) {
       done = !!validation?.passed || status === 'review_ready';
     } else {
       done = idx <= phaseIdx;
@@ -143,7 +152,7 @@ function liveStepState(
     isCurrent = false;
   }
 
-  const failed = finished && key === 'VALIDATE' && validation && !validation.passed;
+  const failed = finished && key === terminalPhase && validation && !validation.passed;
 
   if (failed) return 'failed';
   if (done) return 'completed';
@@ -156,18 +165,29 @@ function buildLiveSteps(
   validation: { passed?: boolean } | null | undefined,
   status: string | null | undefined,
   running: boolean,
+  phaseOrder: string[] = PIPELINE_PHASES,
 ): PipelineStep[] {
   const finished = !running
     && (status === 'review_ready' || status === 'failed' || !!validation);
-  const phaseIdx = PIPELINE_PHASES.indexOf(normalizePipelinePhase(phase));
+  const phaseIdx = phaseOrder.indexOf(normalizePipelinePhase(phase));
+  const terminalPhase = phaseOrder[phaseOrder.length - 1] || 'VALIDATE';
 
-  return PIPELINE_PHASES.map((key, idx) => {
+  return phaseOrder.map((key, idx) => {
     const meta = PHASE_META[key] || { title: key, subtitle: key };
     return {
       id: key,
       title: meta.title,
       subtitle: meta.subtitle,
-      state: liveStepState(idx, phaseIdx, finished, phase, validation, status),
+      state: liveStepState(
+        idx,
+        phaseIdx,
+        finished,
+        phase,
+        validation,
+        status,
+        phaseOrder,
+        terminalPhase,
+      ),
       index: idx,
     };
   });
@@ -213,6 +233,8 @@ export interface PhaseTrackerProps {
   running: boolean;
   attemptLabelOnly?: boolean;
   onSelect?: (attempt?: number) => void;
+  /** Override phase order (defaults to compose CODE/SPIN/VALIDATE). */
+  phaseOrder?: string[];
 }
 
 /** Live build tracker (Build tab and pipeline history "current run"). */
@@ -225,6 +247,7 @@ export function PhaseTracker({
   running,
   attemptLabelOnly = false,
   onSelect,
+  phaseOrder = PIPELINE_PHASES,
 }: PhaseTrackerProps): JSX.Element {
   const attemptLabel = attemptLabelOnly
     ? `Attempt ${attempt || 0}`
@@ -236,7 +259,7 @@ export function PhaseTracker({
     attemptLabelOnly ? 'phase-tracker--compact' : '',
   ].filter(Boolean).join(' ');
 
-  const steps = buildLiveSteps(phase, validation, status, running);
+  const steps = buildLiveSteps(phase, validation, status, running, phaseOrder);
 
   return trackerShell({
     className,

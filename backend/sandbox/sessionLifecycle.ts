@@ -10,7 +10,6 @@ const composeManager = require('./composeManager');
 const portAllocator = require('./portAllocator');
 const sessionStore = require('../db/sessionStore');
 const loader = require('../challenges/loader');
-const invites = require('../auth/invites');
 const { SESSIONS_ROOT } = require('./paths');
 
 function copyDirSync(src: string, dest: string): void {
@@ -39,10 +38,9 @@ function rmDirSync(p: string): void {
 
 interface StartOpts {
   challengeId?: string | null;
-  candidateToken?: string | null;
 }
 
-async function start({ challengeId, candidateToken }: StartOpts = {}): Promise<{ session: GameSession; challenge: unknown }> {
+async function start({ challengeId }: StartOpts = {}): Promise<{ session: GameSession; challenge: unknown }> {
   if (!challengeId) {
     const e = new Error('challengeId is required');
     e.status = 400;
@@ -56,29 +54,12 @@ async function start({ challengeId, candidateToken }: StartOpts = {}): Promise<{
     throw e;
   }
 
-  if (challenge.archived) {
-    const e = new Error(`challenge "${challengeId}" is archived and cannot be played`);
-    e.status = 403;
-    throw e;
-  }
-
   if (!challenge.verifiedDir || !fs.existsSync(challenge.verifiedDir)) {
     const e = new Error(
       `challenge "${challengeId}" has no verifiedDir; legacy sandbox path is not enabled in this MVP`,
     );
     e.status = 400;
     throw e;
-  }
-
-  let candidateName: string | null = null;
-  if (candidateToken) {
-    const invite = await invites.resolveInvite(candidateToken);
-    if (!invite || invite.expired) {
-      const e = new Error(invite?.expired ? 'invite link has expired' : 'invalid candidate token');
-      e.status = invite?.expired ? 410 : 401;
-      throw e;
-    }
-    candidateName = invite.name;
   }
 
   const sessionId = uuidv4();
@@ -93,7 +74,7 @@ async function start({ challengeId, candidateToken }: StartOpts = {}): Promise<{
   const session: GameSession & Record<string, unknown> = sessionStore.makeSession({
     id: sessionId,
     challengeId,
-    candidateName,
+    candidateName: null,
     status: 'active',
   });
   session.buildDir = sessionDir;
@@ -121,14 +102,6 @@ async function start({ challengeId, candidateToken }: StartOpts = {}): Promise<{
     const newErr = new Error(`failed to start sandbox: ${err.message}`);
     (newErr as any).status = 500;
     throw newErr;
-  }
-
-  if (candidateToken) {
-    try {
-      await invites.markUsed(candidateToken);
-    } catch (e: unknown) {
-      console.warn(`[lifecycle] failed to mark invite used: ${(e as Error).message}`);
-    }
   }
 
   await sessionStore.persistRuntime(session);

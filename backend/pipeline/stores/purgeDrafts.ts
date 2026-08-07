@@ -6,7 +6,6 @@ const fs = require('fs');
 const path = require('path');
 const pool = require('../../db/pool');
 const draftStore = require('./problemDraftStore');
-const codeChunkStore = require('./codeChunkStore');
 const { BUILDS_ROOT } = require('../../sandbox/paths');
 
 function rmDirSync(dir: string | null | undefined): void {
@@ -19,8 +18,6 @@ async function purgeAllDrafts(): Promise<{ purged: number }> {
 
   for (const row of rows as Array<{ id: string; build_dir: string | null }>) {
     if (row.build_dir) rmDirSync(row.build_dir);
-    // eslint-disable-next-line no-await-in-loop
-    await codeChunkStore.purgeByDraftSession(row.id).catch(() => {});
   }
 
   if (fs.existsSync(BUILDS_ROOT)) {

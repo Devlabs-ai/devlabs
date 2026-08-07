@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MarkdownProse from '../components/MarkdownProse';
-import { ChecklistPhaseTracker, PhaseTracker, type ChecklistEntry } from '../components/PhaseTracker';
+import { ChecklistPhaseTracker, PhaseTracker, SPARK_PIPELINE_PHASES, type ChecklistEntry } from '../components/PhaseTracker';
 import { DesignValidationChecklist } from '../components/ValidationChecklist';
 import {
   streamChat,
   approveDesign,
   reviseDesign,
   generateSchema,
+  uploadSparkShape,
 } from '../services/problemApi';
 import type { ProblemSession, ChallengeDraft } from '../types/domain';
 import { formatChatForDisplay } from '../utils/chatDisplaySanitizer';
@@ -22,6 +23,8 @@ interface ProblemSetterPageProps {
   llmConfig: LlmConfig | null;
   onGoPipelineLogs: (attempt?: number) => void;
   onGoBuild: () => void;
+  /** Open Build tab without auto-starting (publish / inspect). */
+  onGoPipeline?: () => void;
   onGoReview?: () => void;
   onDraftChanged: (draft: ProblemSession) => void;
   onImportDraft: (json: string | object) => void;
@@ -107,9 +110,13 @@ function PipelineHistoryRail({ draft, onGoPipelineLogs }: PipelineHistoryRailPro
   const checklists = [...(draft?.buildChecklists || [])].reverse() as ChecklistEntry[];
   const attempts = draft?.buildAttempts || 0;
   const maxAttempts = (draft?.buildLatestChecklist as { total?: number } | undefined)?.total
-    || (checklists[0] as { total?: number } | undefined)?.total || 5;
-  const hasRuns = status !== 'draft' || checklists.length > 0;
+    || (checklists[0] as { total?: number } | undefined)?.total
+    || (isSparkSession(draft) ? 2 : 5);
+  const hasRuns = status !== 'draft' && status != null && status !== '';
   const isBuilding = status === 'building';
+  const spark = isSparkSession(draft);
+  const passed = status === 'review_ready';
+  const failed = status === 'failed';
 
   useEffect(() => {
     setPage(0);
@@ -124,7 +131,7 @@ function PipelineHistoryRail({ draft, onGoPipelineLogs }: PipelineHistoryRailPro
 
   return (
     <div className="pipeline-history">
-      {!hasRuns ? (
+      {!hasRuns && checklists.length === 0 ? (
         <p className="setter-rail-empty">No pipeline runs for this draft yet.</p>
       ) : (
         <>
@@ -139,8 +146,47 @@ function PipelineHistoryRail({ draft, onGoPipelineLogs }: PipelineHistoryRailPro
                 validation={draft.buildValidation as { passed?: boolean } | null}
                 running
                 attemptLabelOnly
+                phaseOrder={spark ? SPARK_PIPELINE_PHASES : undefined}
                 onSelect={onGoPipelineLogs}
               />
+            </section>
+          )}
+
+          {!isBuilding && hasRuns && (
+            <section className="pipeline-history-section">
+              <h4 className="pipeline-history-section-title">Latest build</h4>
+              <div className={`pipeline-history-summary ${passed ? 'ok' : failed ? 'bad' : ''}`}>
+                <div className="pipeline-history-summary-row">
+                  <span className="pipeline-history-summary-status">
+                    {passed ? 'Passed' : failed ? 'Failed' : status}
+                  </span>
+                  {attempts > 0 && (
+                    <span className="dim">
+                      {attempts} attempt{attempts === 1 ? '' : 's'}
+                    </span>
+                  )}
+                </div>
+                {draft.buildFailedPhase && (
+                  <p className="pipeline-history-summary-meta dim">
+                    Phase <code>{draft.buildFailedPhase}</code>
+                  </p>
+                )}
+                {failed && draft.buildFailedMsg && (
+                  <p className="pipeline-history-summary-msg">{draft.buildFailedMsg}</p>
+                )}
+                {passed && (
+                  <p className="pipeline-history-summary-meta dim">
+                    {spark ? 'Data → Code → Validate → Eval completed.' : 'Build validation passed.'}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="sm"
+                  onClick={() => onGoPipelineLogs()}
+                >
+                  View build logs
+                </button>
+              </div>
             </section>
           )}
 
@@ -248,6 +294,10 @@ function shapeContractMissingLocal(d: ChallengeDraft | null | undefined): string
   return missing;
 }
 
+function isSparkSession(draft: ProblemSession | null | undefined): boolean {
+  return (draft?.authoringKind || draft?.draft?.authoringKind) === 'spark-platform';
+}
+
 type ShapePhase = 'design' | 'schema' | 'ready' | string;
 
 interface PhaseBadgeProps {
@@ -255,18 +305,27 @@ interface PhaseBadgeProps {
   designApproved: boolean;
   draftReady: boolean;
   schemaMaterialized: boolean;
+  spark?: boolean;
 }
 
-function PhaseBadge({ shapePhase, designApproved, draftReady, schemaMaterialized }: PhaseBadgeProps): JSX.Element {
-  const labels: Record<string, string> = {
-    design: 'Phase 1 — Design contract',
-    schema: schemaMaterialized && draftReady
-      ? 'Ready to build'
-      : schemaMaterialized
-        ? 'Phase 2 — Schema generated'
-        : 'Phase 2 — Generate schema',
-    ready: 'Ready to build',
-  };
+function PhaseBadge({
+  shapePhase, designApproved, draftReady, schemaMaterialized, spark,
+}: PhaseBadgeProps): JSX.Element {
+  const labels: Record<string, string> = spark
+    ? {
+      design: 'Phase 1 — Spark shape',
+      schema: 'Ready to build',
+      ready: 'Ready to build',
+    }
+    : {
+      design: 'Phase 1 — Design contract',
+      schema: schemaMaterialized && draftReady
+        ? 'Ready to build'
+        : schemaMaterialized
+          ? 'Phase 2 — Schema generated'
+          : 'Phase 2 — Generate schema',
+      ready: 'Ready to build',
+    };
   return (
     <span className={`pill shape-phase ${shapePhase}`}>
       {labels[shapePhase] || shapePhase}
@@ -280,11 +339,80 @@ interface DescriptionPanelProps {
   designApproved: boolean;
   schemaMaterialized: boolean;
   shapeContractMissing: string[];
+  spark?: boolean;
 }
 
 function DescriptionPanel({
-  draft, shapePhase, designApproved, schemaMaterialized, shapeContractMissing,
+  draft, shapePhase, designApproved, schemaMaterialized, shapeContractMissing, spark,
 }: DescriptionPanelProps): JSX.Element {
+  const sparkShape = draft?.sparkShape as {
+    meta?: { name?: string; difficulty?: string; tags?: string[]; category?: string; slug?: string };
+    kind?: string;
+    brief?: { description?: string; problemStatement?: { overview?: string; yourTask?: string } };
+    data?: { businessDate?: string; format?: string };
+    platform?: { language?: string };
+  } | null | undefined;
+
+  if (spark) {
+    const description = sparkShape?.brief?.description?.trim() || draft?.description?.trim();
+    const missing = shapeContractMissing || [];
+    if (!description && !sparkShape) {
+      return (
+        <div className="draft-preview-empty">
+          No Spark shape yet. Describe the lab in chat, or use{' '}
+          <strong>Upload shape JSON</strong> under the composer. The Preview
+          updates the same way either path.
+        </div>
+      );
+    }
+    const meta = sparkShape?.meta || draft?.meta || {};
+    return (
+      <div className="description-panel">
+        {(meta as { name?: string }).name && (
+          <h3 className="contract-title">{(meta as { name?: string }).name}</h3>
+        )}
+        <div className="contract-pills">
+          {sparkShape?.kind && <span className="contract-pill">{sparkShape.kind}</span>}
+          {(meta as { difficulty?: string }).difficulty && (
+            <span className="contract-pill">{(meta as { difficulty?: string }).difficulty}</span>
+          )}
+          {((meta as { tags?: string[] }).tags || []).slice(0, 6).map((t) => (
+            <span key={t} className="contract-pill">{t}</span>
+          ))}
+        </div>
+        {description && (
+          <div className="contract-section">
+            <h4 className="contract-section-title">Brief</h4>
+            <MarkdownProse text={description} className="markdown-prose contract-prose" />
+          </div>
+        )}
+        {sparkShape?.brief?.problemStatement?.overview && (
+          <div className="contract-section">
+            <h4 className="contract-section-title">Overview</h4>
+            <p className="description-body">{sparkShape.brief.problemStatement.overview}</p>
+          </div>
+        )}
+        {missing.length > 0 && shapePhase === 'design' && !designApproved && (
+          <p className="contract-footnote warn">Still needed: {missing.join(', ')}</p>
+        )}
+        {shapePhase === 'design' && !designApproved && missing.length === 0 && description && (
+          <p className="contract-footnote">
+            Shape looks complete. Click <strong>Approve design</strong> when ready to build.
+          </p>
+        )}
+        {designApproved && (
+          <p className="contract-footnote">
+            Shape approved — use <strong>Build pipeline</strong> on the right.
+          </p>
+        )}
+        <details className="json-toggle">
+          <summary>Full shape JSON</summary>
+          <pre>{JSON.stringify(sparkShape || draft, null, 2)}</pre>
+        </details>
+      </div>
+    );
+  }
+
   const description = draft?.description?.trim();
   const rootCause = draft?.brokenState?.rootCause?.trim();
   const meta = draft?.meta || {};
@@ -511,9 +639,23 @@ function ShapePreviewPanel({
   draft, shapePhase, designApproved, schemaMaterialized, shapeContractMissing,
 }: ShapePreviewPanelProps): JSX.Element {
   const d = draft?.draft;
-  const showSchema = !!schemaMaterialized;
+  const spark = isSparkSession(draft);
 
-  if (showSchema) {
+  // Spark has no schema agent — always show shape/brief preview
+  if (spark) {
+    return (
+      <DescriptionPanel
+        draft={d}
+        shapePhase={shapePhase}
+        designApproved={designApproved}
+        schemaMaterialized={schemaMaterialized}
+        shapeContractMissing={shapeContractMissing}
+        spark
+      />
+    );
+  }
+
+  if (schemaMaterialized) {
     return <SchemaPreview draft={d} compact />;
   }
 
@@ -544,6 +686,7 @@ export default function ProblemSetterPage({
   llmConfig,
   onGoPipelineLogs,
   onGoBuild,
+  onGoPipeline,
   onGoReview,
   onDraftChanged,
   onImportDraft,
@@ -557,27 +700,38 @@ export default function ProblemSetterPage({
   const [err, setErr] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const shapeFileRef = useRef<HTMLInputElement>(null);
 
   const shapePhase: ShapePhase = draft?.shapePhase || 'design';
   const designApproved = !!draft?.designApproved;
   const schemaMaterialized = !!draft?.schemaMaterialized;
   const llmReady = !!llmConfig?.llmConfigured;
+  const spark = isSparkSession(draft);
+  const buildSucceeded = isBuildSucceeded(draft);
   const canChat = shapePhase === 'design' && !designApproved;
+  const canUploadShape = spark && !designApproved && !busy;
   const shapeContractComplete = draft?.shapeContractComplete
-    ?? isShapeContractCompleteLocal(draft?.draft);
+    ?? (spark
+      ? Boolean(draft?.draft?.sparkShape || (draft as { sparkShape?: unknown })?.sparkShape)
+      : isShapeContractCompleteLocal(draft?.draft));
   const shapeContractMissing = (draft?.shapeContractMissing?.length
     && draft?.shapeContractComplete === false
-    && !isShapeContractCompleteLocal(draft?.draft))
+    && !(spark ? Boolean(draft?.draft?.sparkShape || (draft as { sparkShape?: unknown })?.sparkShape) : isShapeContractCompleteLocal(draft?.draft)))
     ? draft.shapeContractMissing
-    : shapeContractMissingLocal(draft?.draft);
-  const schemaReadyForBuild = !!(
-    schemaMaterialized
-    && (draft?.draftReady || isDraftBuildReadyLocal(draft?.draft))
-  );
-  const canRevise = designApproved && !schemaMaterialized;
-  const canApprove = !designApproved && llmReady && shapeContractComplete;
-  const canGenerateSchema = designApproved && !schemaMaterialized && llmReady && shapeContractComplete;
-  const buildSucceeded = isBuildSucceeded(draft);
+    : (spark ? (draft?.shapeContractMissing || []) : shapeContractMissingLocal(draft?.draft));
+  // Spark: approve → ready (no schema agent). Compose: need schema materialized.
+  const schemaReadyForBuild = spark
+    ? !!(designApproved && shapeContractComplete)
+    : !!(
+      schemaMaterialized
+      && (draft?.draftReady || isDraftBuildReadyLocal(draft?.draft))
+    );
+  const canRevise = spark
+    ? designApproved && !buildSucceeded
+    : designApproved && !schemaMaterialized;
+  // Spark upload path does not need LLM; compose approve still does.
+  const canApprove = !designApproved && shapeContractComplete && (spark || llmReady);
+  const canGenerateSchema = !spark && designApproved && !schemaMaterialized && llmReady && shapeContractComplete;
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -602,7 +756,9 @@ export default function ProblemSetterPage({
     setBusy(true);
     setErr(null);
     setStreamingText('');
-    setStreamingPending('Shaping design contract in Preview…');
+    setStreamingPending(spark
+      ? 'Shaping Spark contract in Preview…'
+      : 'Shaping design contract in Preview…');
 
     const optimistic: ProblemSession = {
       ...draft,
@@ -614,7 +770,7 @@ export default function ProblemSetterPage({
     abortRef.current = controller;
 
     let visibleText = '';
-    let partial: ChallengeDraft = optimistic.draft || {};
+    let partial: ChallengeDraft = optimistic.draft || { authoringKind: spark ? 'spark-platform' : undefined };
     try {
       await streamChat(draft.id, msg, (ev: unknown) => {
         const event = ev as StreamEvent;
@@ -624,24 +780,38 @@ export default function ProblemSetterPage({
           setStreamingPending(null);
         } else if (event.type === 'design') {
           const ex = event.extracted || {};
-          partial = {
-            ...partial,
-            description: ex.description as string,
-            arch: (ex.arch as string) || partial.arch,
-            meta: {
-              ...(partial.meta || {}),
-              ...(ex.meta as Record<string, unknown> || {}),
-              ...((ex.catalogueCategories as string[])?.length
-                ? { catalogueCategories: ex.catalogueCategories as string[] }
-                : {}),
-            },
-            infra: (ex.infra as { services?: unknown[] })?.services?.length
-              ? { ...(partial.infra || {}), services: (ex.infra as { services: Array<string | { name: string }> }).services }
-              : partial.infra,
-            brokenState: ex.brokenState
-              ? { ...(partial.brokenState || {}), ...(ex.brokenState as object) }
-              : partial.brokenState,
-          };
+          if (spark || ex.brief || ex.data) {
+            partial = {
+              ...partial,
+              authoringKind: 'spark-platform',
+              sparkShape: ex as ChallengeDraft['sparkShape'],
+              description: (ex.brief as { description?: string } | undefined)?.description
+                || partial.description,
+              meta: {
+                ...(partial.meta || {}),
+                ...((ex.meta as object) || {}),
+              },
+            };
+          } else {
+            partial = {
+              ...partial,
+              description: ex.description as string,
+              arch: (ex.arch as string) || partial.arch,
+              meta: {
+                ...(partial.meta || {}),
+                ...(ex.meta as Record<string, unknown> || {}),
+                ...((ex.catalogueCategories as string[])?.length
+                  ? { catalogueCategories: ex.catalogueCategories as string[] }
+                  : {}),
+              },
+              infra: (ex.infra as { services?: unknown[] })?.services?.length
+                ? { ...(partial.infra || {}), services: (ex.infra as { services: Array<string | { name: string }> }).services }
+                : partial.infra,
+              brokenState: ex.brokenState
+                ? { ...(partial.brokenState || {}), ...(ex.brokenState as object) }
+                : partial.brokenState,
+            };
+          }
         } else if (event.type === 'error') {
           setErr(event.message ?? 'Unknown error');
         }
@@ -651,8 +821,11 @@ export default function ProblemSetterPage({
         ...optimistic,
         messages: [...optimistic.messages!, { role: 'assistant', content: visibleText }],
         draft: partial,
-        shapeContractComplete: isShapeContractCompleteLocal(partial),
-        shapeContractMissing: shapeContractMissingLocal(partial),
+        authoringKind: spark ? 'spark-platform' : optimistic.authoringKind,
+        shapeContractComplete: spark
+          ? Boolean(partial.sparkShape)
+          : isShapeContractCompleteLocal(partial),
+        shapeContractMissing: spark ? [] : shapeContractMissingLocal(partial),
       });
       if (onRefreshSession) await onRefreshSession();
       setStreamingText('');
@@ -725,6 +898,49 @@ export default function ProblemSetterPage({
     }
   };
 
+  const handleUploadShapeFile = async (file: File): Promise<void> => {
+    if (!canUploadShape || !draft) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const text = await file.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        throw new Error('File is not valid JSON');
+      }
+      // Allow { contract }, { sparkShape }, or the raw contract object
+      const obj = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+      const contract = obj && (obj.contract != null || obj.sparkShape != null)
+        ? (obj.contract ?? obj.sparkShape)
+        : parsed;
+      const res = await uploadSparkShape(draft.id, contract) as {
+        draft?: ProblemSession;
+        shapeContractComplete?: boolean;
+        shapeContractMissing?: string[];
+      };
+      if (res.draft) {
+        onDraftChanged({
+          ...res.draft,
+          shapeContractComplete: res.shapeContractComplete,
+          shapeContractMissing: res.shapeContractMissing,
+        } as ProblemSession);
+      }
+      if (onRefreshSession) await onRefreshSession();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string; hint?: string } }; message?: string };
+      setErr(
+        [err?.response?.data?.error, err?.response?.data?.hint].filter(Boolean).join(' — ')
+        || err.message
+        || 'Upload failed',
+      );
+    } finally {
+      setBusy(false);
+      if (shapeFileRef.current) shapeFileRef.current.value = '';
+    }
+  };
+
   const handleGenerateSchema = async (): Promise<void> => {
     if (!canGenerateSchema || busy) return;
     setBusy(true);
@@ -760,11 +976,17 @@ export default function ProblemSetterPage({
   const inputPlaceholder = !llmReady
     ? 'Set API key in backend/.env'
     : canChat
-      ? 'Describe the incident, broken state, and what candidates should fix…'
+      ? (spark
+        ? 'Describe the Spark lab — data shape, transforms, and what candidates should build…'
+        : 'Describe the incident, broken state, and what candidates should fix…')
       : schemaReadyForBuild
-        ? 'Schema ready — start Build pipeline in the right panel'
+        ? (spark
+          ? 'Shape ready — click Build pipeline to start'
+          : 'Schema ready — click Build pipeline to start')
         : designApproved
-          ? 'Generate schema in Preview to continue'
+          ? (spark
+            ? 'Shape approved — click Build pipeline to start'
+            : 'Generate schema in Preview to continue')
           : 'Approve design in Preview when the contract is complete';
 
   return (
@@ -785,7 +1007,9 @@ export default function ProblemSetterPage({
                       ? 'LLM not configured'
                       : !shapeContractComplete
                         ? `Complete contract first: ${shapeContractMissing.join(', ')}`
-                        : 'Lock the design contract and move to schema generation'
+                        : spark
+                          ? 'Lock the Spark shape and enable the build pipeline'
+                          : 'Lock the design contract and move to schema generation'
                   }
                 >
                   {busy ? 'Approving…' : 'Approve design'}
@@ -825,7 +1049,9 @@ export default function ProblemSetterPage({
             )}
             {schemaReadyForBuild && (
               <p className="setter-preview-hint dim">
-                Schema ready — use <strong>Build pipeline</strong> on the right.
+                {spark
+                  ? <>Shape ready — <strong>Build pipeline</strong> starts immediately.</>
+                  : <>Schema ready — <strong>Build pipeline</strong> starts immediately.</>}
               </p>
             )}
             {err && <p className="setter-preview-hint alert-inline">{err}</p>}
@@ -847,11 +1073,14 @@ export default function ProblemSetterPage({
           {(draft.messages || []).length === 0 && (
             <div className="chat-intro setter-intent-intro">
               <p className="setter-intent-intro-lead">
-                Describe the production incident you want candidates to debug.
+                {spark
+                  ? 'Describe the Spark platform lab you want candidates to build.'
+                  : 'Describe the production incident you want candidates to debug.'}
               </p>
               <p className="dim">
-                The agent will shape a full design contract — story, services, root cause, and
-                validation intent — when you are ready.
+                {spark
+                  ? 'Chat with the agent to shape a contract, or upload a spark_shape_contract JSON. Preview updates on the left — Approve unlocks Build (no schema step).'
+                  : 'The agent will shape a full design contract — story, services, root cause, and validation intent — when you are ready.'}
               </p>
             </div>
           )}
@@ -865,6 +1094,36 @@ export default function ProblemSetterPage({
         </div>
 
         <div className="chat-input setter-intent-input">
+          {spark && (
+            <div className="setter-shape-upload">
+              <input
+                ref={shapeFileRef}
+                type="file"
+                accept="application/json,.json"
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleUploadShapeFile(file);
+                }}
+              />
+              <button
+                type="button"
+                className="ghost sm"
+                disabled={!canUploadShape}
+                onClick={() => shapeFileRef.current?.click()}
+                title={
+                  designApproved
+                    ? 'Use Edit contract before uploading a new shape'
+                    : 'Upload a spark_shape_contract JSON — same Preview / Approve path as chat'
+                }
+              >
+                {busy ? 'Uploading…' : 'Upload shape JSON'}
+              </button>
+              <span className="dim setter-shape-upload-hint">
+                Or chat below — Preview updates either way
+              </span>
+            </div>
+          )}
           <div className="setter-intent-composer">
             <textarea
               placeholder={inputPlaceholder}
@@ -906,40 +1165,58 @@ export default function ProblemSetterPage({
           <div className="setter-rail-card-header setter-rail-card-header--stacked">
             <h3 className="setter-rail-card-title">Pipeline history</h3>
             <div className="setter-preview-actions">
-              {buildSucceeded && onGoReview && (
+              {buildSucceeded && (spark ? true : onGoReview) && (
                 <button
                   type="button"
                   className="primary sm"
-                  onClick={onGoReview}
-                  title="Open Ship to inspect the build and push to your library"
+                  onClick={spark ? (onGoPipeline || onGoBuild) : onGoReview}
+                  title={spark
+                    ? 'Open Build to publish this lab to Play'
+                    : 'Open Ship to inspect the build and push to your library'}
                 >
-                  Open review →
+                  {spark ? 'Publish →' : 'Open review →'}
                 </button>
               )}
-              <button
-                type="button"
-                className="sm"
-                disabled={!schemaReadyForBuild || busy}
-                onClick={onGoBuild}
-                title={
-                  schemaReadyForBuild
-                    ? buildSucceeded
-                      ? 'Open the Build tab to rebuild'
-                      : 'Open the Build tab and run the pipeline'
-                    : 'Generate schema in Preview first'
-                }
-              >
-                {buildSucceeded ? 'Rebuild' : 'Build pipeline'}
-              </button>
+              {!buildSucceeded && (
+                <button
+                  type="button"
+                  className="sm"
+                  disabled={!schemaReadyForBuild || busy}
+                  onClick={onGoBuild}
+                  title={
+                    schemaReadyForBuild
+                      ? draft?.buildStatus === 'failed'
+                        ? 'Retry the build in repair mode with the last failure'
+                        : 'Open Build and start the pipeline'
+                      : spark
+                        ? 'Approve the Spark shape in Preview first'
+                        : 'Generate schema in Preview first'
+                  }
+                >
+                  {draft?.buildStatus === 'failed' ? 'Retry pipeline' : 'Build pipeline'}
+                </button>
+              )}
             </div>
             <p className="setter-preview-hint dim">
               {buildSucceeded
-                ? 'Build passed — open review to ship to your library.'
+                ? (spark
+                  ? 'Build passed — publish when ready, or open logs to inspect the run.'
+                  : 'Build passed — open review to ship to your library.')
                 : schemaReadyForBuild
-                  ? 'Schema ready — run the build to validate in Docker.'
+                  ? (spark
+                    ? draft?.buildStatus === 'failed'
+                      ? 'Last build failed — Retry repairs from that error (same workspace).'
+                      : 'Shape ready — Build pipeline starts Data → Code → Eval immediately.'
+                    : draft?.buildStatus === 'failed'
+                      ? 'Last build failed — Retry repairs in the same workspace.'
+                      : 'Schema ready — Build pipeline starts validation in Docker immediately.')
                   : designApproved
-                    ? 'Generate schema in Preview to enable build.'
-                    : 'Approve design and generate schema before building.'}
+                    ? (spark
+                      ? 'Approve finished — open Build when ready.'
+                      : 'Generate schema in Preview to enable build.')
+                    : (spark
+                      ? 'Approve the Spark shape before building.'
+                      : 'Approve design and generate schema before building.')}
             </p>
           </div>
           <div className="setter-rail-card-body">

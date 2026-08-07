@@ -7,12 +7,37 @@ const express = require('express');
 const { spawn } = require('child_process');
 const { requireSessionAccess } = require('../auth/middleware');
 const lifecycle = require('../sandbox/sessionLifecycle');
+const sparkLifecycle = require('../workspace/sparkLifecycle');
+const sparkJobs = require('../workspace/sparkJobs');
+const workspaceStore = require('../workspace/workspaceStore');
 const sessionStore = require('../db/sessionStore');
 const loader = require('../challenges/loader');
 const terminalEventBus = require('../observability/terminalEventBus');
 const { handleBrowse, listBrowseServices } = require('../sandbox/sessionBrowseProxy');
 
 const router = express.Router();
+
+/** Relative workspace path (no leading slash, no ..). */
+function safeWorkspacePath(p: unknown): string | null {
+  if (!p || typeof p !== 'string') return null;
+  const trimmed = p.replace(/^\/+/, '');
+  if (!trimmed || trimmed.includes('..') || trimmed.includes('\\')) return null;
+  return trimmed;
+}
+
+function getSparkSession(id: string, res: ExpressResponse): GameSession | null {
+  const session = sessionStore.get(id);
+  if (!session) { res.status(404).json({ error: 'session not found' }); return null; }
+  if (session.runtime !== 'spark-platform' || !session.workspacePrefix) {
+    res.status(409).json({ error: 'not a spark-platform workspace session' });
+    return null;
+  }
+  if (session.status !== 'active') {
+    res.status(409).json({ error: 'session is not active' });
+    return null;
+  }
+  return session;
+}
 
 // Reject any path containing ".." segments to prevent path traversal.
 function safePath(p: unknown): string | null {
@@ -125,6 +150,10 @@ function publicSession(s: GameSession, challenge: unknown): Record<string, unkno
     startTime: s.startTime,
     endTime: s.endTime,
     recovered: s.recovered,
+    runtime: s.runtime || (s.buildDir ? 'compose' : null),
+    workspacePrefix: s.workspacePrefix || null,
+    entrypoint: s.entrypoint || null,
+    workspaceUpdatedAt: s.workspaceUpdatedAt || null,
     services: candidateServices(
       Array.isArray(s.services) && s.services.length > 0
         ? s.services
@@ -141,6 +170,7 @@ function publicSession(s: GameSession, challenge: unknown): Record<string, unkno
           difficulty: (challenge as Record<string, unknown>).difficulty,
           tags: (challenge as Record<string, unknown>).tags,
           category: (challenge as Record<string, unknown>).category,
+          sandboxType: (challenge as Record<string, unknown>).sandboxType,
           problemStatement: (challenge as Record<string, unknown>).problemStatement,
         }
       : null,
@@ -150,8 +180,8 @@ function publicSession(s: GameSession, challenge: unknown): Record<string, unkno
 router.post('/start', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
   try {
     const body = (req.body as Record<string, unknown>) || {};
-    const { challengeId, candidateToken } = body;
-    const { session, challenge } = await lifecycle.start({ challengeId, candidateToken });
+    const { challengeId } = body;
+    const { session, challenge } = await lifecycle.start({ challengeId });
 
     const pub = publicSession(session, challenge);
     res.status(201).json({
@@ -165,6 +195,206 @@ router.post('/start', requireSessionAccess, async (req: ExpressRequest, res: Exp
       challenge: pub.challenge,
       session: pub,
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/session/spark/start  { challengeId, starterFiles, entrypoint? }
+router.post('/spark/start', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const body = (req.body as Record<string, unknown>) || {};
+    const challengeId = body.challengeId as string;
+    const starterFiles = body.starterFiles as Record<string, string>;
+    const entrypoint = (body.entrypoint as string) || 'src/main.py';
+    const userId = (req.user as { sub?: string; id?: string } | undefined)?.sub
+      || (req.user as { sub?: string; id?: string } | undefined)?.id
+      || null;
+
+    const { session, created } = await sparkLifecycle.startSparkSession({
+      challengeId,
+      userId,
+      candidateName: null,
+      entrypoint,
+      starterFiles,
+    });
+
+    const challenge = loader.getChallenge(challengeId);
+    const pub = publicSession(session, challenge);
+    res.status(created ? 201 : 200).json({
+      sessionId: session.id,
+      created,
+      status: session.status,
+      runtime: 'spark-platform',
+      workspacePrefix: session.workspacePrefix,
+      entrypoint: session.entrypoint,
+      session: pub,
+      challenge: pub.challenge,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/session/:id/workspace
+router.get('/:id/workspace', async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getSparkSession(req.params.id, res);
+    if (!session) return;
+    const files = await workspaceStore.loadAllFiles(session.id, session.workspacePrefix);
+    const manifest = await workspaceStore.listFiles(session.id);
+    res.json({
+      sessionId: session.id,
+      workspacePrefix: session.workspacePrefix,
+      entrypoint: session.entrypoint,
+      files,
+      manifest,
+      updatedAt: session.workspaceUpdatedAt || null,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// PUT /api/session/:id/workspace/file  { path, content }
+router.put('/:id/workspace/file', express.json({ limit: '2mb' }), async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getSparkSession(req.params.id, res);
+    if (!session) return;
+    const body = (req.body as Record<string, unknown>) || {};
+    const filePath = safeWorkspacePath(body.path);
+    if (!filePath) return res.status(400).json({ error: 'invalid path' });
+    if (typeof body.content !== 'string') return res.status(400).json({ error: 'content must be a string' });
+
+    const result = await workspaceStore.putFile(
+      session.id,
+      session.workspacePrefix,
+      filePath,
+      body.content,
+    );
+    session.workspaceUpdatedAt = Date.now();
+    await sessionStore.persistRow(session);
+    res.json({ ok: true, ...result, updatedAt: session.workspaceUpdatedAt });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// DELETE /api/session/:id/workspace/file  { path }
+router.delete('/:id/workspace/file', express.json({ limit: '1mb' }), async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getSparkSession(req.params.id, res);
+    if (!session) return;
+    const body = (req.body as Record<string, unknown>) || {};
+    const filePath = safeWorkspacePath(body.path || req.query.path);
+    if (!filePath) return res.status(400).json({ error: 'invalid path' });
+
+    await workspaceStore.deleteFile(session.id, session.workspacePrefix, filePath);
+    session.workspaceUpdatedAt = Date.now();
+    await sessionStore.persistRow(session);
+    res.json({ ok: true, path: filePath });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/session/:id/workspace/rename  { from, to }
+router.post('/:id/workspace/rename', express.json({ limit: '1mb' }), async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getSparkSession(req.params.id, res);
+    if (!session) return;
+    const body = (req.body as Record<string, unknown>) || {};
+    const from = safeWorkspacePath(body.from);
+    const to = safeWorkspacePath(body.to);
+    if (!from || !to) return res.status(400).json({ error: 'invalid from/to path' });
+
+    await workspaceStore.renameFile(session.id, session.workspacePrefix, from, to);
+    session.workspaceUpdatedAt = Date.now();
+    await sessionStore.persistRow(session);
+    res.json({ ok: true, from, to });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/session/:id/spark/jobs  { mode, inputPath, businessDate, evalSolutionPath?, limits? }
+router.post('/:id/spark/jobs', express.json({ limit: '256kb' }), async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getSparkSession(req.params.id, res);
+    if (!session) return;
+    const body = (req.body as Record<string, unknown>) || {};
+    const mode = body.mode === 'run' ? 'run' : 'submit';
+    const inputPath = typeof body.inputPath === 'string' ? body.inputPath : '';
+    const businessDate = typeof body.businessDate === 'string' ? body.businessDate : '2026-01-15';
+    const evalSolutionPath =
+      typeof body.evalSolutionPath === 'string'
+        ? body.evalSolutionPath
+        : typeof body.resultsPath === 'string'
+          ? body.resultsPath
+          : '';
+    const limits = (body.limits && typeof body.limits === 'object')
+      ? (body.limits as Record<string, unknown>)
+      : undefined;
+
+    const job = await sparkJobs.startSparkJob({
+      session: {
+        id: session.id,
+        challengeId: session.challengeId,
+        userId: session.userId || null,
+        workspacePrefix: session.workspacePrefix,
+        entrypoint: session.entrypoint || 'src/main.py',
+      },
+      mode,
+      inputPath,
+      businessDate,
+      evalSolutionPath: evalSolutionPath || undefined,
+      limits: limits as {
+        driver?: number;
+        executors?: number;
+        executorCores?: number;
+        executorMemory?: string;
+      } | undefined,
+    });
+    res.status(201).json({ job });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/session/:id/spark/jobs
+router.get('/:id/spark/jobs', async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getSparkSession(req.params.id, res);
+    if (!session) return;
+    const jobs = await sparkJobs.listJobsForSession(session.id);
+    res.json({ jobs });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/session/:id/spark/submissions  (scored submit-mode jobs only)
+router.get('/:id/spark/submissions', async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getSparkSession(req.params.id, res);
+    if (!session) return;
+    const submissions = await sparkJobs.listSubmissionsForSession(session.id);
+    res.json({ submissions });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/session/:id/spark/jobs/:jobId
+router.get('/:id/spark/jobs/:jobId', async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getSparkSession(req.params.id, res);
+    if (!session) return;
+    const job = await sparkJobs.refreshJobFromPlatform(req.params.jobId);
+    if (!job?.id || job.sessionId !== session.id) {
+      return res.status(404).json({ error: 'job not found' });
+    }
+    res.json({ job });
   } catch (e) {
     next(e);
   }
@@ -201,8 +431,13 @@ router.post('/:id/end', async (req: ExpressRequest, res: ExpressResponse, next: 
     const before: GameSession | null = sessionStore.get(sessionId);
     if (!before) return res.status(404).json({ error: 'session not found' });
 
-    const session: GameSession = await lifecycle.end(sessionId);
-    await sessionStore.persistRow(session);
+    let session: GameSession;
+    if (before.runtime === 'spark-platform') {
+      session = await sparkLifecycle.endSparkSession(sessionId);
+    } else {
+      session = await lifecycle.end(sessionId);
+      await sessionStore.persistRow(session);
+    }
 
     terminalEventBus.emit('session_end', { sessionId });
 

@@ -1,10 +1,19 @@
 /** Parsed pipeline log entry for rich UI rendering. */
 
 export type PipelineLogEntry =
-  | { kind: 'text'; text: string; level: 'info' | 'ok' | 'warn' | 'error' | 'phase' }
-  | { kind: 'thinking'; label: string; step: number }
-  | { kind: 'codeStep'; step: number; summary: string; tools: string; ms: number; cost: string; tokens: string }
-  | { kind: 'codeDiff'; tool: string; path: string; body: string; summary?: boolean }
+  | { kind: 'text'; text: string; level: 'info' | 'ok' | 'warn' | 'error' | 'phase'; agent?: string }
+  | { kind: 'thinking'; label: string; step: number; agent?: string }
+  | {
+    kind: 'codeStep';
+    step: number;
+    summary: string;
+    tools: string;
+    ms: number;
+    cost: string;
+    tokens: string;
+    agent?: string;
+  }
+  | { kind: 'codeDiff'; tool: string; path: string; body: string; summary?: boolean; agent?: string }
   | { kind: 'separator'; text: string };
 
 const THINKING_PREFIX = '💭 ';
@@ -12,6 +21,14 @@ const CODE_STEP_PREFIX = '⚡ ';
 const CODE_DIFF_HEADER = /^📋 CODE diff · ([^·]+) · (.+)$/;
 const CODE_DIFF_CONT = /^📋  /;
 const CODE_DIFF_SUMMARY = '📋 CODE repair summary';
+const AGENT_PREFIX = /^\[([^\]]+)\]\s*/;
+
+/** Strip and return leading [Agent Name] if present. */
+export function splitAgentPrefix(line: string): { agent?: string; rest: string } {
+  const m = line.match(AGENT_PREFIX);
+  if (!m) return { rest: line };
+  return { agent: m[1].trim(), rest: line.slice(m[0].length) };
+}
 
 export function formatCodeDiffLines(args: {
   tool?: string;
@@ -42,16 +59,42 @@ export function formatCodeStepLog(args: {
   return `${CODE_STEP_PREFIX}Step ${step + 1} · ${tools} · ${(ms / 1000).toFixed(1)}s · ${cost} · ${tokens}`;
 }
 
+/** Map SSE / event tag → display name (mirrors backend agentLogLabel). */
+const AGENT_TAG_NAMES: Record<string, string> = {
+  spark_data: 'Data Agent',
+  spark_code: 'Code Agent',
+  spark_validation: 'Validation Agent',
+  spark_eval: 'Eval Agent',
+  spark_eval_repair: 'Eval Repair',
+  spark_pipeline: 'Pipeline',
+  spark_design: 'Design Agent',
+  design: 'Design Agent',
+  schema: 'Schema Agent',
+  code: 'Code Agent',
+  validate: 'Validation Agent',
+  validation: 'Validation Agent',
+  spin: 'Spin',
+  build: 'Build',
+  lessons: 'Lessons',
+};
+
+export function agentNameFromTag(tag: unknown): string | null {
+  if (typeof tag !== 'string' || !tag.trim()) return null;
+  return AGENT_TAG_NAMES[tag.trim()] || null;
+}
+
 /** Turn a persisted log line into a structured entry (or plain text). */
 export function parseLogLine(line: string): PipelineLogEntry {
-  if (line.startsWith(THINKING_PREFIX)) {
-    const m = line.match(/^💭 (.+) \(step (\d+)\)$/);
+  const { agent, rest } = splitAgentPrefix(line);
+
+  if (rest.startsWith(THINKING_PREFIX)) {
+    const m = rest.match(/^💭 (.+) \(step (\d+)\)$/);
     if (m) {
-      return { kind: 'thinking', label: m[1], step: parseInt(m[2], 10) - 1 };
+      return { kind: 'thinking', label: m[1], step: parseInt(m[2], 10) - 1, agent };
     }
   }
-  if (line.startsWith(CODE_STEP_PREFIX)) {
-    const body = line.slice(CODE_STEP_PREFIX.length);
+  if (rest.startsWith(CODE_STEP_PREFIX)) {
+    const body = rest.slice(CODE_STEP_PREFIX.length);
     const parts = body.split(' · ');
     if (parts.length >= 5 && parts[0]?.startsWith('Step ')) {
       const stepMatch = parts[0].match(/^Step (\d+)$/);
@@ -67,7 +110,8 @@ export function parseLogLine(line: string): PipelineLogEntry {
           ms: parseFloat(timeStr) * 1000,
           cost,
           tokens,
-          summary: line,
+          summary: rest,
+          agent,
         };
       }
     }
@@ -80,19 +124,20 @@ export function parseLogLine(line: string): PipelineLogEntry {
         ms: 0,
         cost: '—',
         tokens: '—',
-        summary: line,
+        summary: rest,
+        agent,
       };
     }
   }
-  if (line.startsWith('---')) {
-    return { kind: 'separator', text: line };
+  if (rest.startsWith('---')) {
+    return { kind: 'separator', text: rest };
   }
   let level: 'info' | 'ok' | 'warn' | 'error' | 'phase' = 'info';
-  if (line.includes('✗') || line.includes(' FAIL') || /failed/i.test(line)) level = 'error';
-  else if (line.includes('✓') || line.includes(' PASS') || /passed/i.test(line)) level = 'ok';
-  else if (line.includes('⚠')) level = 'warn';
-  else if (line.includes('►') || /^Iteration \d/.test(line) || /^Step: /.test(line)) level = 'phase';
-  return { kind: 'text', text: line, level };
+  if (rest.includes('✗') || rest.includes(' FAIL') || /failed/i.test(rest)) level = 'error';
+  else if (rest.includes('✓') || rest.includes(' PASS') || /passed/i.test(rest)) level = 'ok';
+  else if (rest.includes('⚠')) level = 'warn';
+  else if (rest.includes('►') || /^Iteration \d/.test(rest) || /^Step: /.test(rest)) level = 'phase';
+  return { kind: 'text', text: rest, level, agent };
 }
 
 /** Parse log lines, grouping multi-line CODE repair diffs into single entries. */
@@ -101,11 +146,12 @@ export function parseLogLines(lines: string[]): PipelineLogEntry[] {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    if (line === CODE_DIFF_SUMMARY) {
+    const { agent, rest } = splitAgentPrefix(line);
+    if (rest === CODE_DIFF_SUMMARY) {
       i += 1;
       const bodyLines: string[] = [];
-      while (i < lines.length && CODE_DIFF_CONT.test(lines[i])) {
-        bodyLines.push(lines[i].slice(4));
+      while (i < lines.length && CODE_DIFF_CONT.test(splitAgentPrefix(lines[i]).rest)) {
+        bodyLines.push(splitAgentPrefix(lines[i]).rest.slice(4));
         i += 1;
       }
       out.push({
@@ -114,20 +160,21 @@ export function parseLogLines(lines: string[]): PipelineLogEntry[] {
         path: '(all changes)',
         body: bodyLines.join('\n'),
         summary: true,
+        agent,
       });
       continue;
     }
-    const headerMatch = line.match(CODE_DIFF_HEADER);
+    const headerMatch = rest.match(CODE_DIFF_HEADER);
     if (headerMatch) {
       const tool = headerMatch[1].trim();
       const path = headerMatch[2].trim();
       i += 1;
       const bodyLines: string[] = [];
-      while (i < lines.length && CODE_DIFF_CONT.test(lines[i])) {
-        bodyLines.push(lines[i].slice(4));
+      while (i < lines.length && CODE_DIFF_CONT.test(splitAgentPrefix(lines[i]).rest)) {
+        bodyLines.push(splitAgentPrefix(lines[i]).rest.slice(4));
         i += 1;
       }
-      out.push({ kind: 'codeDiff', tool, path, body: bodyLines.join('\n') });
+      out.push({ kind: 'codeDiff', tool, path, body: bodyLines.join('\n'), agent });
       continue;
     }
     out.push(parseLogLine(line));

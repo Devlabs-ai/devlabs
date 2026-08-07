@@ -36,12 +36,10 @@ export async function getReview(sessionId: string): Promise<unknown> {
   return (data as { review: unknown }).review;
 }
 
-export async function pushReview(sessionId: string, { bucket }: { bucket?: string } = {}): Promise<unknown> {
-  const { data } = await axios.post(
-    `/api/reviews/${sessionId}/push`,
-    { bucket },
-    { headers: getAuthHeader() },
-  );
+export async function pushReview(sessionId: string): Promise<unknown> {
+  const { data } = await axios.post(`/api/reviews/${sessionId}/push`, {}, {
+    headers: getAuthHeader(),
+  });
   return data;
 }
 

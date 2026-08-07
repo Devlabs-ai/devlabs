@@ -2,10 +2,7 @@
 
 import type { ChallengeRow, ChallengePublic, ChallengeFull } from '../types/domain';
 
-const fs = require('fs');
-const path = require('path');
 const pool = require('../db/pool');
-const { normalizeBucket } = require('./buckets');
 
 const cache = new Map<string, ChallengeFull>();
 
@@ -17,90 +14,32 @@ function publicFields(row: ChallengeRow): ChallengePublic {
     difficulty: row.difficulty,
     tags: row.tags || [],
     category: row.category,
-    bucket: (row.bucket as import('../types/domain').BucketId | null) || null,
     finalized: !!row.finalized,
-    archived: !!row.archived,
     sandboxType: row.sandbox_type || null,
   };
 }
 
 function fullFields(row: ChallengeRow): ChallengeFull {
+  const platformSpec = row.platform_spec || null;
   return {
     ...publicFields(row),
-    authored_by: row.authored_by || null,
-    visibility: row.visibility || 'private',
-    library_id: row.library_id || null,
     verifiedDir: row.verified_dir || null,
     problemStatement: row.problem_statement || null,
     validationSpec: row.validation_spec || null,
+    sparkPlatform: platformSpec
+      ? (platformSpec as ChallengeFull['sparkPlatform'])
+      : null,
   };
 }
 
+/**
+ * Disk seed from sandbox/verified — disabled during catalog v2 redesign.
+ * Legacy rows live in challenges_legacy; new rows via seedManualCatalog.
+ */
 async function seedChallengesFromDisk(verifiedRoot: string): Promise<void> {
-  if (!fs.existsSync(verifiedRoot)) {
-    console.log(`[challenges] no verified dir at ${verifiedRoot}, skipping seed`);
-    return;
-  }
-
-  const entries = fs.readdirSync(verifiedRoot, { withFileTypes: true });
-  for (const ent of entries) {
-    if (!ent.isDirectory()) continue;
-    const slug: string = ent.name;
-    const challengeFile = path.join(verifiedRoot, slug, 'challenge.json');
-    if (!fs.existsSync(challengeFile)) continue;
-
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(fs.readFileSync(challengeFile, 'utf8'));
-    } catch (e: unknown) {
-      console.warn(`[challenges] failed to parse ${challengeFile}: ${(e as Error).message}`);
-      continue;
-    }
-
-    const verifiedDir = path.resolve(verifiedRoot, slug);
-    const id = (parsed.id as string) || slug;
-    const now = Date.now();
-
-    await pool.query(
-      `INSERT INTO challenges
-        (id, title, description, difficulty, tags, category, bucket, finalized, archived,
-         sandbox_type, verified_dir, problem_statement, validation_spec,
-         created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false,$9,$10,$11,$12,$13,$13)
-       ON CONFLICT (id) DO UPDATE SET
-         title = EXCLUDED.title,
-         description = EXCLUDED.description,
-         difficulty = EXCLUDED.difficulty,
-         tags = EXCLUDED.tags,
-         category = EXCLUDED.category,
-         bucket = EXCLUDED.bucket,
-         finalized = EXCLUDED.finalized,
-         archived = CASE WHEN challenges.archived THEN challenges.archived ELSE EXCLUDED.archived END,
-         sandbox_type = EXCLUDED.sandbox_type,
-         verified_dir = EXCLUDED.verified_dir,
-         problem_statement = EXCLUDED.problem_statement,
-         validation_spec = EXCLUDED.validation_spec,
-         updated_at = EXCLUDED.updated_at
-       WHERE NOT challenges.archived`,
-      [
-        id,
-        parsed.title || slug,
-        parsed.description || '',
-        parsed.difficulty || 'Medium',
-        JSON.stringify(parsed.tags || []),
-        parsed.category || 'General',
-        normalizeBucket(parsed.bucket),
-        parsed.finalized != null ? !!parsed.finalized : true,
-        parsed.sandboxType || null,
-        verifiedDir,
-        parsed.problemStatement || null,
-        parsed.validationSpec || null,
-        now,
-      ],
-    );
-
-    console.log(`[challenges] seeded "${id}" from ${verifiedDir}`);
-  }
+  console.log(
+    `[challenges] disk seed skipped (catalog v2); verified root would be ${verifiedRoot}`,
+  );
 }
 
 async function loadChallengesFromDB(): Promise<Map<string, ChallengeFull>> {
@@ -129,12 +68,10 @@ function listPublicChallenges(): Record<string, unknown>[] {
     difficulty: c.difficulty,
     tags: c.tags,
     category: c.category,
-    bucket: c.bucket || null,
     finalized: c.finalized,
     sandboxType: c.sandboxType,
-    authored_by: c.authored_by || null,
-    visibility: c.visibility || 'private',
-    archived: !!c.archived,
+    problemStatement: c.problemStatement,
+    sparkPlatform: c.sparkPlatform || null,
   }));
 }
 
@@ -148,10 +85,12 @@ function getPublicChallenge(id: string): Record<string, unknown> | null {
     difficulty: c.difficulty,
     tags: c.tags,
     category: c.category,
-    bucket: c.bucket || null,
     finalized: c.finalized,
     sandboxType: c.sandboxType,
+    verifiedDir: c.verifiedDir,
     problemStatement: c.problemStatement,
+    validationSpec: c.validationSpec,
+    sparkPlatform: c.sparkPlatform || null,
   };
 }
 

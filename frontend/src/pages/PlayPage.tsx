@@ -1,35 +1,22 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
+import AppPageHeader from '../components/AppPageHeader';
 import ChallengeLibrary from '../components/ChallengeLibrary';
-import ShareEvalModal from '../components/ShareEvalModal';
 import SandboxWorkspace from '../components/SandboxWorkspace';
+import SparkPlatformWorkspace, {
+  isSparkPlatformChallenge,
+} from '../components/SparkPlatformWorkspace';
+import {
+  PLAY_DOMAINS,
+  getPlayDomain,
+  getPlayPanel,
+  isPlayDomainId,
+  looksLikePlaySessionId,
+  playCatalogPath,
+  type PlayDomainId,
+} from '../constants/playCatalog';
 import type { ChallengePublic } from '../types/domain';
-
-interface Collection {
-  id: string;
-  label: string;
-}
-
-const COLLECTIONS: Collection[] = [
-  { id: 'my',      label: 'My Challenges' },
-  { id: 'org',     label: 'Org Challenges' },
-  { id: 'public',  label: 'Public Challenges' },
-  { id: 'archive', label: 'Archive' },
-];
-
-const DIFFICULTIES: string[] = ['Easy', 'Medium', 'Hard'];
-
-interface DomainFilter {
-  id: string;
-  label: string;
-}
-
-const DOMAINS: DomainFilter[] = [
-  { id: 'software-engineer', label: 'Software Eng' },
-  { id: 'platform-engineer', label: 'Platform' },
-  { id: 'devops',            label: 'DevOps' },
-  { id: 'data-engineer',     label: 'Data Eng' },
-];
 
 interface LibraryViewProps {
   challenges: ChallengePublic[];
@@ -39,162 +26,213 @@ interface LibraryViewProps {
 }
 
 function LibraryView({ challenges, challengesError, startError, onSelectChallenge }: LibraryViewProps): JSX.Element {
-  const { currentUser } = useAppState();
+  const navigate = useNavigate();
+  const params = useParams<{ domainId?: string; panelId?: string }>();
 
-  const [collection, setCollection] = useState<string>('my');
-  const [difficulty, setDifficulty] = useState<string | null>(null);
-  const [domain, setDomain]         = useState<string | null>(null);
-  const [filterOpen, setFilterOpen] = useState<boolean>(false);
-  const [shareChallenge, setShareChallenge] = useState<ChallengePublic | null>(null);
-  const filterRef = React.useRef<HTMLDivElement>(null);
+  const domainId = isPlayDomainId(params.domainId) ? (params.domainId as PlayDomainId) : null;
+  const domain = getPlayDomain(domainId);
+  const panel = getPlayPanel(domain, params.panelId || null);
 
-  React.useEffect(() => {
-    if (!filterOpen) return undefined;
-    const handler = (e: PointerEvent): void => {
-      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false);
-    };
-    document.addEventListener('pointerdown', handler);
-    return () => document.removeEventListener('pointerdown', handler);
-  }, [filterOpen]);
-
-  const activeFilterCount = (difficulty ? 1 : 0) + (domain ? 1 : 0);
-
-  const activeChallenges = useMemo(
-    () => challenges.filter((c) => !c.archived),
-    [challenges],
-  );
-  const archivedChallenges = useMemo(
-    () => challenges.filter((c) => c.archived),
-    [challenges],
-  );
-
-  const collectionCounts = useMemo<Record<string, number>>(() => ({
-    my:      activeChallenges.filter((c) => c.authored_by && c.authored_by === currentUser?.id).length,
-    org:     activeChallenges.filter((c) => c.authored_by && c.authored_by !== currentUser?.id).length,
-    public:  activeChallenges.filter((c) => !c.authored_by || c.visibility === 'public').length,
-    archive: archivedChallenges.length,
-  }), [activeChallenges, archivedChallenges, currentUser]);
-
-  const filtered = useMemo<ChallengePublic[]>(() => {
-    let list = collection === 'archive' ? archivedChallenges : activeChallenges;
-
-    if (collection === 'my') {
-      list = list.filter((c) => c.authored_by && c.authored_by === currentUser?.id);
-    } else if (collection === 'org') {
-      list = list.filter((c) => c.authored_by && c.authored_by !== currentUser?.id);
-    } else if (collection === 'public') {
-      list = list.filter((c) => !c.authored_by || c.visibility === 'public');
+  // Invalid domain slug → home. Unknown panel under a valid domain → domain page.
+  // Session UUIDs share /play/:id with domains — leave those for App session restore.
+  useEffect(() => {
+    if (params.domainId && !domainId) {
+      if (looksLikePlaySessionId(params.domainId)) return;
+      navigate('/play', { replace: true });
+      return;
     }
-
-    if (difficulty) {
-      list = list.filter((c) => (c.difficulty || '').toLowerCase() === difficulty.toLowerCase());
+    if (domainId && params.panelId && !panel) {
+      navigate(playCatalogPath(domainId), { replace: true });
     }
+  }, [params.domainId, params.panelId, domainId, panel, navigate]);
 
-    if (domain) {
-      list = list.filter((c) => c.bucket === domain);
-    }
+  const byId = useMemo(() => {
+    const map = new Map<string, ChallengePublic>();
+    for (const c of challenges) map.set(c.id, c);
+    return map;
+  }, [challenges]);
 
-    return list;
-  }, [activeChallenges, archivedChallenges, collection, difficulty, domain, currentUser]);
+  const panelChallenges = useMemo(() => {
+    if (!panel) return [];
+    return panel.challengeIds
+      .map((id) => byId.get(id))
+      .filter((c): c is ChallengePublic => Boolean(c));
+  }, [panel, byId]);
+
+  let title = 'Play';
+  let lead = 'Choose an engineering track, then open a lab.';
+  if (domain && !panel) {
+    title = domain.label;
+    lead = domain.blurb;
+  } else if (domain && panel) {
+    title = panel.label;
+    lead = panel.blurb;
+  }
 
   return (
-    <div className="app-page">
+    <div className="app-page play-catalog-page">
       {challengesError && <div className="alert app-page-alert">{challengesError}</div>}
       {startError && <div className="alert app-page-alert">Failed to start: {startError}</div>}
 
-      <div className="library-toolbar">
-        <div className="library-collections" role="tablist">
-          {COLLECTIONS.map((col) => (
-            <button
-              key={col.id}
-              type="button"
-              role="tab"
-              aria-selected={collection === col.id}
-              className={`lib-tab ${collection === col.id ? 'active' : ''}`}
-              onClick={() => setCollection(col.id)}
-            >
-              {col.label}
-              <span className="lib-tab-count">{collectionCounts[col.id]}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="filter-popover-wrap" ref={filterRef}>
-          <button
-            type="button"
-            className={`filter-funnel-btn ${filterOpen ? 'open' : ''} ${activeFilterCount > 0 ? 'has-filters' : ''}`}
-            onClick={() => setFilterOpen((o) => !o)}
-            aria-label="Filters"
-          >
-            <svg className="funnel-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M1.5 3h13L9.5 8.5V13l-3-1.5V8.5L1.5 3Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
-            </svg>
-            {activeFilterCount > 0 && (
-              <span className="filter-funnel-badge">{activeFilterCount}</span>
-            )}
-          </button>
-
-          {filterOpen && (
-            <div className="filter-popover">
-              <div className="filter-popover-section">
-                <span className="filter-popover-label">Difficulty</span>
-                <div className="filter-group">
-                  {DIFFICULTIES.map((d) => (
-                    <button
-                      key={d}
-                      type="button"
-                      className={`filter-chip difficulty-${d.toLowerCase()} ${difficulty === d ? 'active' : ''}`}
-                      onClick={() => setDifficulty((prev) => (prev === d ? null : d))}
-                    >
-                      {d}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="filter-popover-section">
-                <span className="filter-popover-label">Domain</span>
-                <div className="filter-group filter-group--wrap">
-                  {DOMAINS.map((dom) => (
-                    <button
-                      key={dom.id}
-                      type="button"
-                      className={`filter-chip ${domain === dom.id ? 'active' : ''}`}
-                      onClick={() => setDomain((prev) => (prev === dom.id ? null : dom.id))}
-                    >
-                      {dom.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {activeFilterCount > 0 && (
-                <button
-                  type="button"
-                  className="filter-clear"
-                  onClick={() => { setDifficulty(null); setDomain(null); }}
-                >
-                  Clear all
-                </button>
+      <AppPageHeader
+        eyebrow="Library"
+        title={title}
+        lead={lead}
+        aside={
+          (domain || panel) ? (
+            <nav className="play-catalog-crumb" aria-label="Catalog breadcrumb">
+              <Link to="/play" className="ghost sm play-catalog-crumb-link">
+                All tracks
+              </Link>
+              {domain && (
+                <>
+                  <span className="play-catalog-crumb-sep" aria-hidden>/</span>
+                  {panel ? (
+                    <Link to={playCatalogPath(domain.id)} className="ghost sm play-catalog-crumb-link">
+                      {domain.label}
+                    </Link>
+                  ) : (
+                    <span className="play-catalog-crumb-current">{domain.label}</span>
+                  )}
+                </>
               )}
-            </div>
-          )}
+              {panel && (
+                <>
+                  <span className="play-catalog-crumb-sep" aria-hidden>/</span>
+                  <span className="play-catalog-crumb-current">{panel.label}</span>
+                </>
+              )}
+            </nav>
+          ) : null
+        }
+      />
+
+      {!domain && (
+        <div className="card-grid">
+          {PLAY_DOMAINS.map((d) => {
+            const challengeCount = d.panels.reduce((n, p) => n + p.challengeIds.length, 0);
+            const comingSoon = d.panels.length === 0;
+            const body = (
+              <>
+                <div className="challenge-card-top challenge-card-top-row">
+                  <div className="challenge-card-top-meta">
+                    <span className="pill">Track</span>
+                    <span className="challenge-card-category">Engineering</span>
+                  </div>
+                </div>
+                <h3>{d.label}</h3>
+                <p className="challenge-card-description">{d.blurb}</p>
+                <div className="challenge-card-footer">
+                  <div className="meta">
+                    {comingSoon ? (
+                      <span className="tag">Coming soon</span>
+                    ) : (
+                      <>
+                        <span className="tag">
+                          {d.panels.length} panel{d.panels.length === 1 ? '' : 's'}
+                        </span>
+                        <span className="tag">
+                          {challengeCount} lab{challengeCount === 1 ? '' : 's'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  {!comingSoon && (
+                    <span className="challenge-card-cta" aria-hidden>
+                      Browse <span className="arrow">→</span>
+                    </span>
+                  )}
+                </div>
+              </>
+            );
+            if (comingSoon) {
+              return (
+                <div key={d.id} className="card challenge-card coming-soon">
+                  {body}
+                </div>
+              );
+            }
+            return (
+              <Link key={d.id} to={playCatalogPath(d.id)} className="card challenge-card play-catalog-card">
+                {body}
+              </Link>
+            );
+          })}
         </div>
-      </div>
+      )}
 
-      <ChallengeLibrary
-        challenges={filtered}
-        onSelect={onSelectChallenge}
-        showCardMenu={collection === 'my'}
-        onShareChallenge={(c) => setShareChallenge(c)}
-        archiveMode={collection === 'archive'}
-      />
+      {domain && !panel && (
+        domain.panels.length === 0 ? (
+          <div className="alert info">Labs for this track are coming soon.</div>
+        ) : (
+          <div className="card-grid">
+            {domain.panels.map((p) => {
+              const count = p.challengeIds.filter((id) => byId.has(id)).length;
+              const comingSoon = p.challengeIds.length === 0;
+              const body = (
+                <>
+                  <div className="challenge-card-top challenge-card-top-row">
+                    <div className="challenge-card-top-meta">
+                      <span className="pill medium">Platform</span>
+                      <span className="challenge-card-category">{domain.label}</span>
+                    </div>
+                  </div>
+                  <h3>{p.label}</h3>
+                  <p className="challenge-card-description">{p.blurb}</p>
+                  <div className="challenge-card-footer">
+                    <div className="meta">
+                      {comingSoon ? (
+                        <span className="tag">Coming soon</span>
+                      ) : (
+                        <span className="tag">
+                          {count} lab{count === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </div>
+                    {!comingSoon && (
+                      <span className="challenge-card-cta" aria-hidden>
+                        Open <span className="arrow">→</span>
+                      </span>
+                    )}
+                  </div>
+                </>
+              );
+              if (comingSoon) {
+                return (
+                  <div key={p.id} className="card challenge-card coming-soon">
+                    {body}
+                  </div>
+                );
+              }
+              return (
+                <Link
+                  key={p.id}
+                  to={playCatalogPath(domain.id, p.id)}
+                  className="card challenge-card play-catalog-card"
+                >
+                  {body}
+                </Link>
+              );
+            })}
+          </div>
+        )
+      )}
 
-      <ShareEvalModal
-        open={Boolean(shareChallenge)}
-        challenge={shareChallenge}
-        onClose={() => setShareChallenge(null)}
-      />
+      {domain && panel && (
+        panelChallenges.length === 0 ? (
+          <div className="alert info">
+            {panel.challengeIds.length === 0
+              ? `${panel.label} labs are coming soon.`
+              : 'No matching challenges loaded from the catalog yet.'}
+          </div>
+        ) : (
+          <ChallengeLibrary
+            challenges={panelChallenges}
+            onSelect={onSelectChallenge}
+            showCardMenu={false}
+          />
+        )
+      )}
     </div>
   );
 }
@@ -211,6 +249,46 @@ export default function PlayPage(): JSX.Element | null {
     onSelectChallenge,
     onBackToLibrary,
   } = useAppState();
+  const params = useParams<{ domainId?: string; panelId?: string }>();
+  const restoringSession =
+    playState === 'library' &&
+    Boolean(params.domainId) &&
+    !params.panelId &&
+    looksLikePlaySessionId(params.domainId);
+
+  if (restoringSession || playState === 'loading') {
+    const spark = isSparkPlatformChallenge(activeChallenge);
+    return (
+      <div className="app-page app-page-centered">
+        <div className="loading-card app-surface-card">
+          <span className="spinner" />
+          <div>
+            {spark ? (
+              <>
+                Opening Spark workspace for <strong>{activeChallenge?.title}</strong>…
+                <div style={{ color: 'var(--text-dim)', fontSize: 14, marginTop: 6 }}>
+                  Shared cluster session — no Docker sandbox to build.
+                </div>
+              </>
+            ) : (
+              <>
+                {restoringSession ? (
+                  <>Restoring session…</>
+                ) : (
+                  <>
+                    Spinning up sandbox for <strong>{activeChallenge?.title}</strong>…
+                    <div style={{ color: 'var(--text-dim)', fontSize: 14, marginTop: 6 }}>
+                      This can take 30–60 seconds the first time while Docker images build.
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (playState === 'library') {
     return (
@@ -223,23 +301,16 @@ export default function PlayPage(): JSX.Element | null {
     );
   }
 
-  if (playState === 'loading') {
-    return (
-      <div className="app-page app-page-centered">
-        <div className="loading-card app-surface-card">
-          <span className="spinner" />
-          <div>
-            Spinning up sandbox for <strong>{activeChallenge?.title}</strong>…
-            <div style={{ color: 'var(--text-dim)', fontSize: 14, marginTop: 6 }}>
-              This can take 30–60 seconds the first time while Docker images build.
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   if (playState === 'active' && activeSession) {
+    if (isSparkPlatformChallenge(activeChallenge) || activeSession.runtime === 'spark-platform') {
+      return (
+        <SparkPlatformWorkspace
+          challenge={activeChallenge}
+          session={activeSession}
+          onClose={onBackToLibrary}
+        />
+      );
+    }
     return (
       <SandboxWorkspace
         mode="play"
@@ -251,6 +322,7 @@ export default function PlayPage(): JSX.Element | null {
 
   if (playState === 'ended' && endResult) {
     const result = endResult as { elapsed?: number };
+    const spark = activeSession?.runtime === 'spark-platform';
     return (
       <div className="app-page app-page-centered">
         <div className="score-card app-surface-card">
@@ -259,7 +331,9 @@ export default function PlayPage(): JSX.Element | null {
             Elapsed: {Math.floor((result.elapsed ?? 0) / 1000)}s
           </p>
           <p style={{ color: 'var(--text-dim)', fontSize: 13, margin: '0 0 20px' }}>
-            The sandbox has been torn down. Evaluate the candidate from your notes.
+            {spark
+              ? 'Platform session closed. Evaluate the candidate from job outputs and your notes.'
+              : 'The sandbox has been torn down. Evaluate the candidate from your notes.'}
           </p>
           <button type="button" onClick={onBackToLibrary}>
             Back to library

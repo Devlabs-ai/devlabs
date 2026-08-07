@@ -70,22 +70,27 @@ function assertCodeHarnessConfigured(): void {
   }
 }
 
-function resolveClaudeModel(): { model: string; modelId: string } {
-  const modelId = modelIdFor('code');
+function resolveClaudeModel(agentKey = 'code'): { model: string; modelId: string } {
+  const modelId = modelIdFor(agentKey);
   if (providerOf(modelId) === 'anthropic') {
     return { model: splitId(modelId).model, modelId };
   }
   const fallbackModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5';
   const fallbackId = `anthropic:${fallbackModel}`;
   console.warn(
-    `[code] LLM_MODEL_CODE=${modelId} ignored — Claude Agent SDK requires Anthropic; using ${fallbackId}`,
+    `[${agentKey}] ${modelId} ignored — Claude Agent SDK requires Anthropic; using ${fallbackId}`,
   );
   return { model: fallbackModel, modelId: fallbackId };
 }
 
-function emitCodeLog(onEvent: BuildEventHandler | undefined, message: string, detail?: unknown): void {
-  onEvent?.({ type: 'log', level: 'info', tag: 'code', message, detail } as never);
-  console.log(`[code] ${message}`);
+function emitCodeLog(
+  onEvent: BuildEventHandler | undefined,
+  message: string,
+  opts?: { tag?: string; detail?: unknown },
+): void {
+  const tag = opts?.tag || 'code';
+  onEvent?.({ type: 'log', level: 'info', tag, message, detail: opts?.detail } as never);
+  console.log(`[${tag}] ${message}`);
 }
 
 function extractToolUses(content: unknown): ToolUseSummary[] {
@@ -129,7 +134,11 @@ function toolPath(input: Record<string, unknown>): string | null {
   return toolFilePath(input);
 }
 
-function buildWorkspaceCanUseTool(buildDir: string, onEvent?: BuildEventHandler) {
+function buildWorkspaceCanUseTool(
+  buildDir: string,
+  onEvent?: BuildEventHandler,
+  agentTag = 'code',
+) {
   const root = path.resolve(buildDir);
   return async (toolName: string, input: Record<string, unknown>) => {
     if (!PATH_JAILED_TOOLS.has(toolName)) {
@@ -137,7 +146,7 @@ function buildWorkspaceCanUseTool(buildDir: string, onEvent?: BuildEventHandler)
     }
     const check = validateWorkspaceToolPath(root, toolName, input);
     if (!check.allowed) {
-      emitCodeLog(onEvent, `Rejected ${toolName}: ${check.reason}`);
+      emitCodeLog(onEvent, `Rejected ${toolName}: ${check.reason}`, { tag: agentTag });
       return {
         behavior: 'deny' as const,
         message: check.reason || `Path must be inside ${root}`,
@@ -189,6 +198,7 @@ async function runCodeAgentHarness({
   maxTurns,
   onEvent,
   label = 'code',
+  agentKey = 'code',
 }: {
   prompt: string;
   systemPrompt: string;
@@ -196,15 +206,19 @@ async function runCodeAgentHarness({
   maxTurns: number;
   onEvent?: BuildEventHandler;
   label?: string;
+  /** Model registry key (code, spark_data, spark_code, …). */
+  agentKey?: string;
 }): Promise<HarnessRunResult> {
   assertCodeHarnessConfigured();
   const { query } = await loadSdk();
-  const { model, modelId } = resolveClaudeModel();
+  const { model, modelId } = resolveClaudeModel(agentKey);
+  const agentTag = label || agentKey || 'code';
 
   const workspaceRoot = path.resolve(buildDir);
   emitCodeLog(
     onEvent,
-    `Claude Code harness (${label}, max ${maxTurns} turns) — ${modelId}, cwd=${workspaceRoot} (writes jailed to workspace)`,
+    `Claude Code harness (max ${maxTurns} turns) — ${modelId}, cwd=${workspaceRoot} (writes jailed to workspace)`,
+    { tag: agentTag },
   );
 
   const loopStart = Date.now();
@@ -225,7 +239,7 @@ async function runCodeAgentHarness({
       tools: CODE_TOOLS,
       allowedTools: CODE_TOOLS,
       disallowedTools: DISALLOWED_TOOLS,
-      canUseTool: buildWorkspaceCanUseTool(workspaceRoot, onEvent),
+      canUseTool: buildWorkspaceCanUseTool(workspaceRoot, onEvent, agentTag),
       permissionMode: 'acceptEdits',
       settingSources: [],
       env: {
@@ -247,7 +261,12 @@ async function runCodeAgentHarness({
         if (toolUses.some((t) => WRITE_TOOLS.has(t.name))) hasWritten = true;
 
         if (toolUses.length > 0 || text) {
-          onEvent?.({ type: 'thinking', step: stepIndex, label: 'Working' } as never);
+          onEvent?.({
+            type: 'thinking',
+            step: stepIndex,
+            label: 'Working',
+            tag: agentTag,
+          } as never);
           const toolsSummary = summarizeToolBatch(toolUses);
           const hint = toolStepHint(toolUses);
           const tokens = '—';
@@ -264,12 +283,13 @@ async function runCodeAgentHarness({
             tokens,
             toolCount: toolUses.length,
             summary: text ? text.slice(0, 200) : null,
+            tag: agentTag,
           } as never);
 
           const persistLine = toolUses.length
             ? `⚡ Step ${stepIndex + 1} · ${toolsSummary}${hint ? ` — ${hint}` : ''}`
             : `⚡ Step ${stepIndex + 1} · ${text ? text.trim() : 'done'}`;
-          emitCodeLog(onEvent, persistLine);
+          emitCodeLog(onEvent, persistLine, { tag: agentTag });
           stepIndex += 1;
         }
         if (text) fullText = text;
@@ -309,6 +329,7 @@ async function runCodeAgentHarness({
   emitCodeLog(
     onEvent,
     `Claude Code harness done: ${numTurns || stepIndex} turn(s), ${(totalMs / 1000).toFixed(1)}s, ${costStr}, ${tokens}`,
+    { tag: agentTag },
   );
 
   return {

@@ -1,5 +1,4 @@
 import React from 'react';
-import { bucketLabel, resolvePushBucket } from '../utils/reviewHelpers';
 import type { ReviewRecord } from '../types/domain';
 
 interface ReviewActionBarProps {
@@ -30,7 +29,6 @@ export default function ReviewActionBar({
   showOpenSandbox = true,
 }: ReviewActionBarProps): JSX.Element | null {
   if (!r) return null;
-  const bucket = resolvePushBucket(r);
   const canPush = !busy && !previewBusy && r.buildValidation?.passed && sandboxValidated;
 
   return (
@@ -40,19 +38,16 @@ export default function ReviewActionBar({
           <input
             type="checkbox"
             checked={sandboxValidated}
+            disabled={!sandboxTouched || busy || previewBusy}
             onChange={(e) => onSandboxValidatedChange(e.target.checked)}
-            disabled={busy || previewBusy || !sandboxTouched}
           />
-          <span>Sandbox sign-off</span>
+          <span>I validated this in the sandbox</span>
         </label>
-        {!sandboxTouched && (
-          <p className="review-signoff-hint">Open sandbox to validate before shipping.</p>
-        )}
       </div>
-      <div className="review-action-bar-buttons">
+      <div className="review-action-bar-btns">
         {onBack && (
           <button type="button" className="ghost sm" onClick={onBack} disabled={busy || previewBusy}>
-            ← Back
+            Back
           </button>
         )}
         {showOpenSandbox && (
@@ -75,7 +70,7 @@ export default function ReviewActionBar({
               ? 'Open sandbox and confirm sign-off first'
               : !sandboxValidated
                 ? 'Confirm sandbox sign-off'
-                : `Ship to ${bucketLabel(bucket) || 'library'}`
+                : 'Ship to challenge library'
           }
         >
           {busy ? 'Shipping…' : 'Ship to library'}
