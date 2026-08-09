@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import BrandMark from './BrandMark';
 import LoginModal from './LoginModal';
 import ContactSalesModal from './ContactSalesModal';
 import type { UserRecord } from '../types/domain';
@@ -44,7 +45,7 @@ export default function MarketingPageShell({ children, onLoggedIn }: MarketingPa
       <div className={`landing ${modalOpen ? 'landing-modal-open' : ''}`}>
         <header className="landing-header">
           <Link to="/" className="landing-brand">
-            <span className="logo-dot" />
+            <BrandMark className="brand-mark" />
             DevLabs
             <span className="landing-brand-ver">v0.2</span>
           </Link>

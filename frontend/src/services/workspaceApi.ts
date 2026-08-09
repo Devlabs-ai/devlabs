@@ -10,6 +10,7 @@ export interface SparkSessionStartResult {
   workspacePrefix?: string | null;
   entrypoint?: string | null;
   session?: Record<string, unknown>;
+  challenge?: Record<string, unknown>;
 }
 
 export interface WorkspacePayload {
@@ -23,14 +24,17 @@ export interface WorkspacePayload {
 
 export async function startSparkSession(
   challengeId: string,
-  starterFiles: SparkProjectFiles,
-  entrypoint = 'src/main.py',
+  starterFiles?: SparkProjectFiles | null,
+  entrypoint?: string,
 ): Promise<SparkSessionStartResult> {
-  const { data } = await axios.post(
-    '/api/session/spark/start',
-    { challengeId, starterFiles, entrypoint },
-    { headers: getAuthHeader() },
-  );
+  const body: Record<string, unknown> = { challengeId };
+  if (starterFiles && Object.keys(starterFiles).length > 0) {
+    body.starterFiles = starterFiles;
+  }
+  if (entrypoint) body.entrypoint = entrypoint;
+  const { data } = await axios.post('/api/session/spark/start', body, {
+    headers: getAuthHeader(),
+  });
   return data as SparkSessionStartResult;
 }
 
@@ -74,12 +78,23 @@ export async function renameWorkspaceFile(
 
 export interface StartSparkJobBody {
   mode: 'run' | 'submit';
-  inputPath: string;
+  /** Legacy direct INPUT_PATH; omit when using testcasesPrefix + cases. */
+  inputPath?: string;
   businessDate?: string;
-  /** s3a path to challenges/.../eval/solution.json */
+  /** Author expected path, or testcases/ prefix for Parquet row-diff. */
   evalSolutionPath?: string;
+  testcasesPrefix?: string;
+  cases?: string[];
+  gradeKeys?: string[];
+  /** Controls OUTPUT_PATH shape (json file vs parquet directory). */
+  outputFormat?: 'json' | 'parquet';
+  /** Dimension Parquet path → job env PRODUCTS_PATH. */
+  productsPath?: string;
+  /** Stage input/ + input_b/ → INPUT_A_PATH / INPUT_B_PATH. */
+  dualInput?: boolean;
   limits?: {
     driver?: number;
+    driverMemory?: string;
     executors?: number;
     executorCores?: number;
     executorMemory?: string;

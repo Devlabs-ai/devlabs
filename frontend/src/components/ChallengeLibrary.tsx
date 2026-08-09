@@ -10,10 +10,12 @@ interface ChallengeLibraryProps {
 }
 
 function difficultyClass(d: string | undefined): string {
-  const s = (d || '').toLowerCase();
-  if (s.includes('easy')) return 'easy';
-  if (s.includes('hard')) return 'hard';
-  return 'medium';
+  const s = (d || '').trim().toLowerCase();
+  if (s === 'l1' || s.includes('easy')) return 'l1';
+  if (s === 'l2' || s.includes('medium')) return 'l2';
+  if (s === 'l3') return 'l3';
+  if (s === 'l4' || s.includes('hard')) return 'l4';
+  return 'l2';
 }
 
 export default function ChallengeLibrary({
@@ -67,6 +69,9 @@ export default function ChallengeLibrary({
                 <span className={`pill ${difficultyClass(c.difficulty)}`}>{c.difficulty}</span>
                 {(c.sandboxType || '') === 'spark-platform' && (
                   <span className="pill spark-runtime-pill">Spark</span>
+                )}
+                {c.number != null && (
+                  <span className="pill spark-track-pill">#{c.number}</span>
                 )}
                 {c.category && <span className="challenge-card-category">{c.category}</span>}
               </div>

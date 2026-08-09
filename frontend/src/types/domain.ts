@@ -18,7 +18,10 @@ export interface ValidationSpec {
 export type SandboxType = 'compose' | 'spark-platform';
 
 export interface SparkPlatformLimits {
+  /** Driver cores requested for each Run/Submit job. */
   driver: number;
+  /** Driver memory (e.g. "1g"). Defaults to 1g when omitted. */
+  driverMemory?: string;
   executors: number;
   executorCores: number;
   executorMemory: string;
@@ -26,27 +29,54 @@ export interface SparkPlatformLimits {
 
 /** Metadata for batch Spark challenges (Daily Product Sales, etc.). */
 export interface SparkPlatformSpec {
+  /** Submit input (full / aggregate). */
   inputPath: string;
   outputPath?: string;
   /** Author golden — challenges/<challengeId>/eval/solution.json for Submit grading. */
   evalSolutionPath: string;
-  businessDate: string;
+  /** Run input (smoke). Falls back to inputPath when omitted. */
+  runInputPath?: string;
+  /** Run expected output Parquet (reference). Falls back to evalSolutionPath. */
+  runEvalPath?: string;
+  /** Canonical testcases/ prefix (each case has input/ + expected/). */
+  testcasesPrefix?: string;
+  runCases?: string[];
+  submitCases?: string[];
+  /** Row-diff key columns for Parquet grading (default transaction_id). */
+  gradeKeys?: string[];
+  /** Candidate OUTPUT_PATH shape: json file (default) or parquet directory. */
+  outputFormat?: 'json' | 'parquet';
+  businessDate?: string;
+  /** Optional dimension path injected as PRODUCTS_PATH (e.g. join labs). */
+  productsPath?: string;
+  /** When true, stage testcases/<id>/input/ + input_b/ as INPUT_A_PATH / INPUT_B_PATH. */
+  dualInput?: boolean;
   language: 'python';
   starterFileName: string;
   limits: SparkPlatformLimits;
   /** Checklist items shown in the brief (human-readable). */
   gradeChecks: string[];
+  /** When "minio", Play loads description/hints/spec/starter from MinIO. */
+  contentSource?: 'minio' | string;
 }
 
 export interface ChallengePublic {
   id: string;
+  /** Global catalog number across all platforms (1, 2, 3, …). */
+  number?: number | null;
   title: string;
   description: string;
   difficulty: string;
   tags: string[];
   category: string;
   finalized: boolean;
+  /** True when this user has ≥1 submit graded passed. */
+  solved?: boolean;
+  /** Distinct users who have submitted this challenge. */
+  submitters?: number;
   sandboxType: SandboxType | string | null;
+  /** Runtime SSOT marker; "minio" means hydrate from challenges/<id>/challenge/. */
+  contentSource?: 'minio' | string;
   problemStatement?: Record<string, unknown> | string | null;
   sparkPlatform?: SparkPlatformSpec | null;
 }

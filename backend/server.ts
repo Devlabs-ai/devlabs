@@ -20,6 +20,8 @@ const contactRoutes = require('./routes/contact');
 const authRoutes = require('./routes/auth');
 const challengeRoutes = require('./routes/challenges');
 const sessionRoutes = require('./routes/session');
+const papersRoutes = require('./routes/papers');
+const quizzesRoutes = require('./routes/quizzes');
 const devDbRoutes = require('./routes/devDb');
 
 const terminalService = require('./observability/terminalService');
@@ -41,6 +43,8 @@ app.use('/api/contact', contactRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/challenges', challengeRoutes);
 app.use('/api/session', sessionRoutes);
+app.use('/api/papers', papersRoutes);
+app.use('/api/quizzes', quizzesRoutes);
 app.use('/api/dev/db', devDbRoutes);
 
 app.use((err: Error & { status?: number }, _req: ExpressRequest, res: ExpressResponse, _next: ExpressNextFunction) => {

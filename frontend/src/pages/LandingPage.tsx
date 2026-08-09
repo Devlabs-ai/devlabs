@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import BrandMark from '../components/BrandMark';
 import MarketingPageShell, { useMarketing } from '../components/MarketingPageShell';
 import type { UserRecord } from '../types/domain';
 
@@ -72,11 +73,14 @@ function LandingContent(): JSX.Element {
       <section className="landing-screen">
         <div className="landing-screen-copy">
           <p className="landing-brand-mark">
-            DevLabs <span>v0.2</span>
+            <BrandMark className="brand-mark brand-mark--hero" />
+            <span className="landing-brand-mark-text">
+              DevLabs <span>v0.2</span>
+            </span>
           </p>
           <h1>Hands-on learning for modern engineering</h1>
           <p className="landing-lead">
-            Master production-grade systems in isolated labs — build pipelines,
+            Master data systems in isolated labs — build pipelines,
             troubleshoot failures, and validate against automated checks.
           </p>
           <div className="landing-cta">

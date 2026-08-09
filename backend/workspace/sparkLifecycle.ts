@@ -6,13 +6,15 @@ const { v4: uuidv4 } = require('uuid');
 const pool = require('../db/pool');
 const sessionStore = require('../db/sessionStore');
 const workspaceStore = require('./workspaceStore');
+const { loadStarterFiles, loadChallengeMeta } = require('../challenges/minioChallengeAssets');
 
 interface StartSparkOpts {
   challengeId: string;
   userId?: string | null;
   candidateName?: string | null;
   entrypoint?: string;
-  starterFiles: Record<string, string>;
+  /** Optional override; when omitted, starter is loaded from MinIO challenges/<id>/starter/. */
+  starterFiles?: Record<string, string> | null;
 }
 
 export type StartSparkResult = {
@@ -74,11 +76,39 @@ async function findExistingSparkSession(
   return session;
 }
 
+async function resolveStarterFiles(
+  challengeId: string,
+  starterFiles?: Record<string, string> | null,
+): Promise<Record<string, string>> {
+  if (starterFiles && typeof starterFiles === 'object' && Object.keys(starterFiles).length > 0) {
+    return starterFiles;
+  }
+  const fromMinio = await loadStarterFiles(challengeId);
+  if (fromMinio && Object.keys(fromMinio).length > 0) {
+    return fromMinio;
+  }
+  const e = new Error(
+    `No starter files for ${challengeId}. Publish starter/ to MinIO (challenges/${challengeId}/starter/) or pass starterFiles.`,
+  );
+  (e as Error & { status?: number }).status = 503;
+  throw e;
+}
+
+async function resolveEntrypoint(
+  challengeId: string,
+  entrypoint?: string,
+): Promise<string> {
+  if (entrypoint && entrypoint.trim()) return entrypoint;
+  const meta = await loadChallengeMeta(challengeId);
+  const fromSpec = (meta?.platformSpec as { starterFileName?: string } | undefined)?.starterFileName;
+  return fromSpec || 'src/main.py';
+}
+
 async function startSparkSession({
   challengeId,
   userId = null,
   candidateName = null,
-  entrypoint = 'src/main.py',
+  entrypoint,
   starterFiles,
 }: StartSparkOpts): Promise<StartSparkResult> {
   if (!challengeId) {
@@ -86,11 +116,9 @@ async function startSparkSession({
     (e as Error & { status?: number }).status = 400;
     throw e;
   }
-  if (!starterFiles || typeof starterFiles !== 'object') {
-    const e = new Error('starterFiles map is required');
-    (e as Error & { status?: number }).status = 400;
-    throw e;
-  }
+
+  const resolvedStarter = await resolveStarterFiles(challengeId, starterFiles);
+  const resolvedEntrypoint = await resolveEntrypoint(challengeId, entrypoint);
 
   const owner = workspaceStore.sanitizeOwner(userId || candidateName || 'anonymous');
   const workspacePrefix = workspaceStore.buildWorkspacePrefix(challengeId, owner);
@@ -102,16 +130,16 @@ async function startSparkSession({
     existing.runtime = 'spark-platform';
     existing.userId = owner;
     existing.workspacePrefix = workspacePrefix;
-    existing.entrypoint = entrypoint || existing.entrypoint || 'src/main.py';
+    existing.entrypoint = resolvedEntrypoint || existing.entrypoint || 'src/main.py';
     existing.candidateName = candidateName || existing.candidateName;
     sessionStore.set(existing.id, existing);
 
     try {
-      await workspaceStore.seedMissingFiles(existing.id, workspacePrefix, starterFiles);
+      await workspaceStore.seedMissingFiles(existing.id, workspacePrefix, resolvedStarter);
       // Ensure DB index matches object store after prefix consolidation.
       const files = await workspaceStore.loadAllFiles(existing.id, workspacePrefix);
       if (Object.keys(files).length === 0) {
-        await workspaceStore.seedFiles(existing.id, workspacePrefix, starterFiles);
+        await workspaceStore.seedFiles(existing.id, workspacePrefix, resolvedStarter);
       }
     } catch (err: unknown) {
       throw wrapSeedError(err);
@@ -132,7 +160,7 @@ async function startSparkSession({
   session.runtime = 'spark-platform';
   session.userId = owner;
   session.workspacePrefix = workspacePrefix;
-  session.entrypoint = entrypoint;
+  session.entrypoint = resolvedEntrypoint;
   session.workspaceUpdatedAt = Date.now();
   session.buildDir = null;
   session.portMap = null;
@@ -143,7 +171,7 @@ async function startSparkSession({
   await sessionStore.persistRow(session);
 
   try {
-    await workspaceStore.seedFiles(sessionId, workspacePrefix, starterFiles);
+    await workspaceStore.seedFiles(sessionId, workspacePrefix, resolvedStarter);
   } catch (err: unknown) {
     session.status = 'ended';
     session.endTime = Date.now();

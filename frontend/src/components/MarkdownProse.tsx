@@ -1,4 +1,5 @@
 import React from 'react';
+import ReadOnlyCodePane from './ReadOnlyCodePane';
 
 function inlineMarkdown(text: string): React.ReactNode[] {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
@@ -73,6 +74,119 @@ function parseTable(
   return { element, nextIndex: i - 1 };
 }
 
+/** Normalize fence language tags to Monaco ids. */
+function normalizeFenceLang(raw: string): string {
+  const lang = (raw || '').trim().toLowerCase().split(/\s+/)[0] || '';
+  if (!lang) return 'plaintext';
+  if (lang === 'py' || lang === 'python3') return 'python';
+  if (lang === 'js') return 'javascript';
+  if (lang === 'ts') return 'typescript';
+  if (lang === 'sh' || lang === 'bash' || lang === 'shell') return 'shell';
+  if (lang === 'yml') return 'yaml';
+  if (lang === 'text' || lang === 'plain' || lang === 'txt') return 'plaintext';
+  return lang;
+}
+
+function pathForFenceLang(lang: string): string {
+  switch (lang) {
+    case 'python':
+      return 'snippet.py';
+    case 'sql':
+      return 'snippet.sql';
+    case 'javascript':
+      return 'snippet.js';
+    case 'typescript':
+      return 'snippet.ts';
+    case 'json':
+      return 'snippet.json';
+    case 'yaml':
+      return 'snippet.yaml';
+    case 'shell':
+      return 'snippet.sh';
+    case 'markdown':
+      return 'snippet.md';
+    default:
+      return 'snippet.txt';
+  }
+}
+
+/** Trim / dedent fence bodies so Theory snippets render cleanly. */
+function formatFenceContent(raw: string, lang: string): string {
+  let text = raw.replace(/\r\n/g, '\n').replace(/\t/g, '    ');
+  const lines = text.split('\n').map((l) => l.replace(/[ \t]+$/g, ''));
+
+  // Drop leading / trailing blank lines
+  while (lines.length && lines[0].trim() === '') lines.shift();
+  while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+
+  const nonEmpty = lines.filter((l) => l.trim() !== '');
+  if (nonEmpty.length) {
+    const indent = Math.min(
+      ...nonEmpty.map((l) => {
+        const m = l.match(/^[ ]*/);
+        return m ? m[0].length : 0;
+      }),
+    );
+    if (indent > 0) {
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith(' '.repeat(indent))) {
+          lines[i] = lines[i].slice(indent);
+        }
+      }
+    }
+  }
+
+  // Collapse runs of blank lines
+  const collapsed: string[] = [];
+  for (const line of lines) {
+    if (line.trim() === '' && collapsed.length && collapsed[collapsed.length - 1] === '') {
+      continue;
+    }
+    collapsed.push(line);
+  }
+
+  let out = collapsed.join('\n');
+  if (lang === 'sql') {
+    out = formatSqlLight(out);
+  } else if (lang === 'python') {
+    out = formatPythonLight(out);
+  }
+  // No trailing newline — Monaco would render an empty last line.
+  return out.replace(/\n+$/g, '');
+}
+
+/** Light SQL pretty-print for short Theory examples (keeps string literals intact). */
+function formatSqlLight(sql: string): string {
+  const trimmed = sql.trim();
+  // Multi-line already authored — only normalize spaces inside single-line snippets.
+  if (trimmed.includes('\n')) {
+    return trimmed
+      .split('\n')
+      .map((l) => l.replace(/[ \t]+$/g, ''))
+      .join('\n');
+  }
+  return trimmed
+    .replace(/\s+/g, ' ')
+    .replace(/\s*,\s*/g, ', ')
+    .replace(/\s*=\s*/g, ' = ')
+    .trim();
+}
+
+/** Light Python cleanup — preserve structure, fix trailing whitespace / blank runs. */
+function formatPythonLight(code: string): string {
+  return code
+    .split('\n')
+    .map((l) => l.replace(/[ \t]+$/g, ''))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd();
+}
+
+function fenceLabel(lang: string): string {
+  if (lang === 'plaintext') return 'code';
+  return lang;
+}
+
 function renderMarkdown(text: string): React.ReactNode[] | null {
   if (!text) return null;
   const lines = text.split('\n');
@@ -81,6 +195,33 @@ function renderMarkdown(text: string): React.ReactNode[] | null {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const fenceOpen = line.trim().match(/^```([\w+-]*)\s*$/);
+
+    if (fenceOpen) {
+      const lang = normalizeFenceLang(fenceOpen[1] || '');
+      const body: string[] = [];
+      i += 1;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) {
+        body.push(lines[i]);
+        i += 1;
+      }
+      const content = formatFenceContent(body.join('\n'), lang);
+      const path = pathForFenceLang(lang);
+      elements.push(
+        <div key={key++} className="markdown-code-block">
+          <div className="markdown-code-toolbar">
+            <span className="markdown-code-lang">{fenceLabel(lang)}</span>
+          </div>
+          <ReadOnlyCodePane
+            path={path}
+            content={content}
+            language={lang}
+            className="markdown-code-pane"
+          />
+        </div>,
+      );
+      continue;
+    }
 
     if (/^#{1,4}\s/.test(line)) {
       const level = (line.match(/^(#+)/) as RegExpMatchArray)[1].length;
@@ -131,7 +272,7 @@ interface MarkdownProseProps {
   className?: string;
 }
 
-/** Renders challenge-style markdown (headings, lists, tables, bold, inline code). */
+/** Renders challenge-style markdown (headings, lists, tables, fences, bold, inline code). */
 export default function MarkdownProse({ text, className = 'markdown-prose' }: MarkdownProseProps): JSX.Element | null {
   if (!text?.trim()) return null;
   return <div className={className}>{renderMarkdown(text)}</div>;

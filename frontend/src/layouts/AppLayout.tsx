@@ -1,109 +1,22 @@
 import React from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
+import BrandMark from '../components/BrandMark';
 import SessionController from '../components/SessionController';
-import {
-  IconPlay,
-  IconSubmit,
-  IconSubmissions,
-} from '../components/ChromeIcons';
 import { useAppState } from '../context/AppStateContext';
-import { PlayChromeProvider, usePlayChrome } from '../context/PlayChromeContext';
+import { PlayChromeProvider } from '../context/PlayChromeContext';
 
-const CHROME_ACTION_STYLE: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 7,
-  padding: '4px 8px',
-  margin: 0,
-  border: 'none',
-  borderRadius: 6,
-  background: 'transparent',
-  boxShadow: 'none',
-  color: '#34d399',
-  fontSize: 13,
-  fontWeight: 600,
-  filter: 'none',
-  transform: 'none',
-  letterSpacing: 'normal',
-};
-
+/** Thin brand bar — Run/Submit live in the IDE action bar (TensorTonic-style). */
 function ChallengeTopBar(): JSX.Element {
-  const { chrome } = usePlayChrome();
-
-  const showRun = Boolean(chrome.run || chrome.primary);
-  const runBusy = Boolean(chrome.run?.busy || chrome.primary?.busy);
-
   return (
     <div className="topbar topbar--challenge">
       <div className="topbar-inner topbar-inner--challenge">
         <div className="challenge-chrome-left">
           <Link to="/" className="brand brand--compact brand-link" title="Home">
-            <span className="logo-dot" />
-            Devlabs
+            <BrandMark className="brand-mark brand-mark--sm" />
+            DevLabs
           </Link>
         </div>
-
-        <div className="challenge-chrome-center">
-          {showRun && (
-            <button
-              type="button"
-              className="challenge-chrome-submit"
-              onClick={chrome.run?.onClick}
-              disabled={!chrome.run || runBusy}
-              title="Run"
-              style={{
-                ...CHROME_ACTION_STYLE,
-                cursor: !chrome.run || runBusy ? 'not-allowed' : 'pointer',
-                opacity: !chrome.run || runBusy ? 0.55 : 1,
-              }}
-            >
-              <IconPlay color="#34d399" />
-              <span>{chrome.run?.busy ? (chrome.run.busyLabel || 'Running…') : 'Run'}</span>
-            </button>
-          )}
-          {chrome.primary && (
-            <button
-              type="button"
-              className="challenge-chrome-submit"
-              onClick={chrome.primary.onClick}
-              disabled={chrome.primary.busy}
-              title={chrome.primary.busy
-                ? (chrome.primary.busyLabel || chrome.primary.label)
-                : chrome.primary.label}
-              style={{
-                ...CHROME_ACTION_STYLE,
-                cursor: chrome.primary.busy ? 'not-allowed' : 'pointer',
-                opacity: chrome.primary.busy ? 0.55 : 1,
-              }}
-            >
-              <IconSubmit />
-              <span>
-                {chrome.primary.busy
-                  ? (chrome.primary.busyLabel || chrome.primary.label)
-                  : chrome.primary.label}
-              </span>
-            </button>
-          )}
-          {chrome.submissions && (
-            <button
-              type="button"
-              className="challenge-chrome-submit"
-              onClick={chrome.submissions.onClick}
-              disabled={chrome.submissions.busy}
-              title={chrome.submissions.label}
-              style={{
-                ...CHROME_ACTION_STYLE,
-                cursor: chrome.submissions.busy ? 'not-allowed' : 'pointer',
-                opacity: chrome.submissions.busy ? 0.55 : 1,
-              }}
-            >
-              <IconSubmissions />
-              <span>{chrome.submissions.label}</span>
-            </button>
-          )}
-          {chrome.status}
-        </div>
-
+        <div className="challenge-chrome-center" />
         <div className="challenge-chrome-right" />
       </div>
     </div>
@@ -123,21 +36,33 @@ function AppLayoutInner(): React.JSX.Element {
   const location = useLocation();
   const challengeOpen = playState === 'active' && Boolean(activeSession);
   const showNav = authMode === 'interviewer' && playState !== 'active';
+  const onPlayRoute =
+    location.pathname === '/play' ||
+    (location.pathname.startsWith('/play/') &&
+      !location.pathname.startsWith('/play/quiz/') &&
+      !location.pathname.startsWith('/play/papers') &&
+      !location.pathname.startsWith('/play/quests'));
+  const usePlayChrome =
+    (onPlayRoute ||
+      location.pathname.startsWith('/play/quiz/') ||
+      location.pathname.startsWith('/play/papers') ||
+      location.pathname.startsWith('/play/quests')) &&
+    !challengeOpen;
 
   return (
-    <div className={`app${challengeOpen ? ' app--challenge' : ''}`}>
+    <div className={`app${challengeOpen ? ' app--challenge' : ''}${usePlayChrome ? ' app--play' : ''}`}>
       {challengeOpen ? (
         <ChallengeTopBar />
       ) : (
-        <div className="topbar">
-          <div className="topbar-inner topbar-inner--split">
+        <header className={`topbar${usePlayChrome ? ' topbar--play' : ''}`}>
+          <div className="topbar-inner topbar-inner--play">
             <NavLink to="/" className="brand brand-link" end title="Home">
-              <span className="logo-dot" />
-              Devlabs
-              <span className="sub">v0.2</span>
+              <BrandMark className="brand-mark" />
+              <span className="brand-name">DevLabs</span>
+              {!usePlayChrome && <span className="sub">v0.2</span>}
             </NavLink>
 
-            <div className="right">
+            <div className="topbar-trailing">
               {playState === 'active' && activeSession && (
                 <SessionController
                   session={activeSession}
@@ -147,16 +72,7 @@ function AppLayoutInner(): React.JSX.Element {
               )}
 
               {showNav && (
-                <nav className="topnav">
-                  <NavLink
-                    to="/play"
-                    className={({ isActive }) => `topnav-pill${isActive || location.pathname.startsWith('/play') ? ' active' : ''}`}
-                  >
-                    Play
-                  </NavLink>
-
-                  <span className="topnav-sep" />
-
+                <nav className="topnav topnav--actions" aria-label="Account">
                   <NavLink
                     to="/profile"
                     className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
@@ -170,7 +86,7 @@ function AppLayoutInner(): React.JSX.Element {
               )}
             </div>
           </div>
-        </div>
+        </header>
       )}
 
       <div className={`app-body${challengeOpen ? ' app-body--challenge' : ''}`}>

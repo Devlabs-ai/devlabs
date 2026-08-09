@@ -9,6 +9,9 @@ import {
 } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
 import PlayPage from './pages/PlayPage';
+import QuizPage from './pages/QuizPage';
+import WhitePapersPage from './pages/WhitePapersPage';
+import SideQuestsPage from './pages/SideQuestsPage';
 import ProfilePage from './pages/ProfilePage';
 import DbExplorerPage from './pages/DbExplorerPage';
 import AppLayout from './layouts/AppLayout';
@@ -60,18 +63,21 @@ export default function App(): React.JSX.Element {
     }
   }, []);
 
+  const refreshChallenges = async (): Promise<void> => {
+    try {
+      const list = await fetchChallenges();
+      setChallenges(list);
+      setChallengesError(null);
+    } catch (e) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      setChallenges([]);
+      setChallengesError(err?.response?.data?.error || err.message || 'Unknown error');
+    }
+  };
+
   useEffect(() => {
     if (authMode === 'interviewer') {
-      (async () => {
-        try {
-          const list = await fetchChallenges();
-          setChallenges(list);
-        } catch (e) {
-          const err = e as { response?: { data?: { error?: string } }; message?: string };
-          setChallenges([]);
-          setChallengesError(err?.response?.data?.error || err.message || 'Unknown error');
-        }
-      })();
+      void refreshChallenges();
     }
   }, [authMode]);
 
@@ -80,21 +86,30 @@ export default function App(): React.JSX.Element {
     setPlayState('loading');
     setActiveChallenge(challenge);
 
-    // Spark-platform: create DB session + seed workspace in MinIO.
+    // Spark-platform: hydrate meta from MinIO; seed starter from MinIO when contentSource=minio.
     if (isSparkPlatformChallenge(challenge)) {
       try {
-        const full =
-          (challenge as ChallengeFull).sparkPlatform
-            ? (challenge as ChallengeFull)
-            : await fetchChallenge(challenge.id);
+        const full = await fetchChallenge(challenge.id);
         const platform = full.sparkPlatform;
-        if (!platform) throw new Error('Missing sparkPlatform spec');
-        const starterFiles = buildDailyProductSalesProject(platform);
+        const contentSource = full.contentSource || platform?.contentSource;
+        // MinIO SSOT labs: backend loads challenges/<id>/starter/.
+        // Legacy labs (e.g. DPS) still use FE fixtures until migrated.
+        const useMinioStarter = contentSource === 'minio';
+        if (!useMinioStarter && !platform) {
+          throw new Error('Missing sparkPlatform spec');
+        }
+        const starterFiles = useMinioStarter
+          ? null
+          : buildDailyProductSalesProject(platform!);
         const res = await startSparkSession(
           full.id,
           starterFiles,
-          platform.starterFileName || 'src/main.py',
+          platform?.starterFileName,
         );
+        const hydrated =
+          (res.challenge as ChallengeFull | undefined)
+          || (res.session as { challenge?: ChallengeFull } | undefined)?.challenge
+          || full;
         setActiveSession({
           id: res.sessionId,
           startTime: Date.now(),
@@ -106,7 +121,7 @@ export default function App(): React.JSX.Element {
           terminalService: null,
           runtime: 'spark-platform',
         });
-        setActiveChallenge(full);
+        setActiveChallenge(hydrated);
         setActiveTab('editor');
         openingSessionRef.current = res.sessionId;
         setPlayState('active');
@@ -167,6 +182,9 @@ export default function App(): React.JSX.Element {
 
     const a = segments[1] || null;
     const b = segments[2] || null;
+
+    // Quiz / papers / quests — not session restore paths
+    if (a === 'quiz' || a === 'papers' || a === 'quests') return;
 
     // Catalog: /play | /play/:domain | /play/:domain/:panel
     if (!a || isPlayDomainId(a)) {
@@ -259,7 +277,7 @@ export default function App(): React.JSX.Element {
         // Workspace exists without a recoverable challenge id — probe MinIO then default lab.
         const { fetchWorkspace } = await import('./services/workspaceApi');
         await fetchWorkspace(sid);
-        full = await fetchChallenge('daily-product-sales-pipeline-l1');
+        full = await fetchChallenge('l1-filter-valid-sales-rows');
       }
 
       if (!full?.sparkPlatform && full) {
@@ -315,6 +333,7 @@ export default function App(): React.JSX.Element {
     setActiveChallenge(null);
     setEndResult(null);
     navigate(dest);
+    void refreshChallenges();
   };
 
   const handleLogout = (): void => {
@@ -395,6 +414,11 @@ export default function App(): React.JSX.Element {
         <Route path="/" element={<Navigate to="/play" replace />} />
         <Route element={<AppLayout />}>
           <Route path="play" element={<PlayPage />} />
+          <Route path="play/quiz/:quizId" element={<QuizPage />} />
+          <Route path="play/papers" element={<WhitePapersPage />} />
+          <Route path="play/papers/:sectionId" element={<WhitePapersPage />} />
+          <Route path="play/quests" element={<SideQuestsPage />} />
+          <Route path="play/quests/:topicId" element={<SideQuestsPage />} />
           <Route path="play/:domainId" element={<PlayPage />} />
           <Route path="play/:domainId/:panelId" element={<PlayPage />} />
           <Route path="profile" element={<ProfilePage />} />

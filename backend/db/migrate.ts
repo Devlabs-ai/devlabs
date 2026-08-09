@@ -102,9 +102,18 @@ const STATEMENTS: string[] = [
   `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS grade_status TEXT`,
   `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS grade_result JSONB`,
   `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS graded_at BIGINT`,
+  `CREATE INDEX IF NOT EXISTS idx_submissions_user_solved
+     ON submissions (user_id, challenge_id)
+     WHERE mode = 'submit' AND grade_status = 'passed'`,
 
   // Spark / platform metadata (paths, limits, gradeChecks, …).
   `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS platform_spec JSONB`,
+
+  // Global catalog number across all platforms (1, 2, 3, …).
+  `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS number INTEGER`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_challenges_number
+     ON challenges (number)
+     WHERE number IS NOT NULL`,
 ];
 
 const CATALOG_V2_KEY = 'challenges_catalog_v2';

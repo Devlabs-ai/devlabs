@@ -3,73 +3,6 @@ import type { ChallengeFull, SparkPlatformSpec } from '../types/domain';
 /** In-memory project files handed to the candidate (VS Code–style workspace). */
 export type SparkProjectFiles = Record<string, string>;
 
-function buildReadme(platform: SparkPlatformSpec): string {
-  return `# Daily Product Sales Pipeline
-
-You are building the nightly **product sales** batch job for Acme Retail.
-
-You may create as many files/modules as you need under this project. Keep \`src/main.py\` as the Spark application entrypoint (or update submit config later).
-
-## Cluster
-
-- **Driver:** ${platform.limits.driver}
-- **Executors:** up to ${platform.limits.executors}
-- **Executor cores:** ${platform.limits.executorCores}
-- **Executor memory:** ${platform.limits.executorMemory}
-
-Queue wait is excluded from evaluation; only Spark application runtime counts.
-
-## Data (MinIO / s3a)
-
-- **Input:** \`${platform.inputPath}\`
-- **Your job OUTPUT_PATH:** a single JSON object at \`results/<jobId>/solution.json\` under your workspace
-- **Eval (Submit grade):** \`${platform.evalSolutionPath}\` (same JSON contract)
-- **Business date:** \`${platform.businessDate}\`
-
-Environment variables available at runtime:
-
-- \`INPUT_PATH\`
-- \`OUTPUT_PATH\` — write \`{"rows":[...]} \` matching the eval schema
-- \`BUSINESS_DATE\`
-
-## Expected output JSON
-
-Write to \`OUTPUT_PATH\` (JSON):
-
-\`\`\`json
-{
-  "rows": [
-    {
-      "business_date": "2026-01-15",
-      "product_id": 1,
-      "total_units_sold": 0,
-      "total_revenue": 0.0,
-      "transaction_count": 0,
-      "stores_sold_in": 0
-    }
-  ]
-}
-\`\`\`
-
-Row fields:
-
-- \`business_date\` — Processing date
-- \`product_id\` — Product identifier
-- \`total_units_sold\` — Sum of quantity
-- \`total_revenue\` — Sum of quantity × unit_price
-- \`transaction_count\` — Number of transactions
-- \`stores_sold_in\` — Distinct stores selling the product
-
-Schema/types for grading come from the author \`eval/solution.json\` — your \`rows\` must include those columns.
-
-## Notes
-
-- Ignore malformed rows; do not fail the whole batch on bad records.
-- One Parquet file per store is expected under the input prefix (\`store_id=<n>/...\`).
-- \`spark.read.parquet\` fills null \`store_id\` values from the hive partition path.
-`;
-}
-
 const MAIN_PY = `"""Spark entrypoint — expand into packages/modules as you like."""
 
 from pyspark.sql import SparkSession
@@ -101,7 +34,7 @@ def main() -> None:
 
     # TODO: discover INPUT_PATH parquet, validate, aggregate, then:
     # write_result_json(spark, rows, OUTPUT_PATH)
-    # Each row must include the graded columns (see README / eval solution schema).
+    # Each row must include the graded columns (see eval solution schema).
 
     spark.stop()
 
@@ -110,7 +43,7 @@ if __name__ == "__main__":
     main()
 `;
 
-/** Starter project files for Spark labs (README + main.py). Challenge catalog lives in DB. */
+/** Challenge catalog fixture for Daily Product Sales. Starter is src/main.py only. */
 export const DAILY_PRODUCT_SALES_L1: ChallengeFull = {
   id: 'daily-product-sales-pipeline-l1',
   title: 'Daily Product Sales Pipeline',
@@ -126,7 +59,7 @@ Your pipeline should:
 - Compute product-level business metrics
 - Publish a daily summary dataset
 `,
-  difficulty: 'Medium',
+  difficulty: 'L2',
   tags: ['spark', 'batch', 'parquet', 'minio', 'aggregation'],
   category: 'batch-processing',
   finalized: true,
@@ -149,7 +82,7 @@ Your pipeline should:
     yourTask:
       'Implement a Spark application that discovers input Parquet files, validates rows, aggregates product metrics, and publishes daily_product_summary.',
     hints: [
-      'Cluster limits and s3a paths are in README.md.',
+      'Cluster limits and s3a paths are in the Spec tab / platform settings.',
       'Reject nulls and non-positive quantity / unit_price; keep processing.',
       'Input is hive-partitioned by store_id — spark.read.parquet fills null store_id from the path.',
       'total_revenue = sum(quantity × unit_price); stores_sold_in = distinct store_id per product.',
@@ -198,9 +131,8 @@ Your pipeline should:
   },
 };
 
-export function buildDailyProductSalesProject(platform: SparkPlatformSpec): SparkProjectFiles {
+export function buildDailyProductSalesProject(_platform: SparkPlatformSpec): SparkProjectFiles {
   return {
-    'README.md': buildReadme(platform),
     'src/main.py': MAIN_PY,
   };
 }

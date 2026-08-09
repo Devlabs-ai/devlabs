@@ -24,7 +24,10 @@ let historyBaseCache: string | null = HISTORY_UI_FALLBACK;
 export type SparkJobMode = 'run' | 'submit';
 
 export interface SparkJobLimits {
+  /** Driver cores (platform `driver_cores`). */
   driver?: number;
+  /** Driver memory string, e.g. "1g" (platform `driver_memory`). */
+  driverMemory?: string;
   executors?: number;
   executorCores?: number;
   executorMemory?: string;
@@ -39,11 +42,74 @@ export interface StartSparkJobOpts {
     entrypoint?: string | null;
   };
   mode: SparkJobMode;
-  inputPath: string;
+  /**
+   * Direct INPUT_PATH (legacy / non-testcase challenges).
+   * Ignored when testcasesPrefix + cases are provided (platform stages inputs).
+   */
+  inputPath?: string;
   businessDate: string;
-  /** Author golden: s3a://…/challenges/…/eval/solution.json */
+  /** Author expected JSON, or testcases/ prefix for Parquet row-diff. */
   evalSolutionPath?: string;
+  /** Canonical testcases/ prefix (s3a). */
+  testcasesPrefix?: string;
+  /** Case ids to run for this job (from runCases / submitCases). */
+  cases?: string[];
+  /** Row-diff keys for Parquet grading. */
+  gradeKeys?: string[];
+  /** json (default) → results/<id>/solution.json; parquet → results/<id>/ */
+  outputFormat?: 'json' | 'parquet';
+  /** Optional products dimension path → env PRODUCTS_PATH. */
+  productsPath?: string;
+  /**
+   * When true with testcasesPrefix+cases: stage input/ → INPUT_A_PATH and
+   * input_b/ → INPUT_B_PATH (merge / dual-drop labs).
+   */
+  dualInput?: boolean;
   limits?: SparkJobLimits;
+}
+
+/**
+ * Copy testcases/<id>/<folder>/*.parquet → destPrefix/<id>.parquet for one Spark read.
+ */
+async function stageTestcaseInputs(
+  store: ReturnType<typeof getObjectStore>,
+  testcasesPrefixS3a: string,
+  caseIds: string[],
+  destPrefixKey: string,
+  folder: string = 'input',
+): Promise<{ inputPathS3a: string; stagedFiles: number }> {
+  const tcRoot = s3aToKeyLocal(testcasesPrefixS3a).replace(/\/?$/, '/');
+  const destRoot = normalizeKey(destPrefixKey).replace(/\/?$/, '/');
+  const folderName = (folder || 'input').replace(/^\/+|\/+$/g, '') || 'input';
+  let stagedFiles = 0;
+
+  for (const caseId of caseIds) {
+    const srcPrefix = `${tcRoot}${caseId}/${folderName}/`;
+    const keys = (await store.listKeys(srcPrefix)).filter(
+      (k: string) => k.endsWith('.parquet') && !k.includes('_temporary'),
+    );
+    if (!keys.length) {
+      throw Object.assign(
+        new Error(`no input parquet for testcase ${caseId} under ${srcPrefix}`),
+        { status: 400 },
+      );
+    }
+    // One file per case keeps spark.read.parquet(dir) simple.
+    const srcKey = keys.sort()[0];
+    const destKey = `${destRoot}${caseId}.parquet`;
+    await store.copyObject(srcKey, destKey);
+    stagedFiles += 1;
+  }
+
+  await store.putObject(`${destRoot}_SUCCESS`, Buffer.from(''), 'text/plain');
+  return { inputPathS3a: s3aKey(destRoot), stagedFiles };
+}
+
+function s3aToKeyLocal(s3aOrKey: string): string {
+  const raw = String(s3aOrKey || '').trim();
+  if (!raw) return '';
+  const m = raw.match(/^s3a:\/\/[^/]+\/(.+)$/);
+  return normalizeKey(m ? m[1] : raw.replace(/^\/+/, ''));
 }
 
 function workspaceRootFromPrefix(workspacePrefix: string): string {
@@ -264,13 +330,23 @@ async function enrichJobDebug(jobId: string): Promise<Record<string, unknown>> {
 
 async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, unknown>> {
   await resolveHistoryBase();
-  const { session, mode, inputPath, businessDate, limits } = opts;
-  const evalSolutionPath = (opts.evalSolutionPath || '').trim();
+  const { session, mode, businessDate, limits, productsPath } = opts;
+  const dualInput = Boolean(opts.dualInput);
+  const outputFormat = opts.outputFormat === 'parquet' ? 'parquet' : 'json';
+  const testcasesPrefix = (opts.testcasesPrefix || '').trim();
+  const cases = Array.isArray(opts.cases)
+    ? opts.cases.map(String).filter(Boolean)
+    : [];
+  const gradeKeys = Array.isArray(opts.gradeKeys)
+    ? opts.gradeKeys.map(String).filter(Boolean)
+    : ['transaction_id'];
+  let evalSolutionPath = (opts.evalSolutionPath || '').trim();
+  let inputPath = (opts.inputPath || '').trim();
+  let inputAPath = '';
+  let inputBPath = '';
+
   if (!session.workspacePrefix) {
     throw Object.assign(new Error('session has no workspacePrefix'), { status: 400 });
-  }
-  if (!inputPath) {
-    throw Object.assign(new Error('inputPath is required'), { status: 400 });
   }
 
   const jobId = uuidv4();
@@ -280,17 +356,65 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
   const projectPrefix = session.workspacePrefix;
   const jobAppPrefix = `${root}/jobs/${jobId}/app`;
   const manifestKey = `${root}/jobs/${jobId}/manifest.json`;
-  const outputPath = s3aKey(`${root}/results/${jobId}/solution.json`);
+  const stagedInputPrefix = `${root}/jobs/${jobId}/staged-input`;
+  const stagedInputBPrefix = `${root}/jobs/${jobId}/staged-input-b`;
+  const outputPath =
+    outputFormat === 'parquet'
+      ? s3aKey(`${root}/results/${jobId}/`)
+      : s3aKey(`${root}/results/${jobId}/solution.json`);
   const mainFile = s3aKey(`${jobAppPrefix}/${entrypoint}`);
   const k8sName = dnsJobName(owner, jobId, mode);
 
   const snap = await snapshotProject(projectPrefix, jobAppPrefix);
-  // Verify entrypoint exists in snapshot
   const store = getObjectStore();
   const entryObj = await store.getObject(normalizeKey(`${jobAppPrefix}/${entrypoint}`));
   if (!entryObj) {
     throw Object.assign(
       new Error(`entrypoint not found in workspace: ${entrypoint}`),
+      { status: 400 },
+    );
+  }
+
+  let stagedFiles = 0;
+  if (testcasesPrefix && cases.length) {
+    if (dualInput) {
+      const stagedA = await stageTestcaseInputs(
+        store,
+        testcasesPrefix,
+        cases,
+        stagedInputPrefix,
+        'input',
+      );
+      const stagedB = await stageTestcaseInputs(
+        store,
+        testcasesPrefix,
+        cases,
+        stagedInputBPrefix,
+        'input_b',
+      );
+      inputAPath = stagedA.inputPathS3a;
+      inputBPath = stagedB.inputPathS3a;
+      // Compat: INPUT_PATH points at side A for labs that only read one path by mistake.
+      inputPath = inputAPath;
+      stagedFiles = stagedA.stagedFiles + stagedB.stagedFiles;
+    } else {
+      const staged = await stageTestcaseInputs(
+        store,
+        testcasesPrefix,
+        cases,
+        stagedInputPrefix,
+        'input',
+      );
+      inputPath = staged.inputPathS3a;
+      stagedFiles = staged.stagedFiles;
+    }
+    // Grade against canonical testcases/ (per-case expected/).
+    evalSolutionPath = testcasesPrefix;
+  }
+
+  if (!inputPath && !(dualInput && inputAPath && inputBPath)) {
+    throw Object.assign(
+      new Error('inputPath is required (or provide testcasesPrefix + cases)'),
       { status: 400 },
     );
   }
@@ -305,7 +429,12 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
     businessDate,
     inputPath,
     outputPath,
+    outputFormat,
     evalSolutionPath: evalSolutionPath || null,
+    testcasesPrefix: testcasesPrefix || null,
+    cases,
+    gradeKeys,
+    stagedFiles,
     mainApplicationFile: mainFile,
     snapshotFiles: snap.files,
     k8sName,
@@ -317,6 +446,8 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
   };
   await writeManifest(manifestKey, manifest);
 
+  const driverCores = Math.min(2, Math.max(1, limits?.driver ?? 1));
+  const driverMemory = limits?.driverMemory || '1g';
   const executors = Math.min(4, Math.max(1, limits?.executors ?? 2));
   const executorCores = Math.min(2, Math.max(1, limits?.executorCores ?? 1));
   const executorMemory = limits?.executorMemory || '1g';
@@ -334,13 +465,19 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
     executor_instances: executors,
     executor_cores: executorCores,
     executor_memory: executorMemory,
-    driver_cores: 1,
-    driver_memory: '1g',
+    driver_cores: driverCores,
+    driver_memory: driverMemory,
     deps_py_files: depsPy,
     env: {
       BUSINESS_DATE: businessDate,
       INPUT_PATH: inputPath,
       OUTPUT_PATH: outputPath,
+      ...(productsPath && String(productsPath).trim()
+        ? { PRODUCTS_PATH: String(productsPath).trim() }
+        : {}),
+      ...(dualInput && inputAPath && inputBPath
+        ? { INPUT_A_PATH: inputAPath, INPUT_B_PATH: inputBPath }
+        : {}),
     },
   };
 
@@ -371,9 +508,12 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
       null,
       JSON.stringify([
         'Snapshot written',
+        cases.length
+          ? `Staged ${stagedFiles} testcase input file(s): ${cases.join(', ')}`
+          : 'Using provided INPUT_PATH',
         `Submitting ${k8sName} to Spark Platform…`,
         mode === 'submit'
-          ? 'Submit mode — will evaluate against eval/solution.json when Spark succeeds'
+          ? 'Submit mode — will row-diff against each testcase expected/ when Spark succeeds'
           : 'Run mode — output for your validation (not a scored submission)',
       ]),
       gradeStatus,
@@ -413,7 +553,7 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
           `Submitted SparkApplication ${k8sName}`,
           `mainApplicationFile=${mainFile}`,
           mode === 'submit'
-            ? 'Submit mode — will evaluate against eval/solution.json when Spark succeeds'
+            ? 'Submit mode — will evaluate against expected output when Spark succeeds'
             : 'Run mode — output for your validation (not a scored submission)',
         ]),
         Date.now(),
@@ -515,7 +655,7 @@ async function maybeGradeJob(jobId: string): Promise<void> {
         JSON.stringify({
           passed: false,
           kind: 'submission',
-          summary: 'No eval/solution.json path configured for challenge',
+          summary: 'No expected/eval path configured for challenge',
           checks: [],
           gradedAt: Date.now(),
         }),
@@ -531,11 +671,33 @@ async function maybeGradeJob(jobId: string): Promise<void> {
   );
 
   try {
+    let gradeCases: string[] | undefined;
+    let gradeKeys: string[] | undefined;
+    try {
+      const manBuf = row.manifest_key
+        ? await getObjectStore().getObject(normalizeKey(String(row.manifest_key)))
+        : null;
+      if (manBuf) {
+        const man = JSON.parse(manBuf.toString('utf8')) as {
+          cases?: string[];
+          gradeKeys?: string[];
+        };
+        if (Array.isArray(man.cases) && man.cases.length) gradeCases = man.cases.map(String);
+        if (Array.isArray(man.gradeKeys) && man.gradeKeys.length) {
+          gradeKeys = man.gradeKeys.map(String);
+        }
+      }
+    } catch {
+      /* fall back to directory-style expected/ */
+    }
+
     const grade = await gradeOutputAgainstSolution({
       candidateOutputS3a: String(row.output_path),
       evalSolutionS3a: String(row.results_path),
       kind: 'submission',
       sparkSucceeded: true,
+      gradeCases,
+      gradeKeys,
     });
     const lines = (() => {
       try {

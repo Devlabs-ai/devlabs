@@ -1,15 +1,21 @@
 'use strict';
 
 /**
- * Grade candidate results JSON against challenge eval/solution.json.
+ * Grade candidate Spark output against author expected artifacts.
  *
- * Contract (devlabs.eval.v1):
- *   - Author:   challenges/<id>/eval/solution.json  (keys + columns + rows)
- *   - Candidate: workspaces/.../results/<jobId>/solution.json  ({ "rows": [...] })
- *
- * Schema always comes from the author's solution.json.
+ * Contracts:
+ *   A) JSON (devlabs.eval.v1):
+ *      Author:   …/eval/solution.json  (keys + columns + rows)
+ *      Candidate: …/results/<jobId>/solution.json  ({ "rows": [...] })
+ *   B) Parquet directories:
+ *      Author:   …/submit/expected/  (*.parquet of valid rows)
+ *      Candidate: …/results/<jobId>/  (*.parquet)
+ *      Compare sorted transaction_id sets (+ row counts).
  */
 
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { getObjectStore, normalizeKey } = require('./objectStore');
 
 export interface GradeResult {
@@ -184,17 +190,375 @@ function extractRows(data: unknown): { rows: unknown[] | null; error?: string } 
   return { rows: null, error: 'JSON root must be an object or array' };
 }
 
-async function gradeOutputAgainstSolution(opts: {
-  /** Candidate result JSON s3a path (…/results/<jobId>/solution.json) */
+function looksLikeParquetExpected(solutionKey: string): boolean {
+  const k = String(solutionKey || '').replace(/\/+$/, '');
+  if (!k) return false;
+  if (k.endsWith('.json')) return false;
+  // Convention: …/expected or …/expected/
+  return /(^|\/)expected$/i.test(k) || k.endsWith('/');
+}
+
+async function downloadParquetPrefix(store: ReturnType<typeof getObjectStore>, prefix: string, destDir: string): Promise<string[]> {
+  const root = normalizeKey(prefix).replace(/\/?$/, '/');
+  const keys = (await store.listKeys(root)).filter(
+    (k: string) => k.endsWith('.parquet') && !k.includes('_temporary') && !k.includes('.spark-staging'),
+  );
+  fs.mkdirSync(destDir, { recursive: true });
+  const local: string[] = [];
+  for (const key of keys) {
+    const buf = await store.getObject(key);
+    if (!buf) continue;
+    const name = path.basename(key);
+    const out = path.join(destDir, name);
+    fs.writeFileSync(out, buf);
+    local.push(out);
+  }
+  return local;
+}
+
+type ParquetRow = Record<string, unknown>;
+
+async function loadHyparquetReader(): Promise<
+  (opts: { file: ArrayBuffer; columns?: string[] }) => Promise<ParquetRow[]>
+> {
+  const mod = await import('hyparquet');
+  return mod.parquetReadObjects as (opts: {
+    file: ArrayBuffer;
+    columns?: string[];
+  }) => Promise<ParquetRow[]>;
+}
+
+function normalizeGradeValue(v: unknown): string {
+  if (v == null) return '';
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) return String(v);
+    // Stable-ish for decimals coming through hyparquet as floats.
+    return Number.isInteger(v) ? String(v) : v.toFixed(6).replace(/\.?0+$/, '');
+  }
+  if (typeof v === 'bigint') return String(v);
+  if (v instanceof Date) return v.toISOString();
+  if (typeof v === 'object') {
+    // Decimal-like / object wrappers
+    if (typeof (v as { toString?: () => string }).toString === 'function') {
+      const s = String((v as { toString: () => string }).toString());
+      if (s !== '[object Object]') return s;
+    }
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return String(v);
+    }
+  }
+  return String(v);
+}
+
+function parquetRowKey(row: ParquetRow, keys: string[]): string {
+  return keys.map((k) => normalizeGradeValue(row[k])).join('\u0001');
+}
+
+async function readParquetRows(filePath: string): Promise<ParquetRow[]> {
+  const read = await loadHyparquetReader();
+  const buf = fs.readFileSync(filePath);
+  const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  return read({ file: ab as ArrayBuffer });
+}
+
+async function rowsByKeyFromFiles(
+  files: string[],
+  keys: string[],
+): Promise<{ map: Map<string, ParquetRow>; error?: string }> {
+  const map = new Map<string, ParquetRow>();
+  for (const f of files) {
+    let rows: ParquetRow[];
+    try {
+      rows = await readParquetRows(f);
+    } catch (e) {
+      return { map, error: `failed reading ${path.basename(f)}: ${String(e)}` };
+    }
+    for (const row of rows) {
+      const k = parquetRowKey(row, keys);
+      if (!k || keys.some((col) => row[col] == null || row[col] === '')) {
+        return { map, error: `row missing key column(s) ${keys.join(',')} in ${path.basename(f)}` };
+      }
+      map.set(k, row);
+    }
+  }
+  return { map };
+}
+
+function rowsEqual(a: ParquetRow, b: ParquetRow): boolean {
+  const cols = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const c of cols) {
+    if (normalizeGradeValue(a[c]) !== normalizeGradeValue(b[c])) return false;
+  }
+  return true;
+}
+
+/**
+ * Generic per-testcase Parquet row-diff:
+ * - expected/ may contain one file per testcase (`<case-id>.parquet`) or parts
+ * - candidate/ is the user's OUTPUT_PATH directory (union of all cases)
+ * - For each expected file (= testcase), every expected row must exist in candidate
+ *   with identical column values (keyed by `keys`, default transaction_id)
+ * - Candidate must not contain rows outside the union of all expected keys
+ */
+async function downloadTestcaseExpectedFiles(
+  store: ReturnType<typeof getObjectStore>,
+  testcasesPrefixKey: string,
+  caseIds: string[],
+  destDir: string,
+): Promise<Array<{ caseId: string; file: string }>> {
+  const root = normalizeKey(testcasesPrefixKey).replace(/\/?$/, '/');
+  fs.mkdirSync(destDir, { recursive: true });
+  const out: Array<{ caseId: string; file: string }> = [];
+  for (const caseId of caseIds) {
+    const keys = (await store.listKeys(`${root}${caseId}/expected/`)).filter(
+      (k: string) => k.endsWith('.parquet') && !k.includes('_temporary'),
+    );
+    if (!keys.length) continue;
+    const src = keys.sort()[0];
+    const buf = await store.getObject(src);
+    if (!buf) continue;
+    const local = path.join(destDir, `${caseId}.parquet`);
+    fs.writeFileSync(local, buf);
+    out.push({ caseId, file: local });
+  }
+  return out;
+}
+
+async function gradeParquetAgainstExpected(opts: {
   candidateOutputS3a: string;
-  /** Author eval/solution.json s3a path */
   evalSolutionS3a: string;
   kind: 'submission' | 'preview';
   sparkSucceeded: boolean;
+  gradeKeys?: string[];
+  /** When set, load expected from testcases/<id>/expected/ under evalSolutionS3a */
+  gradeCases?: string[];
 }): Promise<GradeResult> {
   const gradedAt = Date.now();
   const candidateKey = s3aToKey(opts.candidateOutputS3a);
   const solutionKey = s3aToKey(opts.evalSolutionS3a);
+  const keys = opts.gradeKeys?.length ? opts.gradeKeys : ['transaction_id'];
+  const checks: GradeResult['checks'] = [];
+
+  if (!opts.sparkSucceeded) {
+    return {
+      passed: false,
+      kind: opts.kind,
+      summary: 'Spark application did not succeed',
+      checks: [{ id: 'spark_status', label: 'Spark application succeeded', passed: false }],
+      candidateKey,
+      solutionKey,
+      gradedAt,
+    };
+  }
+  checks.push({ id: 'spark_status', label: 'Spark application succeeded', passed: true });
+
+  if (!solutionKey || !candidateKey) {
+    return {
+      passed: false,
+      kind: opts.kind,
+      summary: 'Parquet expected/candidate paths not configured',
+      checks: [
+        ...checks,
+        { id: 'paths_configured', label: 'Parquet paths configured', passed: false },
+      ],
+      candidateKey,
+      solutionKey,
+      gradedAt,
+    };
+  }
+
+  const store = getObjectStore();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devlabs-parquet-grade-'));
+  try {
+    const expectedDir = path.join(tmp, 'expected');
+    const candidateDir = path.join(tmp, 'candidate');
+    let expectedFiles: string[] = [];
+    if (opts.gradeCases?.length) {
+      const downloaded = await downloadTestcaseExpectedFiles(
+        store,
+        solutionKey,
+        opts.gradeCases,
+        expectedDir,
+      );
+      expectedFiles = downloaded.map((d) => d.file).sort();
+    } else {
+      expectedFiles = (await downloadParquetPrefix(store, solutionKey, expectedDir)).sort();
+    }
+    const candidateFiles = await downloadParquetPrefix(store, candidateKey, candidateDir);
+
+    checks.push({
+      id: 'expected_present',
+      label: 'Author expected/ Parquet present',
+      passed: expectedFiles.length > 0,
+      detail: `${expectedFiles.length} testcase file(s)`,
+    });
+    checks.push({
+      id: 'candidate_present',
+      label: 'Candidate wrote OUTPUT_PATH Parquet',
+      passed: candidateFiles.length > 0,
+      detail: candidateFiles.length
+        ? `${candidateFiles.length} file(s)`
+        : 'expected results/<jobId>/*.parquet via write.mode("overwrite").parquet(OUTPUT_PATH)',
+    });
+
+    if (!expectedFiles.length || !candidateFiles.length) {
+      return {
+        passed: false,
+        kind: opts.kind,
+        summary: 'Missing expected or candidate Parquet',
+        checks,
+        candidateKey,
+        solutionKey,
+        gradedAt,
+      };
+    }
+
+    const candLoaded = await rowsByKeyFromFiles(candidateFiles, keys);
+    if (candLoaded.error) {
+      checks.push({
+        id: 'candidate_rows',
+        label: 'Candidate Parquet rows readable',
+        passed: false,
+        detail: candLoaded.error,
+      });
+      return {
+        passed: false,
+        kind: opts.kind,
+        summary: candLoaded.error,
+        checks,
+        candidateKey,
+        solutionKey,
+        gradedAt,
+      };
+    }
+    checks.push({
+      id: 'candidate_rows',
+      label: 'Candidate Parquet rows readable',
+      passed: true,
+      detail: `${candLoaded.map.size} rows`,
+    });
+
+    const matchedKeys = new Set<string>();
+    let casesPassed = 0;
+    let casesFailed = 0;
+
+    for (const expFile of expectedFiles) {
+      const caseId = path.basename(expFile, '.parquet');
+      const expLoaded = await rowsByKeyFromFiles([expFile], keys);
+      if (expLoaded.error) {
+        casesFailed += 1;
+        checks.push({
+          id: `case:${caseId}`,
+          label: `Testcase ${caseId}`,
+          passed: false,
+          detail: expLoaded.error,
+        });
+        continue;
+      }
+
+      let missing = 0;
+      let mismatched = 0;
+      for (const [k, expRow] of expLoaded.map) {
+        const candRow = candLoaded.map.get(k);
+        if (!candRow) {
+          missing += 1;
+          continue;
+        }
+        matchedKeys.add(k);
+        if (!rowsEqual(expRow, candRow)) mismatched += 1;
+      }
+
+      const ok = missing === 0 && mismatched === 0;
+      if (ok) casesPassed += 1;
+      else casesFailed += 1;
+      checks.push({
+        id: `case:${caseId}`,
+        label: `Testcase ${caseId}`,
+        passed: ok,
+        detail: ok
+          ? `${expLoaded.map.size} rows match`
+          : `rows=${expLoaded.map.size} missing=${missing} value_mismatch=${mismatched}`,
+      });
+    }
+
+    let extra = 0;
+    for (const k of candLoaded.map.keys()) {
+      if (!matchedKeys.has(k)) {
+        // May still be in some expected file that failed to load; recompute union.
+        extra += 1;
+      }
+    }
+    // Recompute extras against union of all successfully loaded expected keys.
+    const allExpectedKeys = new Set<string>();
+    for (const expFile of expectedFiles) {
+      const expLoaded = await rowsByKeyFromFiles([expFile], keys);
+      if (expLoaded.error) continue;
+      for (const k of expLoaded.map.keys()) allExpectedKeys.add(k);
+    }
+    extra = 0;
+    for (const k of candLoaded.map.keys()) {
+      if (!allExpectedKeys.has(k)) extra += 1;
+    }
+
+    checks.push({
+      id: 'no_extra_rows',
+      label: 'No extra rows beyond all expected testcases',
+      passed: extra === 0,
+      detail: `extra=${extra}`,
+    });
+    checks.push({
+      id: 'all_cases',
+      label: 'All testcases passed',
+      passed: casesFailed === 0 && casesPassed === expectedFiles.length,
+      detail: `passed=${casesPassed} failed=${casesFailed} total=${expectedFiles.length}`,
+    });
+
+    const passed = checks.every((c) => c.passed);
+    return {
+      passed,
+      kind: opts.kind,
+      summary: passed
+        ? `Passed — ${casesPassed} testcase(s) match expected/`
+        : `Failed — ${casesFailed} testcase(s) differ from expected/`,
+      checks,
+      candidateKey,
+      solutionKey,
+      gradedAt,
+    };
+  } finally {
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function gradeOutputAgainstSolution(opts: {
+  /** Candidate result JSON or Parquet directory s3a path */
+  candidateOutputS3a: string;
+  /** Author eval/solution.json, expected/ dir, or testcases/ prefix */
+  evalSolutionS3a: string;
+  kind: 'submission' | 'preview';
+  sparkSucceeded: boolean;
+  gradeCases?: string[];
+  gradeKeys?: string[];
+}): Promise<GradeResult> {
+  const solutionKeyEarly = s3aToKey(opts.evalSolutionS3a);
+  const useParquet =
+    Boolean(opts.gradeCases?.length)
+    || looksLikeParquetExpected(solutionKeyEarly)
+    || String(opts.evalSolutionS3a || '').includes('/expected')
+    || String(opts.evalSolutionS3a || '').includes('/testcases');
+  if (useParquet) {
+    return gradeParquetAgainstExpected(opts);
+  }
+
+  const gradedAt = Date.now();
+  const candidateKey = s3aToKey(opts.candidateOutputS3a);
+  const solutionKey = solutionKeyEarly;
   const checks: GradeResult['checks'] = [];
 
   if (!opts.sparkSucceeded) {

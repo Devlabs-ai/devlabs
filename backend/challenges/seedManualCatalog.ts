@@ -1,106 +1,66 @@
 'use strict';
 
 /**
- * Manual challenge catalog (v2). Disk seed from sandbox/verified is disabled
- * while we redesign schema; insert curated rows here.
+ * Challenge catalog seed (v2).
+ * Packs: backend/challenges/packs/*.json
  */
 
+const fs = require('fs');
+const path = require('path');
 const pool = require('../db/pool');
 
-const DAILY_PRODUCT_SALES_L1 = {
-  id: 'daily-product-sales-pipeline-l1',
-  title: 'Daily Product Sales Pipeline',
-  description: `**Acme Retail** operates **50 retail stores** across the country. Each store generates sales transactions throughout the day and exports them as a **Parquet** dataset at the end of business hours.
+interface CatalogRow {
+  id: string;
+  number?: number | null;
+  title: string;
+  description: string;
+  difficulty: string;
+  tags: string[];
+  category: string;
+  sandboxType: string;
+  problemStatement: Record<string, unknown>;
+  platformSpec: Record<string, unknown>;
+}
 
-Every night, these datasets are uploaded to the company's central data platform. Before the start of the next business day, the Business Intelligence team expects an aggregated **Product Sales Summary**.
+function loadPackRows(): CatalogRow[] {
+  const packsDir = path.join(__dirname, 'packs');
+  if (!fs.existsSync(packsDir)) return [];
+  return fs
+    .readdirSync(packsDir)
+    .filter((f: string) => f.endsWith('.json'))
+    .sort()
+    .map((f: string) => {
+      const raw = JSON.parse(fs.readFileSync(path.join(packsDir, f), 'utf8'));
+      return {
+        id: raw.id,
+        number: typeof raw.number === 'number' ? raw.number : null,
+        title: raw.title,
+        description: raw.description,
+        difficulty: raw.difficulty,
+        tags: raw.tags || [],
+        category: raw.category,
+        sandboxType: raw.sandboxType,
+        problemStatement: raw.problemStatement || {},
+        platformSpec: raw.platformSpec || {},
+      } as CatalogRow;
+    });
+}
 
-Your pipeline should:
-
-- Process all incoming sales datasets
-- Validate incoming records
-- Ignore malformed records while continuing processing
-- Compute product-level business metrics
-- Publish a daily summary dataset
-`,
-  difficulty: 'Medium',
-  tags: ['spark', 'batch', 'parquet', 'minio', 'aggregation'],
-  category: 'batch-processing',
-  sandboxType: 'spark-platform',
-  problemStatement: {
-    overview:
-      'Build a Spark batch pipeline that reads nightly store Parquet exports, validates records, and computes a product-level daily summary.',
-    symptoms: [
-      'BI needs a reliable daily_product_summary ready before the next business day.',
-      'Store exports can include malformed rows — reject them without failing the batch.',
-    ],
-    yourTaskSteps: [
-      'Discover all input Parquet files for the business date.',
-      'Validate each row; ignore malformed records and continue.',
-      'Aggregate product-level metrics for the day.',
-      'Publish daily_product_summary to the output path.',
-      'Use as many project files as you need; keep src/main.py as the entrypoint.',
-    ],
-    yourTask:
-      'Implement a Spark application that discovers input Parquet files, validates rows, aggregates product metrics, and publishes daily_product_summary.',
-    hints: [
-      'Cluster limits and s3a paths are in README.md.',
-      'Reject nulls and non-positive quantity / unit_price; keep processing.',
-      'Input is hive-partitioned by store_id — spark.read.parquet fills null store_id from the path.',
-      'total_revenue = sum(quantity × unit_price); stores_sold_in = distinct store_id per product.',
-    ],
-    inputSchema: [
-      { column: 'transaction_id', type: 'STRING' },
-      { column: 'store_id', type: 'INT' },
-      { column: 'product_id', type: 'INT' },
-      { column: 'customer_id', type: 'INT' },
-      { column: 'quantity', type: 'INT' },
-      { column: 'unit_price', type: 'DECIMAL(10,2)' },
-      { column: 'transaction_timestamp', type: 'TIMESTAMP' },
-    ],
-    expectedOutput: [
-      { column: 'business_date', description: 'Processing date' },
-      { column: 'product_id', description: 'Product identifier' },
-      { column: 'total_units_sold', description: 'Sum of quantity sold' },
-      { column: 'total_revenue', description: 'Sum of quantity × unit_price' },
-      { column: 'transaction_count', description: 'Total number of transactions' },
-      { column: 'stores_sold_in', description: 'Distinct stores selling the product' },
-    ],
-  },
-  platformSpec: {
-    inputPath:
-      's3a://devlabs-data/challenges/daily-product-sales-pipeline-l1/input/business_date=2026-01-15/',
-    evalSolutionPath:
-      's3a://devlabs-data/challenges/daily-product-sales-pipeline-l1/eval/solution.json',
-    businessDate: '2026-01-15',
-    language: 'python',
-    starterFileName: 'src/main.py',
-    limits: {
-      driver: 1,
-      executors: 4,
-      executorCores: 1,
-      executorMemory: '1g',
-    },
-    gradeChecks: [
-      'Discovers all incoming Parquet files for the business date',
-      'Validates rows and ignores malformed records without failing the batch',
-      'Writes daily_product_summary with the required columns',
-      'Computes correct product-level aggregates (units, revenue, counts, stores_sold_in)',
-      'Runs as a Spark application within cluster resource limits',
-    ],
-  },
-};
-
-async function seedManualCatalog(): Promise<void> {
+async function upsertChallenge(c: CatalogRow): Promise<void> {
   const now = Date.now();
-  const c = DAILY_PRODUCT_SALES_L1;
+  const number =
+    typeof c.number === 'number' && Number.isFinite(c.number)
+      ? Math.trunc(c.number)
+      : null;
   await pool.query(
     `INSERT INTO challenges
-       (id, title, description, difficulty, tags, category,
+       (id, number, title, description, difficulty, tags, category,
         finalized, sandbox_type, verified_dir,
         problem_statement, validation_spec, platform_spec,
         created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,true,$7,NULL,$8,NULL,$9,$10,$10)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8,NULL,$9,NULL,$10,$11,$11)
      ON CONFLICT (id) DO UPDATE SET
+       number = EXCLUDED.number,
        title = EXCLUDED.title,
        description = EXCLUDED.description,
        difficulty = EXCLUDED.difficulty,
@@ -113,6 +73,7 @@ async function seedManualCatalog(): Promise<void> {
        updated_at = EXCLUDED.updated_at`,
     [
       c.id,
+      number,
       c.title,
       c.description,
       c.difficulty,
@@ -124,7 +85,28 @@ async function seedManualCatalog(): Promise<void> {
       now,
     ],
   );
-  console.log(`[challenges] manual catalog upserted "${c.id}"`);
+  console.log(`[challenges] catalog upserted "${c.id}" number=${number ?? '—'}`);
 }
 
-module.exports = { seedManualCatalog, DAILY_PRODUCT_SALES_L1 };
+async function seedManualCatalog(): Promise<void> {
+  const keepIds = new Set(loadPackRows().map((r) => r.id));
+  const byId = new Map<string, CatalogRow>();
+  for (const row of loadPackRows()) byId.set(row.id, row);
+
+  for (const row of byId.values()) {
+    await upsertChallenge(row);
+  }
+
+  // Drop catalog rows that are no longer in packs (e.g. retired inline seeds).
+  if (keepIds.size > 0) {
+    const result = await pool.query(
+      `DELETE FROM challenges WHERE id <> ALL($1::text[]) RETURNING id`,
+      [[...keepIds]],
+    );
+    for (const row of result.rows || []) {
+      console.log(`[challenges] catalog removed "${row.id}"`);
+    }
+  }
+}
+
+module.exports = { seedManualCatalog, loadPackRows };

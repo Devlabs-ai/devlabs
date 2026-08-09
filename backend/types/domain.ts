@@ -14,6 +14,8 @@ export interface UserRecord {
 
 export interface ChallengePublic {
   id: string;
+  /** Global catalog number across all platforms (1, 2, 3, …). */
+  number?: number | null;
   title: string;
   description: string;
   difficulty: string;
@@ -27,7 +29,16 @@ export interface SparkPlatformSpec {
   inputPath: string;
   outputPath?: string;
   evalSolutionPath: string;
-  businessDate: string;
+  /** Run smoke input; optional — defaults to inputPath. */
+  runInputPath?: string;
+  /** Run expected Parquet prefix (reference). */
+  runEvalPath?: string;
+  testcasesPrefix?: string;
+  runCases?: string[];
+  submitCases?: string[];
+  gradeKeys?: string[];
+  outputFormat?: 'json' | 'parquet';
+  businessDate?: string;
   language: 'python';
   starterFileName: string;
   limits: {
@@ -59,6 +70,7 @@ export interface ValidationSpec {
 
 export interface ChallengeRow {
   id: string;
+  number?: number | null;
   title: string;
   description: string;
   difficulty: string;

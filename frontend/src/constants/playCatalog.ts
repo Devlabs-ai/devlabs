@@ -1,4 +1,4 @@
-/** Play homepage taxonomy: domain → technology panel → challenge ids. */
+/** Play catalog taxonomy (sidebar filters + ordered challenge ids). */
 
 export type PlayDomainId =
   | 'data-engineer'
@@ -33,7 +33,23 @@ export const PLAY_DOMAINS: PlayDomain[] = [
         id: 'spark',
         label: 'Spark',
         blurb: 'Distributed batch processing on a shared Spark platform.',
-        challengeIds: ['daily-product-sales-pipeline-l1'],
+        challengeIds: [
+          'l1-filter-valid-sales-rows',
+          'l1-derive-revenue-column',
+          'l1-normalize-product-codes',
+          'l1-business-date-features',
+          'l1-aggregate-product-totals',
+          'l1-top-products-by-revenue',
+          'l1-left-join-product-names',
+          'l1-inner-join-matched-sales',
+          'l1-find-orphan-sales',
+          'l1-deduplicate-transactions',
+          'l1-merge-two-store-drops',
+          'l1-same-job-in-spark-sql',
+          'l1-daily-product-sales-summary',
+          'l2-partitioned-daily-sales-write',
+          'l2-latest-product-revenue-rollup',
+        ],
       },
       {
         id: 'airflow',
@@ -91,16 +107,53 @@ export function playCatalogPath(
   return `/play/${domainId}/${panelId}`;
 }
 
-/** Deep-link back to the panel that lists this challenge (or /play). */
-export function catalogPathForChallenge(challengeId: string | null | undefined): string {
-  if (!challengeId) return '/play';
+/** Catalog membership for flat Play list (domain + panel metadata). */
+export interface PlayCatalogEntry {
+  challengeId: string;
+  domainId: PlayDomainId;
+  domainLabel: string;
+  panelId: PlayPanelId;
+  panelLabel: string;
+}
+
+/** Ordered catalog rows across all tracks (preserves playCatalog order). */
+export function listPlayCatalogEntries(): PlayCatalogEntry[] {
+  const rows: PlayCatalogEntry[] = [];
   for (const domain of PLAY_DOMAINS) {
     for (const panel of domain.panels) {
-      if (panel.challengeIds.includes(challengeId)) {
-        return playCatalogPath(domain.id, panel.id);
+      for (const challengeId of panel.challengeIds) {
+        rows.push({
+          challengeId,
+          domainId: domain.id,
+          domainLabel: domain.label,
+          panelId: panel.id,
+          panelLabel: panel.label,
+        });
       }
     }
   }
+  return rows;
+}
+
+/** Topic chips = technology panels that have at least one lab. */
+export function listPlayTopics(): Array<{ id: string; label: string; domainId: PlayDomainId; count: number }> {
+  const topics: Array<{ id: string; label: string; domainId: PlayDomainId; count: number }> = [];
+  for (const domain of PLAY_DOMAINS) {
+    for (const panel of domain.panels) {
+      if (panel.challengeIds.length === 0) continue;
+      topics.push({
+        id: panel.id,
+        label: panel.label,
+        domainId: domain.id,
+        count: panel.challengeIds.length,
+      });
+    }
+  }
+  return topics;
+}
+
+/** Back to flat Play library (filters live in the UI, not deep panel routes). */
+export function catalogPathForChallenge(_challengeId?: string | null): string {
   return '/play';
 }
 

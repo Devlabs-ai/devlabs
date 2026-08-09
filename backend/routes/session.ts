@@ -12,6 +12,7 @@ const sparkJobs = require('../workspace/sparkJobs');
 const workspaceStore = require('../workspace/workspaceStore');
 const sessionStore = require('../db/sessionStore');
 const loader = require('../challenges/loader');
+const { hydrateChallengeFromMinio } = require('../challenges/minioChallengeAssets');
 const terminalEventBus = require('../observability/terminalEventBus');
 const { handleBrowse, listBrowseServices } = require('../sandbox/sessionBrowseProxy');
 
@@ -142,6 +143,7 @@ function candidateServices(allServices: unknown): string[] {
 }
 
 function publicSession(s: GameSession, challenge: unknown): Record<string, unknown> {
+  const c = challenge as Record<string, unknown> | null;
   return {
     id: s.id,
     status: s.status,
@@ -162,16 +164,18 @@ function publicSession(s: GameSession, challenge: unknown): Record<string, unkno
     portMap: s.portMap,
     metricsService: s.metricsService,
     terminalService: s.terminalService,
-    challenge: challenge
+    challenge: c
       ? {
-          id: (challenge as Record<string, unknown>).id,
-          title: (challenge as Record<string, unknown>).title,
-          description: (challenge as Record<string, unknown>).description,
-          difficulty: (challenge as Record<string, unknown>).difficulty,
-          tags: (challenge as Record<string, unknown>).tags,
-          category: (challenge as Record<string, unknown>).category,
-          sandboxType: (challenge as Record<string, unknown>).sandboxType,
-          problemStatement: (challenge as Record<string, unknown>).problemStatement,
+          id: c.id,
+          title: c.title,
+          description: c.description,
+          difficulty: c.difficulty,
+          tags: c.tags,
+          category: c.category,
+          sandboxType: c.sandboxType,
+          contentSource: c.contentSource || null,
+          problemStatement: c.problemStatement,
+          sparkPlatform: c.sparkPlatform || null,
         }
       : null,
   };
@@ -199,13 +203,14 @@ router.post('/start', requireSessionAccess, async (req: ExpressRequest, res: Exp
   }
 });
 
-// POST /api/session/spark/start  { challengeId, starterFiles, entrypoint? }
+// POST /api/session/spark/start  { challengeId, starterFiles?, entrypoint? }
+// Starter defaults to MinIO challenges/<id>/starter/ when starterFiles omitted.
 router.post('/spark/start', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
   try {
     const body = (req.body as Record<string, unknown>) || {};
     const challengeId = body.challengeId as string;
-    const starterFiles = body.starterFiles as Record<string, string>;
-    const entrypoint = (body.entrypoint as string) || 'src/main.py';
+    const starterFiles = (body.starterFiles as Record<string, string> | undefined) || null;
+    const entrypoint = (body.entrypoint as string | undefined) || undefined;
     const userId = (req.user as { sub?: string; id?: string } | undefined)?.sub
       || (req.user as { sub?: string; id?: string } | undefined)?.id
       || null;
@@ -218,7 +223,8 @@ router.post('/spark/start', requireSessionAccess, async (req: ExpressRequest, re
       starterFiles,
     });
 
-    const challenge = loader.getChallenge(challengeId);
+    const base = loader.getPublicChallenge(challengeId) || loader.getChallenge(challengeId);
+    const challenge = await hydrateChallengeFromMinio(base);
     const pub = publicSession(session, challenge);
     res.status(created ? 201 : 200).json({
       sessionId: session.id,
@@ -331,6 +337,21 @@ router.post('/:id/spark/jobs', express.json({ limit: '256kb' }), async (req: Exp
         : typeof body.resultsPath === 'string'
           ? body.resultsPath
           : '';
+    const testcasesPrefix =
+      typeof body.testcasesPrefix === 'string' ? body.testcasesPrefix : undefined;
+    const cases = Array.isArray(body.cases)
+      ? body.cases.map((c) => String(c)).filter(Boolean)
+      : undefined;
+    const gradeKeys = Array.isArray(body.gradeKeys)
+      ? body.gradeKeys.map((c) => String(c)).filter(Boolean)
+      : undefined;
+    const outputFormat =
+      body.outputFormat === 'parquet' || body.outputFormat === 'json'
+        ? body.outputFormat
+        : undefined;
+    const productsPath =
+      typeof body.productsPath === 'string' ? body.productsPath : undefined;
+    const dualInput = body.dualInput === true;
     const limits = (body.limits && typeof body.limits === 'object')
       ? (body.limits as Record<string, unknown>)
       : undefined;
@@ -344,11 +365,18 @@ router.post('/:id/spark/jobs', express.json({ limit: '256kb' }), async (req: Exp
         entrypoint: session.entrypoint || 'src/main.py',
       },
       mode,
-      inputPath,
+      inputPath: inputPath || undefined,
       businessDate,
       evalSolutionPath: evalSolutionPath || undefined,
+      testcasesPrefix,
+      cases,
+      gradeKeys,
+      outputFormat,
+      productsPath: productsPath || undefined,
+      dualInput,
       limits: limits as {
         driver?: number;
+        driverMemory?: string;
         executors?: number;
         executorCores?: number;
         executorMemory?: string;
@@ -417,11 +445,18 @@ router.get('/:id/browse-services', (req: ExpressRequest, res: ExpressResponse) =
   res.json({ services: listBrowseServices(session.portMap) });
 });
 
-router.get('/:id', (req: ExpressRequest, res: ExpressResponse) => {
-  const session: GameSession | null = sessionStore.get(req.params.id);
-  if (!session) return res.status(404).json({ error: 'session not found' });
-  const challenge = session.challengeId ? loader.getChallenge(session.challengeId) : null;
-  res.json({ session: publicSession(session, challenge) });
+router.get('/:id', async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session: GameSession | null = sessionStore.get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'session not found' });
+    const base = session.challengeId
+      ? (loader.getPublicChallenge(session.challengeId) || loader.getChallenge(session.challengeId))
+      : null;
+    const challenge = await hydrateChallengeFromMinio(base);
+    res.json({ session: publicSession(session, challenge) });
+  } catch (e) {
+    next(e);
+  }
 });
 
 router.post('/:id/end', async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {

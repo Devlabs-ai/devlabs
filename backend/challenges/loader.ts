@@ -9,6 +9,7 @@ const cache = new Map<string, ChallengeFull>();
 function publicFields(row: ChallengeRow): ChallengePublic {
   return {
     id: row.id,
+    number: row.number ?? null,
     title: row.title,
     description: row.description,
     difficulty: row.difficulty,
@@ -60,9 +61,15 @@ function listChallenges(): ChallengeFull[] {
   return Array.from(cache.values());
 }
 
+function contentSourceOf(c: ChallengeFull): string | null {
+  const fromPlatform = (c.sparkPlatform as { contentSource?: string } | null)?.contentSource;
+  return fromPlatform || null;
+}
+
 function listPublicChallenges(): Record<string, unknown>[] {
   return listChallenges().map((c) => ({
     id: c.id,
+    number: c.number ?? null,
     title: c.title,
     description: c.description,
     difficulty: c.difficulty,
@@ -70,6 +77,7 @@ function listPublicChallenges(): Record<string, unknown>[] {
     category: c.category,
     finalized: c.finalized,
     sandboxType: c.sandboxType,
+    contentSource: contentSourceOf(c),
     problemStatement: c.problemStatement,
     sparkPlatform: c.sparkPlatform || null,
   }));
@@ -80,6 +88,7 @@ function getPublicChallenge(id: string): Record<string, unknown> | null {
   if (!c) return null;
   return {
     id: c.id,
+    number: c.number ?? null,
     title: c.title,
     description: c.description,
     difficulty: c.difficulty,
@@ -87,6 +96,7 @@ function getPublicChallenge(id: string): Record<string, unknown> | null {
     category: c.category,
     finalized: c.finalized,
     sandboxType: c.sandboxType,
+    contentSource: contentSourceOf(c),
     verifiedDir: c.verifiedDir,
     problemStatement: c.problemStatement,
     validationSpec: c.validationSpec,

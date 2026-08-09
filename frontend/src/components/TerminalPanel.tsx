@@ -5,12 +5,12 @@ import { AttachAddon } from '@xterm/addon-attach';
 import '@xterm/xterm/css/xterm.css';
 
 const THEME = {
-  background: '#05080f',
+  background: '#000000',
   foreground: '#eef0ff',
   cursor: '#34d399',
-  cursorAccent: '#05080f',
+  cursorAccent: '#000000',
   selectionBackground: 'rgba(52, 211, 153, 0.25)',
-  black: '#11172b',
+  black: '#000000',
   red: '#f43f5e',
   green: '#34d399',
   yellow: '#fbbf24',

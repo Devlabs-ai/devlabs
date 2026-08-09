@@ -8,7 +8,6 @@ import type { SparkProjectFiles } from '../fixtures/dailyProductSalesL1';
 loader.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.0/min/vs' } });
 
 const THEME_NAME = 'devlabs-dark';
-const PROTECTED = new Set(['README.md']);
 
 function defineTheme(monaco: typeof Monaco): void {
   monaco.editor.defineTheme(THEME_NAME, {
@@ -24,13 +23,13 @@ function defineTheme(monaco: typeof Monaco): void {
       { token: 'function', foreground: '34d399' },
     ],
     colors: {
-      'editor.background': '#05080f',
+      'editor.background': '#000000',
       'editor.foreground': '#eef0ff',
-      'editor.lineHighlightBackground': '#0d1220',
-      'editor.selectionBackground': '#1d2545',
+      'editor.lineHighlightBackground': '#0a0a0a',
+      'editor.selectionBackground': '#222222',
       'editorCursor.foreground': '#34d399',
-      'editorLineNumber.foreground': '#2d3655',
-      'editorLineNumber.activeForeground': '#6c7595',
+      'editorLineNumber.foreground': '#444444',
+      'editorLineNumber.activeForeground': '#888888',
     },
   });
 }
@@ -217,24 +216,13 @@ export default function SparkProjectEditor({
   onFileRenamed,
 }: SparkProjectEditorProps): JSX.Element {
   const paths = Object.keys(files);
-  // Prefer README in preview on challenge open; fall back to entry / first file.
-  const initialFile = paths.includes('README.md')
-    ? 'README.md'
-    : paths.includes(entryFile)
-      ? entryFile
-      : paths[0] || '';
+  const initialFile = paths.includes(entryFile) ? entryFile : paths[0] || '';
 
-  const [openTabs, setOpenTabs] = useState<string[]>(() => {
-    const seed = ['README.md', entryFile].filter((p) => files[p] != null);
-    const unique = Array.from(new Set(seed.length ? seed : initialFile ? [initialFile] : []));
-    return unique;
-  });
+  const [openTabs, setOpenTabs] = useState<string[]>(() => (initialFile ? [initialFile] : []));
   const [activePath, setActivePath] = useState<string>(initialFile);
-  const [previewPath, setPreviewPath] = useState<string | null>(
-    () => (paths.includes('README.md') ? 'README.md' : null),
-  );
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const [explorerOpen, setExplorerOpen] = useState(true);
+  const [explorerOpen, setExplorerOpen] = useState(false);
   const [newPathOpen, setNewPathOpen] = useState(false);
   const [newPath, setNewPath] = useState('src/');
   const [renamePath, setRenamePath] = useState<string | null>(null);
@@ -352,11 +340,6 @@ export default function SparkProjectEditor({
   }
 
   function deletePath(path: string): void {
-    if (PROTECTED.has(path)) {
-      setToast('README.md is protected');
-      setMenu(null);
-      return;
-    }
     const next = { ...files };
     if (files[path] != null) {
       delete next[path];
@@ -392,11 +375,6 @@ export default function SparkProjectEditor({
   }
 
   function startRename(path: string): void {
-    if (PROTECTED.has(path)) {
-      setToast('README.md is protected');
-      setMenu(null);
-      return;
-    }
     setRenamePath(path);
     setRenameValue(path);
     setMenu(null);
@@ -411,11 +389,6 @@ export default function SparkProjectEditor({
     }
     if (files[dest] != null) {
       setToast('A file already exists at that path');
-      return;
-    }
-    if (PROTECTED.has(renamePath)) {
-      setToast('README.md is protected');
-      setRenamePath(null);
       return;
     }
     const next = { ...files };
@@ -508,7 +481,7 @@ export default function SparkProjectEditor({
 
   return (
     <div
-      className={`spark-project-editor spark-project-editor--sidebar-right${explorerOpen ? '' : ' spark-explorer-collapsed'}`}
+      className={`spark-project-editor spark-project-editor--overlay-explorer${explorerOpen ? ' spark-explorer-open' : ' spark-explorer-collapsed'}`}
     >
       <div className="spark-project-main">
         <div className="spark-editor-tabs-bar">
@@ -544,21 +517,16 @@ export default function SparkProjectEditor({
             })}
           </div>
           <div className="spark-editor-tabs-actions">
-            {isPreview && (
-              <button type="button" className="ghost sm" onClick={() => setPreviewPath(null)}>
-                Edit
-              </button>
-            )}
-            {!explorerOpen && (
-              <button
-                type="button"
-                className="ghost sm"
-                title="Show explorer"
-                onClick={() => setExplorerOpen(true)}
-              >
-                Explorer
-              </button>
-            )}
+            <button
+              type="button"
+              className={`spark-explorer-arrow${explorerOpen ? ' active' : ''}`}
+              title={explorerOpen ? 'Hide file tree' : 'Show file tree'}
+              aria-label={explorerOpen ? 'Hide file tree' : 'Show file tree'}
+              aria-expanded={explorerOpen}
+              onClick={() => setExplorerOpen((v) => !v)}
+            >
+              <span aria-hidden>{explorerOpen ? '←' : '→'}</span>
+            </button>
           </div>
         </div>
         <div className="code-editor-body">
@@ -602,9 +570,9 @@ export default function SparkProjectEditor({
       </div>
 
       {explorerOpen && (
-      <aside className="spark-project-sidebar">
+      <aside className="spark-project-sidebar spark-project-sidebar--overlay">
         <div className="spark-project-sidebar-header">
-          <span>EXPLORER</span>
+          <span>FILES</span>
           <div className="spark-project-sidebar-actions">
             <button
               type="button"
@@ -620,7 +588,7 @@ export default function SparkProjectEditor({
             <button
               type="button"
               className="ghost sm"
-              title="Close explorer"
+              title="Close files"
               onClick={() => setExplorerOpen(false)}
             >
               ×
@@ -716,7 +684,6 @@ export default function SparkProjectEditor({
                 role="menuitem"
                 className="spark-context-danger"
                 onClick={() => runMenuAction('delete')}
-                disabled={PROTECTED.has(menu.path)}
               >
                 Delete
               </button>
