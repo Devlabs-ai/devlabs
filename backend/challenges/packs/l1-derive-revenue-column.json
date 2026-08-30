@@ -4,10 +4,10 @@
   "title": "Derive Revenue Column",
   "contentSource": "minio",
   "description": "Acme\u2019s overnight sales Parquet is already cleaned \u2014 every row is a completed line Finance trusts. What BI still lacks is a single line revenue figure they can sum without re-deriving discounts in every dashboard.\n\nYour job is to add a `revenue` column to each row and write the enriched Parquet with overwrite. Keep every input column unchanged; only append `revenue`.\n\nFormula: `revenue = quantity * unit_price * (1 - discount_pct)`, rounded to 2 decimal places as `DECIMAL(12,2)`. `discount_pct` is a fraction in `[0, 0.50]` (for example `0.10` means 10% off), not a whole-number percent.\n\nInput columns: `transaction_id`, `store_id`, `product_id`, `customer_id`, `quantity`, `unit_price`, `discount_pct`, `currency`, `status`, `transaction_timestamp`. Implement with Spark DataFrame APIs (`withColumn`, arithmetic, cast) \u2014 no Python loops over collected rows. **Run** uses two smoke testcases; **Submit** uses the full set and row-diffs your Parquet against each case\u2019s `expected/`.",
-  "difficulty": "L1",
+  "difficulty": "L0",
   "tags": [
     "spark",
-    "l1",
+    "l0",
     "withcolumn",
     "dataframe",
     "parquet"

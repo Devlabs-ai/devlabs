@@ -26,7 +26,7 @@ export interface ChallengePublic {
 }
 
 export interface SparkPlatformSpec {
-  inputPath: string;
+  inputPath?: string;
   outputPath?: string;
   evalSolutionPath: string;
   /** Run smoke input; optional — defaults to inputPath. */
@@ -37,17 +37,61 @@ export interface SparkPlatformSpec {
   runCases?: string[];
   submitCases?: string[];
   gradeKeys?: string[];
-  outputFormat?: 'json' | 'parquet';
+  outputFormat?: 'json' | 'parquet' | 'csv';
   businessDate?: string;
+  productsPath?: string;
+  txnInputPath?: string;
+  rateInputPath?: string;
+  /** Run smoke fact; falls back to txnInputPath. */
+  runTxnInputPath?: string;
+  /** Run smoke rate card; falls back to rateInputPath. */
+  runRateInputPath?: string;
+  /** Events path injected as INPUT_A_PATH. Submit uses this. */
+  eventsInputPath?: string;
+  /** Catalog path injected as INPUT_B_PATH. Submit uses this. */
+  catalogInputPath?: string;
+  /** Run smoke events path. Falls back to eventsInputPath. */
+  runEventsInputPath?: string;
+  /** Run smoke catalog path. Falls back to catalogInputPath. */
+  runCatalogInputPath?: string;
+  gradeScript?: string;
+  dualInput?: boolean;
   language: 'python';
   starterFileName: string;
   limits: {
     driver: number;
+    driverMemory?: string;
     executors: number;
     executorCores: number;
     executorMemory: string;
+    aqe?: boolean;
+    shufflePartitions?: number;
+    skewJoin?: boolean;
+    autoBroadcastJoinThreshold?: string;
+    /** Cluster watcher kills the SparkApplication after this many seconds. */
+    hardTimeoutSeconds?: number;
   };
+  /** Learner-tunable Spark configs declared by the problem setter. */
+  knobs?: Array<{
+    id: string;
+    conf: string;
+    label: string;
+    help?: string;
+    default: string;
+    options: Array<{ value: string; label: string }>;
+  }>;
+  /** Fixed spark_conf applied to every Run/Submit (not learner-tunable). */
+  sparkConf?: Record<string, string>;
   gradeChecks: string[];
+  scoring?: {
+    executionTime?: {
+      targetSeconds?: number;
+      targetMs?: number;
+      maxPoints: number;
+      /** Extra points per whole/fractional second under targetSeconds. */
+      bonusPerSecond?: number;
+    };
+  };
   [key: string]: unknown;
 }
 

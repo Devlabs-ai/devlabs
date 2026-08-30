@@ -4,10 +4,10 @@
   "title": "Merge Two Store Drops",
   "contentSource": "minio",
   "description": "East and West each drop a night sales file. Merge them with unionByName into one Parquet dataset. Read INPUT_A_PATH and INPUT_B_PATH. Output columns: txn_id, store_id, product_id, quantity. Prefer unionByName over positional union. Write with overwrite. Run smoke / Submit full testcases.",
-  "difficulty": "L1",
+  "difficulty": "L0",
   "tags": [
     "spark",
-    "l1",
+    "l0",
     "union",
     "unionByName",
     "dataframe",

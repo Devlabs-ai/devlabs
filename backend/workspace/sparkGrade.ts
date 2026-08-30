@@ -16,6 +16,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const { getObjectStore, normalizeKey } = require('./objectStore');
 
 export interface GradeResult {
@@ -198,6 +199,234 @@ function looksLikeParquetExpected(solutionKey: string): boolean {
   return /(^|\/)expected$/i.test(k) || k.endsWith('/');
 }
 
+async function downloadPrefixAll(
+  store: ReturnType<typeof getObjectStore>,
+  prefix: string,
+  destDir: string,
+): Promise<string[]> {
+  const root = normalizeKey(prefix).replace(/\/?$/, '/');
+  const keys = (await store.listKeys(root)).filter(
+    (k: string) =>
+      !k.endsWith('/')
+      && !k.includes('_temporary')
+      && !k.includes('.spark-staging')
+      && !k.endsWith('.crc'),
+  );
+  fs.mkdirSync(destDir, { recursive: true });
+  const local: string[] = [];
+  for (const key of keys) {
+    const buf = await store.getObject(key);
+    if (!buf) continue;
+    const rel = key.startsWith(root) ? key.slice(root.length) : path.basename(key);
+    const safeRel = rel
+      .split('/')
+      .filter((seg: string) => seg && seg !== '.' && seg !== '..')
+      .join(path.sep);
+    const out = path.join(destDir, safeRel || path.basename(key));
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, buf);
+    local.push(out);
+  }
+  return local;
+}
+
+async function gradeWithScript(opts: {
+  candidateOutputS3a: string;
+  evalSolutionS3a: string;
+  gradeScriptS3a: string;
+  kind: 'submission' | 'preview';
+  sparkSucceeded: boolean;
+}): Promise<GradeResult> {
+  const gradedAt = Date.now();
+  const candidateKey = s3aToKey(opts.candidateOutputS3a);
+  const solutionKey = s3aToKey(opts.evalSolutionS3a);
+  const scriptKey = s3aToKey(opts.gradeScriptS3a);
+  const checks: GradeResult['checks'] = [];
+
+  if (!opts.sparkSucceeded) {
+    return {
+      passed: false,
+      kind: opts.kind,
+      summary: 'Spark application did not succeed',
+      checks: [{ id: 'spark_status', label: 'Spark application succeeded', passed: false }],
+      candidateKey,
+      solutionKey,
+      gradedAt,
+    };
+  }
+  checks.push({ id: 'spark_status', label: 'Spark application succeeded', passed: true });
+
+  if (!scriptKey || !solutionKey || !candidateKey) {
+    return {
+      passed: false,
+      kind: opts.kind,
+      summary: 'Grade script / reference / candidate paths not configured',
+      checks: [
+        ...checks,
+        { id: 'paths_configured', label: 'Grade paths configured', passed: false },
+      ],
+      candidateKey,
+      solutionKey,
+      gradedAt,
+    };
+  }
+
+  const store = getObjectStore();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devlabs-grade-script-'));
+  try {
+    const scriptBuf = await store.getObject(scriptKey);
+    if (!scriptBuf) {
+      checks.push({
+        id: 'grade_script',
+        label: 'Challenge grade script present',
+        passed: false,
+        detail: scriptKey,
+      });
+      return {
+        passed: false,
+        kind: opts.kind,
+        summary: `Grade script missing: ${scriptKey}`,
+        checks,
+        candidateKey,
+        solutionKey,
+        gradedAt,
+      };
+    }
+    const scriptPath = path.join(tmp, 'grade.py');
+    fs.writeFileSync(scriptPath, scriptBuf);
+    checks.push({ id: 'grade_script', label: 'Challenge grade script present', passed: true });
+
+    const expectedDir = path.join(tmp, 'reference');
+    const candidateDir = path.join(tmp, 'candidate');
+    const expectedFiles = await downloadPrefixAll(store, solutionKey, expectedDir);
+    const candidateFiles = await downloadPrefixAll(store, candidateKey, candidateDir);
+    checks.push({
+      id: 'reference_present',
+      label: 'Reference output present',
+      passed: expectedFiles.length > 0,
+      detail: `${expectedFiles.length} file(s)`,
+    });
+    checks.push({
+      id: 'candidate_present',
+      label: 'Candidate wrote OUTPUT_PATH',
+      passed: candidateFiles.length > 0,
+      detail: candidateFiles.length
+        ? `${candidateFiles.length} file(s)`
+        : 'expected results/<jobId>/* via write to OUTPUT_PATH',
+    });
+    if (!expectedFiles.length || !candidateFiles.length) {
+      return {
+        passed: false,
+        kind: opts.kind,
+        summary: 'Missing reference or candidate output',
+        checks,
+        candidateKey,
+        solutionKey,
+        gradedAt,
+      };
+    }
+
+    const py = process.env.PYTHON || process.env.PYTHON3 || 'python3';
+    const spawned = spawnSync(
+      py,
+      [scriptPath, '--candidate', candidateDir, '--reference', expectedDir],
+      { encoding: 'utf8', timeout: 60_000, maxBuffer: 2 * 1024 * 1024 },
+    );
+    if (spawned.error) {
+      const msg = (spawned.error as Error).message || String(spawned.error);
+      checks.push({
+        id: 'grade_runner',
+        label: 'Grade script ran',
+        passed: false,
+        detail: msg,
+      });
+      return {
+        passed: false,
+        kind: opts.kind,
+        summary: `Failed to run grade script: ${msg}`,
+        checks,
+        candidateKey,
+        solutionKey,
+        gradedAt,
+      };
+    }
+    if (spawned.status === 2) {
+      const detail = (spawned.stderr || spawned.stdout || 'grade script usage error').trim();
+      checks.push({
+        id: 'grade_runner',
+        label: 'Grade script ran',
+        passed: false,
+        detail: detail.slice(0, 500),
+      });
+      return {
+        passed: false,
+        kind: opts.kind,
+        summary: 'Grade script could not read candidate or reference',
+        checks,
+        candidateKey,
+        solutionKey,
+        gradedAt,
+      };
+    }
+
+    let parsed: {
+      passed?: boolean;
+      summary?: string;
+      checks?: Array<{ id?: string; label?: string; passed?: boolean; detail?: string }>;
+    };
+    try {
+      parsed = JSON.parse(String(spawned.stdout || '').trim() || '{}');
+    } catch {
+      checks.push({
+        id: 'grade_runner',
+        label: 'Grade script returned JSON',
+        passed: false,
+        detail: (spawned.stderr || spawned.stdout || '').trim().slice(0, 500),
+      });
+      return {
+        passed: false,
+        kind: opts.kind,
+        summary: 'Grade script stdout was not valid JSON',
+        checks,
+        candidateKey,
+        solutionKey,
+        gradedAt,
+      };
+    }
+
+    checks.push({ id: 'grade_runner', label: 'Grade script ran', passed: true });
+    for (const c of parsed.checks || []) {
+      if (!c || typeof c !== 'object') continue;
+      checks.push({
+        id: String(c.id || 'check'),
+        label: String(c.label || c.id || 'check'),
+        passed: Boolean(c.passed),
+        ...(c.detail ? { detail: String(c.detail) } : {}),
+      });
+    }
+
+    const passed = checks.every((c) => c.passed);
+    return {
+      passed,
+      kind: opts.kind,
+      summary: String(
+        parsed.summary
+        || (passed ? 'Passed — grade script accepted the output' : 'Failed — grade script rejected the output'),
+      ),
+      checks,
+      candidateKey,
+      solutionKey,
+      gradedAt,
+    };
+  } finally {
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 async function downloadParquetPrefix(store: ReturnType<typeof getObjectStore>, prefix: string, destDir: string): Promise<string[]> {
   const root = normalizeKey(prefix).replace(/\/?$/, '/');
   const keys = (await store.listKeys(root)).filter(
@@ -208,12 +437,46 @@ async function downloadParquetPrefix(store: ReturnType<typeof getObjectStore>, p
   for (const key of keys) {
     const buf = await store.getObject(key);
     if (!buf) continue;
-    const name = path.basename(key);
-    const out = path.join(destDir, name);
+    // Keep the layout under the prefix: partitionBy writes col=value/ directories
+    // that carry column values, and part files repeat names across partitions.
+    const rel = key.startsWith(root) ? key.slice(root.length) : path.basename(key);
+    const safeRel = rel
+      .split('/')
+      .filter((seg: string) => seg && seg !== '.' && seg !== '..')
+      .join(path.sep);
+    const out = path.join(destDir, safeRel || path.basename(key));
+    fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.writeFileSync(out, buf);
     local.push(out);
   }
   return local;
+}
+
+const HIVE_DEFAULT_PARTITION = '__HIVE_DEFAULT_PARTITION__';
+
+/**
+ * Hive layout stores partition columns in directory names (`col=value/`) and
+ * leaves them out of the Parquet files, so they have to be read back from the path.
+ */
+function partitionsFromPath(filePath: string, rootDir: string): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  const rel = path.relative(rootDir, filePath);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return out;
+  for (const seg of path.dirname(rel).split(path.sep)) {
+    const eq = seg.indexOf('=');
+    if (eq <= 0) continue;
+    let name: string;
+    let raw: string;
+    try {
+      name = decodeURIComponent(seg.slice(0, eq));
+      raw = decodeURIComponent(seg.slice(eq + 1));
+    } catch {
+      name = seg.slice(0, eq);
+      raw = seg.slice(eq + 1);
+    }
+    out[name] = raw === HIVE_DEFAULT_PARTITION ? null : raw;
+  }
+  return out;
 }
 
 type ParquetRow = Record<string, unknown>;
@@ -236,7 +499,11 @@ function normalizeGradeValue(v: unknown): string {
     return Number.isInteger(v) ? String(v) : v.toFixed(6).replace(/\.?0+$/, '');
   }
   if (typeof v === 'bigint') return String(v);
-  if (v instanceof Date) return v.toISOString();
+  if (v instanceof Date) {
+    const iso = v.toISOString();
+    // DATE columns compare as YYYY-MM-DD so a value read from a Hive path matches one read from a file.
+    return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : iso;
+  }
   if (typeof v === 'object') {
     // Decimal-like / object wrappers
     if (typeof (v as { toString?: () => string }).toString === 'function') {
@@ -256,22 +523,34 @@ function parquetRowKey(row: ParquetRow, keys: string[]): string {
   return keys.map((k) => normalizeGradeValue(row[k])).join('\u0001');
 }
 
-async function readParquetRows(filePath: string): Promise<ParquetRow[]> {
+async function readParquetRows(filePath: string, rootDir?: string): Promise<ParquetRow[]> {
   const read = await loadHyparquetReader();
   const buf = fs.readFileSync(filePath);
   const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-  return read({ file: ab as ArrayBuffer });
+  const rows = await read({ file: ab as ArrayBuffer });
+  const partitions = rootDir ? partitionsFromPath(filePath, rootDir) : {};
+  const partCols = Object.keys(partitions);
+  if (!partCols.length) return rows;
+  for (const row of rows) {
+    for (const col of partCols) {
+      if (row[col] === undefined) row[col] = partitions[col];
+    }
+  }
+  return rows;
 }
 
 async function rowsByKeyFromFiles(
   files: string[],
   keys: string[],
+  rootDir?: string,
+  opts?: { allowDuplicateKeys?: boolean },
 ): Promise<{ map: Map<string, ParquetRow>; error?: string }> {
   const map = new Map<string, ParquetRow>();
+  const allowDup = opts?.allowDuplicateKeys === true;
   for (const f of files) {
     let rows: ParquetRow[];
     try {
-      rows = await readParquetRows(f);
+      rows = await readParquetRows(f, rootDir);
     } catch (e) {
       return { map, error: `failed reading ${path.basename(f)}: ${String(e)}` };
     }
@@ -279,6 +558,14 @@ async function rowsByKeyFromFiles(
       const k = parquetRowKey(row, keys);
       if (!k || keys.some((col) => row[col] == null || row[col] === '')) {
         return { map, error: `row missing key column(s) ${keys.join(',')} in ${path.basename(f)}` };
+      }
+      // History joins / exploded outputs often repeat the grade key. Last-write-wins
+      // would hide that and can even fluke the correct row — reject explicitly.
+      if (!allowDup && map.has(k)) {
+        return {
+          map,
+          error: `duplicate grade key (${keys.join(',')})=${JSON.stringify(keys.map((col) => row[col]))} in ${path.basename(f)} — expected one output row per key`,
+        };
       }
       map.set(k, row);
     }
@@ -415,7 +702,7 @@ async function gradeParquetAgainstExpected(opts: {
       };
     }
 
-    const candLoaded = await rowsByKeyFromFiles(candidateFiles, keys);
+    const candLoaded = await rowsByKeyFromFiles(candidateFiles, keys, candidateDir);
     if (candLoaded.error) {
       checks.push({
         id: 'candidate_rows',
@@ -446,7 +733,7 @@ async function gradeParquetAgainstExpected(opts: {
 
     for (const expFile of expectedFiles) {
       const caseId = path.basename(expFile, '.parquet');
-      const expLoaded = await rowsByKeyFromFiles([expFile], keys);
+      const expLoaded = await rowsByKeyFromFiles([expFile], keys, expectedDir);
       if (expLoaded.error) {
         casesFailed += 1;
         checks.push({
@@ -493,7 +780,7 @@ async function gradeParquetAgainstExpected(opts: {
     // Recompute extras against union of all successfully loaded expected keys.
     const allExpectedKeys = new Set<string>();
     for (const expFile of expectedFiles) {
-      const expLoaded = await rowsByKeyFromFiles([expFile], keys);
+      const expLoaded = await rowsByKeyFromFiles([expFile], keys, expectedDir);
       if (expLoaded.error) continue;
       for (const k of expLoaded.map.keys()) allExpectedKeys.add(k);
     }
@@ -545,7 +832,18 @@ async function gradeOutputAgainstSolution(opts: {
   sparkSucceeded: boolean;
   gradeCases?: string[];
   gradeKeys?: string[];
+  /** Per-challenge Python grader (s3a). When set, used instead of the built-in row-diff. */
+  gradeScript?: string;
 }): Promise<GradeResult> {
+  if (opts.gradeScript && opts.gradeScript.trim()) {
+    return gradeWithScript({
+      candidateOutputS3a: opts.candidateOutputS3a,
+      evalSolutionS3a: opts.evalSolutionS3a,
+      gradeScriptS3a: opts.gradeScript.trim(),
+      kind: opts.kind,
+      sparkSucceeded: opts.sparkSucceeded,
+    });
+  }
   const solutionKeyEarly = s3aToKey(opts.evalSolutionS3a);
   const useParquet =
     Boolean(opts.gradeCases?.length)

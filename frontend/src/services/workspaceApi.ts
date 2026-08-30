@@ -86,10 +86,20 @@ export interface StartSparkJobBody {
   testcasesPrefix?: string;
   cases?: string[];
   gradeKeys?: string[];
-  /** Controls OUTPUT_PATH shape (json file vs parquet directory). */
-  outputFormat?: 'json' | 'parquet';
+  /** Controls OUTPUT_PATH shape (json file vs parquet/csv directory). */
+  outputFormat?: 'json' | 'parquet' | 'csv';
   /** Dimension Parquet path → job env PRODUCTS_PATH. */
   productsPath?: string;
+  /** Fact path → job env TXN_INPUT_PATH. */
+  txnInputPath?: string;
+  /** Rate-card path → job env RATE_INPUT_PATH. */
+  rateInputPath?: string;
+  /** Events path → job env INPUT_A_PATH (catalogue dual-input labs). */
+  eventsInputPath?: string;
+  /** Catalog path → job env INPUT_B_PATH. */
+  catalogInputPath?: string;
+  /** Per-challenge grader script (s3a). */
+  gradeScript?: string;
   /** Stage input/ + input_b/ → INPUT_A_PATH / INPUT_B_PATH. */
   dualInput?: boolean;
   limits?: {
@@ -98,7 +108,16 @@ export interface StartSparkJobBody {
     executors?: number;
     executorCores?: number;
     executorMemory?: string;
+    aqe?: boolean;
+    shufflePartitions?: number;
+    skewJoin?: boolean;
+    autoBroadcastJoinThreshold?: string;
   };
+  /** Learner Spark knobs (conf key → value). Backend whitelists against platformSpec.knobs. */
+  /** Learner Spark knobs (conf key → value). Backend whitelists against platformSpec.knobs. */
+  sparkKnobs?: Record<string, string>;
+  /** Workspace-relative .py to use as Spark main for this job. */
+  entrypoint?: string;
 }
 
 export async function startSparkJob(
@@ -129,6 +148,28 @@ export async function fetchSparkJob(
     { headers: getAuthHeader() },
   );
   return data.job as SparkJobRecord;
+}
+
+export async function killSparkJob(
+  sessionId: string,
+  jobId: string,
+): Promise<SparkJobRecord> {
+  const { data } = await axios.delete(
+    `/api/session/${sessionId}/spark/jobs/${jobId}`,
+    { headers: getAuthHeader() },
+  );
+  return data.job as SparkJobRecord;
+}
+
+export async function fetchSparkJobFiles(
+  sessionId: string,
+  jobId: string,
+): Promise<{ jobId: string; name: string; entrypoint: string; files: Record<string, string> }> {
+  const { data } = await axios.get(
+    `/api/session/${sessionId}/spark/jobs/${jobId}/files`,
+    { headers: getAuthHeader() },
+  );
+  return data as { jobId: string; name: string; entrypoint: string; files: Record<string, string> };
 }
 
 export async function fetchSparkSubmissions(sessionId: string): Promise<SparkJobRecord[]> {

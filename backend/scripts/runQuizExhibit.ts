@@ -28,8 +28,14 @@ type QuizMetadata = {
   historyAppId?: string | null;
   historyUrl?: string | null;
   run?: QuizRunSpec;
+  /**
+   * When true, a FAILED Spark job is the intended exhibit (e.g. OOM labs).
+   * History Server links are still captured; publish proceeds.
+   */
+  expectFailure?: boolean;
   capturedAt?: string | null;
   k8sName?: string | null;
+  finalStatus?: 'succeeded' | 'failed' | null;
 };
 
 function s3aKey(key: string): string {
@@ -171,6 +177,7 @@ async function runQuizExhibit(quizDir: string, quizId: string): Promise<ExhibitR
         executors?: number;
         executorCores?: number;
         executorMemory?: string;
+        driverMemory?: string;
       };
     };
   };
@@ -202,6 +209,7 @@ async function runQuizExhibit(quizDir: string, quizId: string): Promise<ExhibitR
   const executors = Math.min(4, Math.max(1, limits.executors ?? 2));
   const executorCores = Math.min(2, Math.max(1, limits.executorCores ?? 1));
   const executorMemory = limits.executorMemory || '1g';
+  const driverMemory = limits.driverMemory || '1g';
 
   const short = createHash('sha256').update(`${quizId}:${runId}`).digest('hex').slice(0, 8);
   const k8sName = `quiz-${short}`.slice(0, 52);
@@ -217,7 +225,7 @@ async function runQuizExhibit(quizDir: string, quizId: string): Promise<ExhibitR
     executor_cores: executorCores,
     executor_memory: executorMemory,
     driver_cores: 1,
-    driver_memory: '1g',
+    driver_memory: driverMemory,
     deps_py_files: [] as string[],
     env: {
       BUSINESS_DATE: new Date().toISOString().slice(0, 10),
@@ -253,6 +261,8 @@ async function runQuizExhibit(quizDir: string, quizId: string): Promise<ExhibitR
     null;
   let logsText = '';
   let status = mapStatus(String(platformJob?.status || ''));
+  /** Retain across polls — failed-job log tails sometimes drop the app id line. */
+  let lastSeenAppId: string | null = extractApplicationId(logsText, platformJob);
 
   while (Date.now() < deadline) {
     await sleep(5000);
@@ -262,30 +272,43 @@ async function runQuizExhibit(quizDir: string, quizId: string): Promise<ExhibitR
       status = mapStatus(String(platformJob.status || ''));
     }
     const logsRes = await platformFetch(
-      `/api/jobs/${encodeURIComponent(k8sName)}/logs?tail=200`,
+      `/api/jobs/${encodeURIComponent(k8sName)}/logs?tail=500`,
     );
     if (logsRes.text != null && logsRes.status < 500) {
       logsText = logsRes.text;
     }
     const appIdHint = extractApplicationId(logsText, platformJob);
+    if (appIdHint) lastSeenAppId = appIdHint;
     console.log(
-      `POLL  status=${status}${appIdHint ? ` app=${appIdHint}` : ''}`,
+      `POLL  status=${status}${appIdHint || lastSeenAppId ? ` app=${appIdHint || lastSeenAppId}` : ''}`,
     );
     if (status === 'succeeded' || status === 'failed') break;
   }
 
-  if (status !== 'succeeded') {
+  const expectFailure = Boolean(metadata.expectFailure);
+  if (status === 'succeeded' && expectFailure) {
+    throw new Error(
+      'exhibit succeeded but metadata.expectFailure=true — refusing to publish a non-failing OOM exhibit',
+    );
+  }
+  if (status !== 'succeeded' && status !== 'failed') {
+    throw new Error(`exhibit job still ${status} after poll deadline — refusing to publish`);
+  }
+  if (status === 'failed' && !expectFailure) {
     const err =
       String(platformJob?.error || '').trim()
       || logsText.split('\n').slice(-12).join('\n')
       || `exhibit job ended status=${status}`;
     throw new Error(`exhibit job did not succeed — refusing to publish.\n${err}`);
   }
+  if (status === 'failed' && expectFailure) {
+    console.log('EXHIBIT_FAIL_OK  expected failure captured for OOM / negative exhibit');
+  }
 
-  // Event logs can lag a few seconds after SUCCEEDED.
-  let historyAppId: string | null = null;
+  // Event logs can lag a few seconds after the terminal status.
+  let historyAppId: string | null = lastSeenAppId;
   for (let i = 0; i < 12 && !historyAppId; i += 1) {
-    historyAppId = extractApplicationId(logsText, platformJob);
+    historyAppId = extractApplicationId(logsText, platformJob) || lastSeenAppId;
     if (historyAppId) break;
     await sleep(2500);
     const statusRes = await platformFetch(`/api/jobs/${encodeURIComponent(k8sName)}`);
@@ -293,14 +316,19 @@ async function runQuizExhibit(quizDir: string, quizId: string): Promise<ExhibitR
       platformJob = statusRes.json as Record<string, unknown>;
     }
     const logsRes = await platformFetch(
-      `/api/jobs/${encodeURIComponent(k8sName)}/logs?tail=200`,
+      `/api/jobs/${encodeURIComponent(k8sName)}/logs?tail=800`,
     );
     if (logsRes.text) logsText = logsRes.text;
+    const again = extractApplicationId(logsText, platformJob);
+    if (again) {
+      lastSeenAppId = again;
+      historyAppId = again;
+    }
   }
 
   if (!historyAppId) {
     throw new Error(
-      'exhibit succeeded but applicationId was not found in Platform job/logs — refusing to publish',
+      `exhibit ${status} but applicationId was not found in Platform job/logs — refusing to publish`,
     );
   }
 
@@ -310,6 +338,7 @@ async function runQuizExhibit(quizDir: string, quizId: string): Promise<ExhibitR
     ...metadata,
     historyAppId,
     historyUrl,
+    finalStatus: status === 'failed' ? 'failed' : 'succeeded',
     capturedAt: new Date().toISOString(),
     k8sName,
   };

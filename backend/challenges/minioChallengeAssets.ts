@@ -59,17 +59,6 @@ async function loadChallengeMeta(challengeId: string): Promise<ChallengeMeta | n
   }
 }
 
-/** Optional markdown concept brief: challenges/<id>/challenge/theory.md */
-async function loadChallengeTheory(challengeId: string): Promise<string | null> {
-  if (!challengeId) return null;
-  const store = getObjectStore();
-  const key = `${challengePrefix(challengeId)}/challenge/theory.md`;
-  const buf = await store.getObject(key);
-  if (!buf) return null;
-  const text = buf.toString('utf8').trim();
-  return text || null;
-}
-
 async function loadPrefixFiles(
   challengeId: string,
   folder: 'starter' | 'solution',
@@ -122,7 +111,6 @@ function catalogWantsMinio(base: Record<string, unknown>): boolean {
 function challengeFromMinioMeta(
   meta: ChallengeMeta,
   base: Record<string, unknown>,
-  theoryMarkdown?: string | null,
 ): Record<string, unknown> {
   const platformSpec = { ...(meta.platformSpec || {}) } as Record<string, unknown>;
   const contentSource =
@@ -132,9 +120,6 @@ function challengeFromMinioMeta(
   platformSpec.contentSource = contentSource;
 
   const problemStatement = { ...(meta.problemStatement || {}) } as Record<string, unknown>;
-  if (theoryMarkdown && theoryMarkdown.trim()) {
-    problemStatement.theory = theoryMarkdown.trim();
-  }
 
   const number =
     typeof meta.number === 'number' && Number.isFinite(meta.number)
@@ -179,23 +164,98 @@ async function hydrateChallengeFromMinio(
     if (!meta) {
       throw minioMissingError(base.id, 'challenge/challenge.json');
     }
-    const theory = await loadChallengeTheory(base.id);
-    return challengeFromMinioMeta(meta, base, theory);
+    return challengeFromMinioMeta(meta, base);
   }
 
   if (meta) {
-    const theory = await loadChallengeTheory(base.id);
-    return challengeFromMinioMeta(meta, base, theory);
+    return challengeFromMinioMeta(meta, base);
   }
   return base;
 }
 
+function safeRelPath(rel: string): string | null {
+  const t = String(rel || '').replace(/^\/+/, '').replace(/\\/g, '/');
+  if (!t || t.includes('..')) return null;
+  const parts = t.split('/');
+  if (parts.some((p) => !p || p === '.')) return null;
+  return t;
+}
+
+async function writeChallengeMeta(meta: ChallengeMeta): Promise<void> {
+  if (!meta?.id) throw new Error('challenge meta missing id');
+  const store = getObjectStore();
+  const prefix = challengePrefix(meta.id);
+  await store.putObject(
+    `${prefix}/challenge/challenge.json`,
+    `${JSON.stringify(meta, null, 2)}\n`,
+    'application/json',
+  );
+  if (typeof meta.description === 'string') {
+    const title = String(meta.title || meta.id);
+    const body = meta.description.replace(/^\s+/, '').replace(/\s+$/, '');
+    const md = `# ${title}\n\n${body}\n`;
+    await store.putObject(
+      `${prefix}/challenge/description.md`,
+      md,
+      'text/markdown; charset=utf-8',
+    );
+  }
+  if (meta.platformSpec && typeof meta.platformSpec === 'object') {
+    await store.putObject(
+      `${prefix}/challenge/platform-spec.json`,
+      `${JSON.stringify(meta.platformSpec, null, 2)}\n`,
+      'application/json',
+    );
+  }
+}
+
+async function writeSolutionFiles(
+  challengeId: string,
+  files: Record<string, string>,
+): Promise<Record<string, string>> {
+  const store = getObjectStore();
+  const prefix = `${challengePrefix(challengeId)}/solution/`;
+  const written: Record<string, string> = {};
+  for (const [rawPath, rawBody] of Object.entries(files || {})) {
+    const rel = safeRelPath(rawPath);
+    if (!rel) continue;
+    const body = typeof rawBody === 'string' ? rawBody : String(rawBody ?? '');
+    await store.putObject(`${prefix}${rel}`, body, 'text/plain; charset=utf-8');
+    written[rel] = body;
+  }
+  return written;
+}
+
+function stripMoat(challenge: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  if (!challenge || typeof challenge !== 'object') return challenge ?? null;
+  const ps = challenge.problemStatement;
+  if (!ps || typeof ps !== 'object' || Array.isArray(ps) || !('moat' in (ps as object))) {
+    return challenge;
+  }
+  const nextPs = { ...(ps as Record<string, unknown>) };
+  delete nextPs.moat;
+  return { ...challenge, problemStatement: nextPs };
+}
+
+/** Learners never see setter notes. Admins (or open lab with no ADMIN_EMAILS) do. */
+function applyMoatPolicy(
+  challenge: Record<string, unknown> | null | undefined,
+  user: { sub?: string; userId?: string; email?: string } | null | undefined,
+): Record<string, unknown> | null {
+  const { isAdminUser } = require('../auth/middleware');
+  if (isAdminUser(user)) return challenge ?? null;
+  return stripMoat(challenge);
+}
+
 module.exports = {
   loadChallengeMeta,
-  loadChallengeTheory,
   loadStarterFiles,
   loadSolutionFiles,
   hydrateChallengeFromMinio,
   challengePrefix,
   challengeFromMinioMeta,
+  writeChallengeMeta,
+  writeSolutionFiles,
+  stripMoat,
+  applyMoatPolicy,
 };

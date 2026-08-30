@@ -12,7 +12,7 @@ const sparkJobs = require('../workspace/sparkJobs');
 const workspaceStore = require('../workspace/workspaceStore');
 const sessionStore = require('../db/sessionStore');
 const loader = require('../challenges/loader');
-const { hydrateChallengeFromMinio } = require('../challenges/minioChallengeAssets');
+const { hydrateChallengeFromMinio, applyMoatPolicy } = require('../challenges/minioChallengeAssets');
 const terminalEventBus = require('../observability/terminalEventBus');
 const { handleBrowse, listBrowseServices } = require('../sandbox/sessionBrowseProxy');
 
@@ -38,6 +38,19 @@ function getSparkSession(id: string, res: ExpressResponse): GameSession | null {
     return null;
   }
   return session;
+}
+
+function parseSparkKnobs(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof k !== 'string' || !k || k.length > 128) continue;
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (!s || s.length > 64) continue;
+    out[k] = s;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 // Reject any path containing ".." segments to prevent path traversal.
@@ -142,8 +155,15 @@ function candidateServices(allServices: unknown): string[] {
   return visible.length > 0 ? visible : list;
 }
 
-function publicSession(s: GameSession, challenge: unknown): Record<string, unknown> {
-  const c = challenge as Record<string, unknown> | null;
+function publicSession(
+  s: GameSession,
+  challenge: unknown,
+  user?: { sub?: string; userId?: string; email?: string } | null,
+): Record<string, unknown> {
+  const c = applyMoatPolicy(
+    challenge && typeof challenge === 'object' ? (challenge as Record<string, unknown>) : null,
+    user,
+  );
   return {
     id: s.id,
     status: s.status,
@@ -187,7 +207,7 @@ router.post('/start', requireSessionAccess, async (req: ExpressRequest, res: Exp
     const { challengeId } = body;
     const { session, challenge } = await lifecycle.start({ challengeId });
 
-    const pub = publicSession(session, challenge);
+    const pub = publicSession(session, challenge, req.user);
     res.status(201).json({
       sessionId: session.id,
       status: session.status,
@@ -225,7 +245,7 @@ router.post('/spark/start', requireSessionAccess, async (req: ExpressRequest, re
 
     const base = loader.getPublicChallenge(challengeId) || loader.getChallenge(challengeId);
     const challenge = await hydrateChallengeFromMinio(base);
-    const pub = publicSession(session, challenge);
+    const pub = publicSession(session, challenge, req.user);
     res.status(created ? 201 : 200).json({
       sessionId: session.id,
       created,
@@ -346,15 +366,34 @@ router.post('/:id/spark/jobs', express.json({ limit: '256kb' }), async (req: Exp
       ? body.gradeKeys.map((c) => String(c)).filter(Boolean)
       : undefined;
     const outputFormat =
-      body.outputFormat === 'parquet' || body.outputFormat === 'json'
+      body.outputFormat === 'parquet' || body.outputFormat === 'json' || body.outputFormat === 'csv'
         ? body.outputFormat
         : undefined;
     const productsPath =
       typeof body.productsPath === 'string' ? body.productsPath : undefined;
+    const txnInputPath =
+      typeof body.txnInputPath === 'string' ? body.txnInputPath : undefined;
+    const rateInputPath =
+      typeof body.rateInputPath === 'string' ? body.rateInputPath : undefined;
+    const eventsInputPath =
+      typeof body.eventsInputPath === 'string' ? body.eventsInputPath : undefined;
+    const catalogInputPath =
+      typeof body.catalogInputPath === 'string' ? body.catalogInputPath : undefined;
+    const gradeScript =
+      typeof body.gradeScript === 'string' ? body.gradeScript : undefined;
     const dualInput = body.dualInput === true;
     const limits = (body.limits && typeof body.limits === 'object')
       ? (body.limits as Record<string, unknown>)
       : undefined;
+    const sparkKnobs = parseSparkKnobs(body.sparkKnobs);
+    const fallbackEntry = session.entrypoint || 'src/main.py';
+    const entrypoint = typeof body.entrypoint === 'string' && body.entrypoint.trim()
+      ? body.entrypoint.trim()
+      : fallbackEntry;
+    if (entrypoint !== session.entrypoint) {
+      session.entrypoint = entrypoint;
+      await sessionStore.persistRow(session);
+    }
 
     const job = await sparkJobs.startSparkJob({
       session: {
@@ -362,7 +401,7 @@ router.post('/:id/spark/jobs', express.json({ limit: '256kb' }), async (req: Exp
         challengeId: session.challengeId,
         userId: session.userId || null,
         workspacePrefix: session.workspacePrefix,
-        entrypoint: session.entrypoint || 'src/main.py',
+        entrypoint,
       },
       mode,
       inputPath: inputPath || undefined,
@@ -373,6 +412,11 @@ router.post('/:id/spark/jobs', express.json({ limit: '256kb' }), async (req: Exp
       gradeKeys,
       outputFormat,
       productsPath: productsPath || undefined,
+      txnInputPath: txnInputPath || undefined,
+      rateInputPath: rateInputPath || undefined,
+      eventsInputPath: eventsInputPath || undefined,
+      catalogInputPath: catalogInputPath || undefined,
+      gradeScript: gradeScript || undefined,
       dualInput,
       limits: limits as {
         driver?: number;
@@ -380,7 +424,13 @@ router.post('/:id/spark/jobs', express.json({ limit: '256kb' }), async (req: Exp
         executors?: number;
         executorCores?: number;
         executorMemory?: string;
+        aqe?: boolean;
+        shufflePartitions?: number;
+        skewJoin?: boolean;
+        autoBroadcastJoinThreshold?: string;
       } | undefined,
+      sparkKnobs,
+      entrypoint,
     });
     res.status(201).json({ job });
   } catch (e) {
@@ -412,6 +462,18 @@ router.get('/:id/spark/submissions', async (req: ExpressRequest, res: ExpressRes
   }
 });
 
+// GET /api/session/:id/spark/jobs/:jobId/files  (frozen submit/run snapshot)
+router.get('/:id/spark/jobs/:jobId/files', async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getSparkSession(req.params.id, res);
+    if (!session) return;
+    const payload = await sparkJobs.listJobAppFiles(req.params.jobId, session.id);
+    res.json(payload);
+  } catch (e) {
+    next(e);
+  }
+});
+
 // GET /api/session/:id/spark/jobs/:jobId
 router.get('/:id/spark/jobs/:jobId', async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
   try {
@@ -421,6 +483,18 @@ router.get('/:id/spark/jobs/:jobId', async (req: ExpressRequest, res: ExpressRes
     if (!job?.id || job.sessionId !== session.id) {
       return res.status(404).json({ error: 'job not found' });
     }
+    res.json({ job });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// DELETE /api/session/:id/spark/jobs/:jobId  — kill a running Run/Submit
+router.delete('/:id/spark/jobs/:jobId', async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getSparkSession(req.params.id, res);
+    if (!session) return;
+    const job = await sparkJobs.killSparkJob(req.params.jobId, session.id);
     res.json({ job });
   } catch (e) {
     next(e);
@@ -453,7 +527,7 @@ router.get('/:id', async (req: ExpressRequest, res: ExpressResponse, next: Expre
       ? (loader.getPublicChallenge(session.challengeId) || loader.getChallenge(session.challengeId))
       : null;
     const challenge = await hydrateChallengeFromMinio(base);
-    res.json({ session: publicSession(session, challenge) });
+    res.json({ session: publicSession(session, challenge, req.user) });
   } catch (e) {
     next(e);
   }

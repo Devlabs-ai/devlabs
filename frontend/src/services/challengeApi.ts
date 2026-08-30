@@ -25,3 +25,22 @@ export async function fetchChallengeSolution(id: string): Promise<ChallengeSolut
   });
   return data as ChallengeSolutionPayload;
 }
+
+export type ChallengeContentTab = 'description' | 'data' | 'spec' | 'knobs' | 'solution' | 'moat';
+
+export async function saveChallengeContent(
+  id: string,
+  body: {
+    tab: ChallengeContentTab;
+    markdown?: string;
+    data?: unknown;
+    spec?: unknown;
+    knobs?: unknown;
+    solutionFiles?: Record<string, string>;
+  },
+): Promise<{ challenge: ChallengeFull; solutionFiles?: Record<string, string> }> {
+  const { data } = await axios.put(`/api/challenges/${id}/content`, body, {
+    headers: getAuthHeader(),
+  });
+  return data as { challenge: ChallengeFull; solutionFiles?: Record<string, string> };
+}

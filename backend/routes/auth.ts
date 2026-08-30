@@ -4,7 +4,7 @@ import type { ExpressRequest, ExpressResponse, ExpressNextFunction } from '../ty
 
 const express = require('express');
 const { signUserToken, signInterviewerToken } = require('../auth/jwt');
-const { requireInterviewer } = require('../auth/middleware');
+const { requireInterviewer, isAdminUser } = require('../auth/middleware');
 const {
   upsertUser,
   updateLastLogin,
@@ -37,6 +37,7 @@ router.post('/login-email', async (req: ExpressRequest, res: ExpressResponse, ne
         id: user.id,
         email: user.email,
         name: user.name,
+        admin: isAdminUser({ sub: user.id, email: user.email }),
       },
     });
   } catch (e) {
@@ -48,7 +49,12 @@ router.get('/me', requireInterviewer, async (req: ExpressRequest, res: ExpressRe
   try {
     const user = await findUserById(req.user!.sub || req.user!.userId || '');
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json({ user });
+    res.json({
+      user: {
+        ...user,
+        admin: isAdminUser({ sub: user.id, email: user.email }),
+      },
+    });
   } catch (e) {
     next(e);
   }
@@ -60,7 +66,10 @@ router.post('/login', (req: ExpressRequest, res: ExpressResponse) => {
     return res.status(401).json({ error: 'invalid credentials' });
   }
   const token = signInterviewerToken(username);
-  res.json({ token });
+  res.json({
+    token,
+    user: { id: username, email: `${username}@local`, admin: true },
+  });
 });
 
 module.exports = router;

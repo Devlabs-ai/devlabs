@@ -4,10 +4,10 @@
   "title": "Deduplicate Transactions",
   "contentSource": "minio",
   "description": "The POS bridge sometimes retries a ticket and the lake ends up with duplicate txn_ids. Keep one row per txn_id \u2014 the latest by event_ts (tie-break store_id asc). Use a window row_number; dropDuplicates alone is not enough. Output: txn_id, store_id, product_id, quantity, event_ts. Write Parquet with overwrite. Run uses smoke testcases; Submit row-diffs against expected/.",
-  "difficulty": "L1",
+  "difficulty": "L0",
   "tags": [
     "spark",
-    "l1",
+    "l0",
     "window",
     "dedup",
     "dataframe",

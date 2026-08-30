@@ -12,6 +12,12 @@ import PlayPage from './pages/PlayPage';
 import QuizPage from './pages/QuizPage';
 import WhitePapersPage from './pages/WhitePapersPage';
 import SideQuestsPage from './pages/SideQuestsPage';
+import PlaygroundsPage from './pages/PlaygroundsPage';
+import ProjectsPage from './pages/ProjectsPage';
+import ProjectModulePage from './pages/ProjectModulePage';
+import MinorsPage from './pages/MinorsPage';
+import SparkPlaygroundPage from './pages/SparkPlaygroundPage';
+import SparkPlaygroundOpenPage from './pages/SparkPlaygroundOpenPage';
 import ProfilePage from './pages/ProfilePage';
 import DbExplorerPage from './pages/DbExplorerPage';
 import AppLayout from './layouts/AppLayout';
@@ -21,7 +27,12 @@ import { fetchChallenges, fetchChallenge } from './services/challengeApi';
 import { startSession, endSession, restoreSession } from './services/sessionApi';
 import { startSparkSession } from './services/workspaceApi';
 import { buildDailyProductSalesProject } from './fixtures/dailyProductSalesL1';
+import {
+  buildSparkPlaygroundChallenge,
+  buildSparkPlaygroundStarter,
+} from './fixtures/sparkPlaygroundStarter';
 import { isSparkPlatformChallenge } from './components/SparkPlatformWorkspace';
+import { SPARK_PLAYGROUND_CHALLENGE_ID } from './constants/playgroundDatasets';
 import { catalogPathForChallenge, isPlayDomainId, looksLikePlaySessionId } from './constants/playCatalog';
 import type {
   AuthMode,
@@ -34,6 +45,11 @@ import type {
   EndSessionResult,
   AppState,
 } from './types/domain';
+
+function LegacyMajorsRedirect(): JSX.Element {
+  const { pathname } = useLocation();
+  return <Navigate to={pathname.replace(/^\/play\/projects/, '/play/majors')} replace />;
+}
 
 export default function App(): React.JSX.Element {
   const navigate = useNavigate();
@@ -183,8 +199,19 @@ export default function App(): React.JSX.Element {
     const a = segments[1] || null;
     const b = segments[2] || null;
 
-    // Quiz / papers / quests — not session restore paths
-    if (a === 'quiz' || a === 'papers' || a === 'quests') return;
+    // Quiz / papers / quests / playgrounds / majors / minors — not session restore paths
+    if (
+      a === 'quiz' ||
+      a === 'papers' ||
+      a === 'quests' ||
+      a === 'playgrounds' ||
+      a === 'projects' ||
+      a === 'majors' ||
+      a === 'minors' ||
+      a === 'spark-playground'
+    ) {
+      return;
+    }
 
     // Catalog: /play | /play/:domain | /play/:domain/:panel
     if (!a || isPlayDomainId(a)) {
@@ -271,7 +298,9 @@ export default function App(): React.JSX.Element {
         null;
 
       let full: ChallengeFull | null = null;
-      if (challengeId) {
+      if (challengeId === SPARK_PLAYGROUND_CHALLENGE_ID) {
+        full = buildSparkPlaygroundChallenge();
+      } else if (challengeId) {
         full = await fetchChallenge(challengeId);
       } else {
         // Workspace exists without a recoverable challenge id — probe MinIO then default lab.
@@ -280,7 +309,7 @@ export default function App(): React.JSX.Element {
         full = await fetchChallenge('l1-filter-valid-sales-rows');
       }
 
-      if (!full?.sparkPlatform && full) {
+      if (challengeId !== SPARK_PLAYGROUND_CHALLENGE_ID && !full?.sparkPlatform && full) {
         // Ensure spark fields exist even if list payload was thin.
         full = await fetchChallenge(full.id);
       }
@@ -323,6 +352,47 @@ export default function App(): React.JSX.Element {
       setStartError(err?.response?.data?.error || err.message || 'Unknown error');
     } finally {
       setEnding(false);
+    }
+  };
+
+  const handleOpenSparkPlayground = async (): Promise<void> => {
+    setStartError(null);
+    setPlayState('loading');
+    const challenge = buildSparkPlaygroundChallenge();
+    try {
+      const res = await startSparkSession(
+        SPARK_PLAYGROUND_CHALLENGE_ID,
+        buildSparkPlaygroundStarter(),
+        'src/main.py',
+      );
+      setActiveSession({
+        id: res.sessionId,
+        startTime: Date.now(),
+        recovered: false,
+        terminalWsUrl: null,
+        metricsWsUrl: null,
+        portMap: null,
+        services: [],
+        terminalService: null,
+        runtime: 'spark-platform',
+      });
+      setActiveChallenge(challenge);
+      setActiveTab('editor');
+      openingSessionRef.current = res.sessionId;
+      setPlayState('active');
+      navigate(`/play/${res.sessionId}`);
+    } catch (e) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      setActiveChallenge(null);
+      setActiveSession(null);
+      setPlayState('library');
+      setStartError(
+        err?.response?.data?.error
+          || err.message
+          || 'Failed to open Spark Playground',
+      );
+      navigate('/play/spark-playground', { replace: true });
+      throw e;
     }
   };
 
@@ -369,6 +439,7 @@ export default function App(): React.JSX.Element {
     setActiveTab,
     ending,
     onSelectChallenge: handleSelectChallenge,
+    onOpenSparkPlayground: handleOpenSparkPlayground,
     onBackToLibrary: handleBackToLibrary,
     onEnd: handleEnd,
     onLogout: handleLogout,
@@ -419,6 +490,16 @@ export default function App(): React.JSX.Element {
           <Route path="play/papers/:sectionId" element={<WhitePapersPage />} />
           <Route path="play/quests" element={<SideQuestsPage />} />
           <Route path="play/quests/:topicId" element={<SideQuestsPage />} />
+          <Route path="play/playgrounds" element={<PlaygroundsPage />} />
+          <Route path="play/majors" element={<ProjectsPage />} />
+          <Route path="play/majors/:projectId" element={<ProjectsPage />} />
+          <Route path="play/majors/:projectId/:moduleId" element={<ProjectModulePage />} />
+          <Route path="play/projects/*" element={<LegacyMajorsRedirect />} />
+          <Route path="play/projects" element={<Navigate to="/play/majors" replace />} />
+          <Route path="play/minors" element={<MinorsPage />} />
+          <Route path="play/minors/:minorId" element={<MinorsPage />} />
+          <Route path="play/spark-playground/open" element={<SparkPlaygroundOpenPage />} />
+          <Route path="play/spark-playground" element={<SparkPlaygroundPage />} />
           <Route path="play/:domainId" element={<PlayPage />} />
           <Route path="play/:domainId/:panelId" element={<PlayPage />} />
           <Route path="profile" element={<ProfilePage />} />

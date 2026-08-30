@@ -1,5 +1,7 @@
 /** Play catalog taxonomy (sidebar filters + ordered challenge ids). */
 
+import { SPARK_PLAYGROUND_CHALLENGE_ID } from './playgroundDatasets';
+
 export type PlayDomainId =
   | 'data-engineer'
   | 'software-engineer'
@@ -49,6 +51,9 @@ export const PLAY_DOMAINS: PlayDomain[] = [
           'l1-daily-product-sales-summary',
           'l2-partitioned-daily-sales-write',
           'l2-latest-product-revenue-rollup',
+          'l3-multi-tenant-activity-report',
+          'l3-broadcast-catalog-enrichment',
+          'l3-interchange-fee-settlement',
         ],
       },
       {
@@ -153,7 +158,8 @@ export function listPlayTopics(): Array<{ id: string; label: string; domainId: P
 }
 
 /** Back to flat Play library (filters live in the UI, not deep panel routes). */
-export function catalogPathForChallenge(_challengeId?: string | null): string {
+export function catalogPathForChallenge(challengeId?: string | null): string {
+  if (challengeId === SPARK_PLAYGROUND_CHALLENGE_ID) return '/play/spark-playground';
   return '/play';
 }
 

@@ -4,6 +4,21 @@ import BrandMark from '../components/BrandMark';
 import SessionController from '../components/SessionController';
 import { useAppState } from '../context/AppStateContext';
 import { PlayChromeProvider } from '../context/PlayChromeContext';
+import { PLAYGROUNDS_PATH, SPARK_PLAYGROUND_PATH } from '../constants/playgrounds';
+import { MAJORS_PATH } from '../constants/projects';
+import { MINORS_PATH } from '../constants/minors';
+
+/** Play routes that bring their own page chrome instead of the catalog's. */
+const PLAY_SUBROUTES = [
+  '/play/quiz/',
+  '/play/papers',
+  '/play/quests',
+  PLAYGROUNDS_PATH,
+  MAJORS_PATH,
+  MINORS_PATH,
+  '/play/projects',
+  SPARK_PLAYGROUND_PATH,
+];
 
 /** Thin brand bar — Run/Submit live in the IDE action bar (TensorTonic-style). */
 function ChallengeTopBar(): JSX.Element {
@@ -36,18 +51,15 @@ function AppLayoutInner(): React.JSX.Element {
   const location = useLocation();
   const challengeOpen = playState === 'active' && Boolean(activeSession);
   const showNav = authMode === 'interviewer' && playState !== 'active';
+  const onPlaySubroute = PLAY_SUBROUTES.some((p) => location.pathname.startsWith(p));
   const onPlayRoute =
     location.pathname === '/play' ||
-    (location.pathname.startsWith('/play/') &&
-      !location.pathname.startsWith('/play/quiz/') &&
-      !location.pathname.startsWith('/play/papers') &&
-      !location.pathname.startsWith('/play/quests'));
-  const usePlayChrome =
-    (onPlayRoute ||
-      location.pathname.startsWith('/play/quiz/') ||
-      location.pathname.startsWith('/play/papers') ||
-      location.pathname.startsWith('/play/quests')) &&
-    !challengeOpen;
+    (location.pathname.startsWith('/play/') && !onPlaySubroute);
+  const usePlayChrome = (onPlayRoute || onPlaySubroute) && !challengeOpen;
+  // The Spark bench is reached through the index, so keep the pill lit inside it.
+  const playgroundsActive =
+    location.pathname.startsWith(PLAYGROUNDS_PATH) ||
+    location.pathname.startsWith(SPARK_PLAYGROUND_PATH);
 
   return (
     <div className={`app${challengeOpen ? ' app--challenge' : ''}${usePlayChrome ? ' app--play' : ''}`}>
@@ -71,6 +83,28 @@ function AppLayoutInner(): React.JSX.Element {
                 />
               )}
 
+              {showNav && (
+                <nav className="topnav topnav--actions" aria-label="Sections">
+                  <NavLink
+                    to={MAJORS_PATH}
+                    className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
+                  >
+                    Majors
+                  </NavLink>
+                  <NavLink
+                    to={MINORS_PATH}
+                    className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
+                  >
+                    Minors
+                  </NavLink>
+                  <NavLink
+                    to={PLAYGROUNDS_PATH}
+                    className={`topnav-pill topnav-action${playgroundsActive ? ' active' : ''}`}
+                  >
+                    Playgrounds
+                  </NavLink>
+                </nav>
+              )}
               {showNav && (
                 <nav className="topnav topnav--actions" aria-label="Account">
                   <NavLink

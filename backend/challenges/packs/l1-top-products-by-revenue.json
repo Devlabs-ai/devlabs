@@ -4,10 +4,10 @@
   "title": "Top Products by Revenue",
   "contentSource": "minio",
   "description": "Merchandising wants a short leaderboard: the top products by discounted revenue for the overnight drop \u2014 not the full product rollup.\n\nRead the input Parquet, compute per-`product_id` discounted revenue (same line formula as Aggregate Product Totals), assign a dense rank by revenue descending, keep rows with `rank <= 10`, and write Parquet with overwrite. Ties share a rank; because of dense ranking at the cutoff you may emit **more than 10 rows**.\n\nLine revenue: `quantity * unit_price * (1 - discount_pct)`, round half-up to 2 decimals per line, then sum. Order ranks by `total_revenue` desc, then `product_id` asc. Output columns only: `product_id`, `total_revenue` (DECIMAL(12,2)), `rank` (INT).\n\nInput columns: `txn_id`, `product_id`, `store_id`, `quantity`, `unit_price`, `discount_pct`. Implement with Spark DataFrame APIs (`groupBy` / `agg`, window `dense_rank`) \u2014 no Python sorts over collected rows. **Run** uses two smoke testcases; **Submit** uses the full set and row-diffs your Parquet against each case\u2019s `expected/`.\n\nWrite results with `df.write.mode(\"overwrite\").parquet(OUTPUT_PATH)`. `OUTPUT_PATH` is set by the platform for **this Run/Submit only**.",
-  "difficulty": "L1",
+  "difficulty": "L0",
   "tags": [
     "spark",
-    "l1",
+    "l0",
     "window",
     "ranking",
     "aggregation",

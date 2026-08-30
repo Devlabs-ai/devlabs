@@ -11,14 +11,13 @@ import {
   getPlayPanel,
   isPlayDomainId,
   listPlayCatalogEntries,
-  listPlayTopics,
   looksLikePlaySessionId,
   playCatalogPath,
   type PlayDomainId,
 } from '../constants/playCatalog';
 import type { ChallengePublic } from '../types/domain';
 
-type DifficultyFilter = 'all' | 'l1' | 'l2' | 'l3' | 'l4';
+type DifficultyFilter = 'all' | 'l0' | 'l1' | 'l2' | 'l3' | 'l4';
 
 interface LibraryViewProps {
   challenges: ChallengePublic[];
@@ -29,11 +28,12 @@ interface LibraryViewProps {
 
 function difficultyClass(d: string | undefined): string {
   const s = (d || '').trim().toLowerCase();
-  if (s === 'l1' || s.includes('easy')) return 'l1';
-  if (s === 'l2' || s.includes('medium')) return 'l2';
-  if (s === 'l3') return 'l3';
-  if (s === 'l4' || s.includes('hard')) return 'l4';
-  return 'l2';
+  if (s === 'l0' || s.includes('easy')) return 'l0';
+  if (s === 'l1' || s.includes('medium')) return 'l1';
+  if (s === 'l2') return 'l2';
+  if (s === 'l3' || s.includes('hard')) return 'l3';
+  if (s === 'l4') return 'l4';
+  return 'l1';
 }
 
 function matchesDifficulty(challenge: ChallengePublic, filter: DifficultyFilter): boolean {
@@ -78,7 +78,6 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
       .filter((row): row is NonNullable<typeof row> => Boolean(row));
   }, [byId]);
 
-  const topics = useMemo(() => listPlayTopics(), []);
   const activeTopicId = panel?.id || null;
 
   const filteredRows = useMemo(() => {
@@ -112,18 +111,11 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
   const totalLabs = catalogRows.length;
 
   return (
-    <div className="app-page play-problems-page">
+    <div className="app-page play-problems-page play-problems-page--fixed">
       {challengesError && <div className="alert app-page-alert">{challengesError}</div>}
       {startError && <div className="alert app-page-alert">Failed to start: {startError}</div>}
 
-      <header className="play-problems-hero">
-        <div className="play-problems-hero-copy">
-          <h1 className="play-problems-title">Play</h1>
-          <p className="play-problems-lead">
-            Hands-on labs across storage, compute, and query engines — filter by track or topic below.
-          </p>
-        </div>
-      </header>
+      <h1 className="sr-only">Play</h1>
 
       <div className="play-problems-layout">
         <aside className="play-problems-sidebar" aria-label="Tracks">
@@ -210,26 +202,6 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
         </aside>
 
         <main className="play-problems-main">
-          <section className="play-topic-row" aria-label="Topics">
-            <button
-              type="button"
-              className={`play-topic-chip${activeTopicId === null ? ' active' : ''}`}
-              onClick={() => navigate(domainId ? playCatalogPath(domainId) : '/play')}
-            >
-              All
-            </button>
-            {topics.map((t) => (
-              <button
-                key={`${t.domainId}:${t.id}`}
-                type="button"
-                className={`play-topic-chip${activeTopicId === t.id && domainId === t.domainId ? ' active' : ''}`}
-                onClick={() => navigate(playCatalogPath(t.domainId, t.id))}
-              >
-                {t.label}
-              </button>
-            ))}
-          </section>
-
           <section className="play-problems-toolbar">
             <label className="play-search">
               <span className="sr-only">Search labs</span>
@@ -247,6 +219,7 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
               aria-label="Difficulty"
             >
               <option value="all">Difficulty</option>
+              <option value="l0">L0</option>
               <option value="l1">L1</option>
               <option value="l2">L2</option>
               <option value="l3">L3</option>
@@ -302,7 +275,7 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                           <span className="sr-only">{domainLabel} {panelLabel}</span>
                         </span>
                         <span className={`pill ${difficultyClass(challenge.difficulty)}`}>
-                          {challenge.difficulty || 'L2'}
+                          {challenge.difficulty || 'L1'}
                         </span>
                         <span
                           className="play-problem-submitters"

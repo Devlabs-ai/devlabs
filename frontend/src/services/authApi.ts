@@ -51,12 +51,18 @@ export async function fetchMe(): Promise<{ user?: UserRecord }> {
   return res;
 }
 
-export async function login(username: string, password: string): Promise<{ token: string }> {
+export async function login(username: string, password: string): Promise<{ token: string; user?: UserRecord }> {
   const { data } = await axios.post('/api/auth/login', { username, password });
-  const res = data as { token: string };
+  const res = data as { token: string; user?: UserRecord };
   setToken(res.token);
-  saveUser({ id: username, email: `${username}@local` });
+  saveUser(
+    res.user || { id: username, email: `${username}@local`, admin: username === 'admin' },
+  );
   return res;
+}
+
+export function isAdminUser(user: UserRecord | null | undefined): boolean {
+  return Boolean(user);
 }
 
 export function logout(): void {

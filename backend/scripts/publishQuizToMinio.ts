@@ -92,10 +92,14 @@ async function main() {
   const prefix = `quizzes/${quizId}`;
   const store = getObjectStore();
 
-  // Upload playground files (relative to quiz dir). Skip local runs/ scratch if any.
+  // Upload playground files (relative to quiz dir). Skip local scratch / captures.
   const files = walkFiles(quizDir).filter((full) => {
     const rel = path.relative(quizDir, full).split(path.sep).join('/');
-    return !rel.startsWith('runs/');
+    if (rel.startsWith('runs/')) return false;
+    if (rel.startsWith('_docker_test/')) return false;
+    if (rel.startsWith('_local_input/')) return false;
+    if (rel === '.gitignore' || rel.endsWith('/.gitignore')) return false;
+    return true;
   });
   let uploaded = 0;
   for (const full of files) {

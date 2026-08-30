@@ -1,9 +1,30 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import ReadOnlyCodePane from './ReadOnlyCodePane';
 
 function inlineMarkdown(text: string): React.ReactNode[] {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  const parts = text.split(/(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|`[^`]+`)/g);
   return parts.map((part, i) => {
+    const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (link) {
+      const [, label, href] = link;
+      const internal = href.startsWith('/');
+      const safe =
+        internal || href.startsWith('https://') || href.startsWith('http://');
+      if (!safe) return label;
+      if (internal) {
+        return (
+          <Link key={i} to={href}>
+            {label}
+          </Link>
+        );
+      }
+      return (
+        <a key={i} href={href} target="_blank" rel="noopener noreferrer">
+          {label}
+        </a>
+      );
+    }
     if (part.startsWith('**') && part.endsWith('**')) {
       return <strong key={i}>{part.slice(2, -2)}</strong>;
     }
@@ -206,6 +227,14 @@ function renderMarkdown(text: string): React.ReactNode[] | null {
         i += 1;
       }
       const content = formatFenceContent(body.join('\n'), lang);
+      if (lang === 'plaintext') {
+        elements.push(
+          <pre key={key++} className="markdown-pre">
+            <code>{content}</code>
+          </pre>,
+        );
+        continue;
+      }
       const path = pathForFenceLang(lang);
       elements.push(
         <div key={key++} className="markdown-code-block">
@@ -272,7 +301,7 @@ interface MarkdownProseProps {
   className?: string;
 }
 
-/** Renders challenge-style markdown (headings, lists, tables, fences, bold, inline code). */
+/** Renders challenge-style markdown (headings, lists, tables, fences, links, bold, inline code). */
 export default function MarkdownProse({ text, className = 'markdown-prose' }: MarkdownProseProps): JSX.Element | null {
   if (!text?.trim()) return null;
   return <div className={className}>{renderMarkdown(text)}</div>;

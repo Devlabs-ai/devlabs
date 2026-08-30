@@ -102,6 +102,8 @@ const STATEMENTS: string[] = [
   `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS grade_status TEXT`,
   `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS grade_result JSONB`,
   `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS graded_at BIGINT`,
+  // Spark History–derived timings (jobs wall, excludes image pull / pod setup).
+  `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS run_metrics JSONB`,
   `CREATE INDEX IF NOT EXISTS idx_submissions_user_solved
      ON submissions (user_id, challenge_id)
      WHERE mode = 'submit' AND grade_status = 'passed'`,

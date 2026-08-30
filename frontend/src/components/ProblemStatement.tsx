@@ -5,11 +5,15 @@ import type { ChallengePublic, ChallengeFull } from '../types/domain';
 
 export type ProblemStatementTab =
   | 'description'
-  | 'hints'
+  | 'data'
   | 'spec'
+  | 'knobs'
   | 'solution'
-  | 'theory'
-  | 'submissions';
+  | 'moat'
+  | 'submissions'
+  | 'notes'
+  | 'resources'
+  | 'runs';
 
 interface ProblemStatementProps {
   challenge: ChallengePublic | ChallengeFull | null | undefined;
@@ -34,14 +38,27 @@ interface ProblemStatementData {
   yourTaskSteps?: string[];
   symptoms?: string[];
   hints?: string[];
-  /** Optional official write-up / approach (markdown or plain text). */
-  solution?: string;
+  /** Setter-only design notes (markdown). Omitted for learners. */
+  moat?: string;
   solutionWriteup?: string;
-  /** Concept / API theory for this lab (markdown). */
-  theory?: string;
   dbAccess?: string[];
   inputSchema?: Array<{ column: string; type: string }>;
   expectedOutput?: Array<{ column: string; description: string }>;
+  /** Data tab — schemas + a glance at distribution. */
+  data?: {
+    overview?: string;
+    datasets?: Array<{
+      name: string;
+      env?: string;
+      kind?: string;
+      blurb?: string;
+      distribution?: string;
+      rowCount?: number;
+      sizeBytes?: number;
+      format?: string;
+      schema?: Array<{ column: string; type: string }>;
+    }>;
+  };
   [key: string]: unknown;
 }
 
@@ -67,6 +84,17 @@ function sortSolutionPaths(paths: string[], entrypoint?: string | null): string[
   });
 }
 
+function formatDatasetRows(n: number): string {
+  return n.toLocaleString('en-US');
+}
+
+function formatDatasetBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 export default function ProblemStatement({
   challenge,
   tab,
@@ -90,15 +118,38 @@ export default function ProblemStatement({
     '',
   );
   const hasDescription = !!descriptionText;
-  const hints = Array.isArray(ps.hints) ? ps.hints : [];
   const inputSchema = Array.isArray(ps.inputSchema) ? ps.inputSchema : [];
   const expectedOutput = Array.isArray(ps.expectedOutput) ? ps.expectedOutput : [];
+  const dataOverview = typeof ps.data?.overview === 'string' ? ps.data.overview.trim() : '';
+  const datasets = Array.isArray(ps.data?.datasets) ? ps.data.datasets : [];
   const solutionText = (
     (typeof ps.solution === 'string' && ps.solution.trim())
     || (typeof ps.solutionWriteup === 'string' && ps.solutionWriteup.trim())
     || ''
   );
-  const theoryText = typeof ps.theory === 'string' ? ps.theory.trim() : '';
+
+  if (tab === 'moat') {
+    const moatText = typeof ps.moat === 'string' ? ps.moat.trim() : '';
+    return (
+      <div className="statement statement--tab">
+        <h2>Moat</h2>
+        <p className="dim" style={{ fontSize: 12, margin: '4px 0 12px' }}>
+          Problem-setter notes. Learners do not see this tab.
+        </p>
+        <hr className="statement-rule" aria-hidden="true" />
+        {moatText ? (
+          <MarkdownProse text={moatText} className="markdown-prose statement-description" />
+        ) : (
+          <div className="statement-empty">
+            <p>No moat notes yet.</p>
+            <p className="dim">
+              Capture what was in mind before this lab existed, and how you went about creating it.
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (tab === 'solution') {
     const filePaths = solutionFiles
@@ -151,22 +202,6 @@ export default function ProblemStatement({
     );
   }
 
-  if (tab === 'theory') {
-    return (
-      <div className="statement statement--tab">
-        <h2>Theory</h2>
-        <hr className="statement-rule" aria-hidden="true" />
-        {theoryText ? (
-          <MarkdownProse text={theoryText} className="markdown-prose statement-theory" />
-        ) : (
-          <p className="dim" style={{ fontSize: 13 }}>
-            Theory for this lab is not published yet.
-          </p>
-        )}
-      </div>
-    );
-  }
-
   if (tab === 'submissions') {
     return (
       <div className="statement statement--tab">
@@ -179,19 +214,83 @@ export default function ProblemStatement({
     );
   }
 
-  if (tab === 'hints') {
+  if (tab === 'data') {
+    const fallbackDatasets = datasets.length > 0
+      ? datasets
+      : inputSchema.length > 0
+        ? [{ name: 'Input', schema: inputSchema }]
+        : [];
     return (
       <div className="statement statement--tab">
-        <h2>Hints</h2>
+        <h2>Data</h2>
         <hr className="statement-rule" aria-hidden="true" />
-        {hints.length > 0 ? (
-          <ul className="statement-hint-list">
-            {hints.map((h) => (
-              <li key={h}>{h}</li>
-            ))}
-          </ul>
+        {dataOverview && (
+          <p className="statement-overview" style={{ marginBottom: 16 }}>{dataOverview}</p>
+        )}
+        {fallbackDatasets.length === 0 ? (
+          <p className="dim" style={{ fontSize: 13 }}>
+            No dataset notes for this lab — see the description for paths and grain.
+          </p>
         ) : (
-          <p className="dim" style={{ fontSize: 13 }}>No hints for this challenge.</p>
+          fallbackDatasets.map((ds) => {
+            const schema = Array.isArray(ds.schema) ? ds.schema : [];
+            const dist = typeof ds.distribution === 'string' ? ds.distribution.trim() : '';
+            const blurb = typeof ds.blurb === 'string' ? ds.blurb.trim() : '';
+            const rowCount = typeof ds.rowCount === 'number' && Number.isFinite(ds.rowCount)
+              ? ds.rowCount
+              : null;
+            const sizeBytes = typeof ds.sizeBytes === 'number' && Number.isFinite(ds.sizeBytes)
+              ? ds.sizeBytes
+              : null;
+            const format = typeof ds.format === 'string' ? ds.format.trim() : '';
+            const hasStats = rowCount != null || sizeBytes != null || Boolean(format);
+            return (
+              <section key={ds.name} className="statement-section">
+                <h4>
+                  {ds.name}
+                  {ds.env && (
+                    <>
+                      {' '}
+                      <code>{ds.env}</code>
+                    </>
+                  )}
+                </h4>
+                {hasStats && (
+                  <p className="statement-dataset-stats">
+                    {[
+                      rowCount != null ? `${formatDatasetRows(rowCount)} rows` : null,
+                      sizeBytes != null ? formatDatasetBytes(sizeBytes) : null,
+                      format || null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </p>
+                )}
+                {blurb && <p className="statement-caption">{blurb}</p>}
+                {dist && <p className="statement-distribution">{dist}</p>}
+                {schema.length > 0 && (
+                  <div className="statement-table-wrap">
+                    <table className="statement-table">
+                      <thead>
+                        <tr>
+                          <th>Column</th>
+                          <th>Type</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {schema.map((col) => (
+                          <tr key={col.column}>
+                            <td className="statement-table-col">{col.column}</td>
+                            <td className="statement-table-type">{col.type}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            );
+          })
         )}
       </div>
     );
@@ -202,30 +301,6 @@ export default function ProblemStatement({
       <div className="statement statement--tab">
         <h2>Spec</h2>
         <hr className="statement-rule" aria-hidden="true" />
-
-        {inputSchema.length > 0 && (
-          <section className="statement-section">
-            <h4>Input schema</h4>
-            <div className="statement-table-wrap">
-              <table className="statement-table">
-                <thead>
-                  <tr>
-                    <th>Column</th>
-                    <th>Type</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {inputSchema.map((col) => (
-                    <tr key={col.column}>
-                      <td className="statement-table-col">{col.column}</td>
-                      <td className="statement-table-type">{col.type}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
 
         {expectedOutput.length > 0 && (
           <section className="statement-section">
@@ -253,7 +328,7 @@ export default function ProblemStatement({
 
         {specExtra}
 
-        {inputSchema.length === 0 && expectedOutput.length === 0 && !specExtra && (
+        {expectedOutput.length === 0 && !specExtra && (
           <p className="dim" style={{ fontSize: 13 }}>
             No schema details — see README.md in the project workspace.
           </p>
@@ -263,7 +338,6 @@ export default function ProblemStatement({
   }
 
   // Description tab (or legacy full view when tab omitted)
-  const showHintsInline = !tab && hints.length > 0;
   const showSchemaInline = !tab;
 
   return (
@@ -307,30 +381,6 @@ export default function ProblemStatement({
             </section>
           )}
 
-          {showSchemaInline && inputSchema.length > 0 && (
-            <section className="statement-section">
-              <h4>Input schema</h4>
-              <div className="statement-table-wrap">
-                <table className="statement-table">
-                  <thead>
-                    <tr>
-                      <th>Column</th>
-                      <th>Type</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {inputSchema.map((col) => (
-                      <tr key={col.column}>
-                        <td className="statement-table-col">{col.column}</td>
-                        <td className="statement-table-type">{col.type}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-
           {showSchemaInline && expectedOutput.length > 0 && (
             <section className="statement-section">
               <h4>Expected output</h4>
@@ -355,17 +405,6 @@ export default function ProblemStatement({
                   </tbody>
                 </table>
               </div>
-            </section>
-          )}
-
-          {showHintsInline && (
-            <section className="statement-section statement-hints">
-              <h4>Hints</h4>
-              <ul className="statement-hint-list">
-                {hints.map((h) => (
-                  <li key={h}>{h}</li>
-                ))}
-              </ul>
             </section>
           )}
         </>

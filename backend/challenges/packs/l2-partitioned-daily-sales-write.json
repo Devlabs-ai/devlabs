@@ -4,10 +4,10 @@
   "title": "Partitioned Daily Sales Write",
   "contentSource": "minio",
   "description": "Finance closes the lake one business date at a time. The overnight sales drop usually mixes several calendar days into a single file, and re-runs for the same close date have been double-counting when they append instead of replacing that day\u2019s slice.\n\nPublish a clean daily sales fact for BUSINESS_DATE only \u2014 nothing from other days \u2014 laid out so consumers can read that date\u2019s partition without scanning the whole lake, and so a re-run for the same date replaces prior output for that day.\n\nPublish Parquet with overwrite. Output columns: txn_id, store_id, product_id, quantity, unit_price, business_date. Run uses smoke testcases; Submit row-diffs against each case\u2019s expected/.",
-  "difficulty": "L2",
+  "difficulty": "L1",
   "tags": [
     "spark",
-    "l2",
+    "l1",
     "partitioning",
     "idempotency",
     "dataframe",

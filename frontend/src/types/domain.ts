@@ -4,6 +4,8 @@ export interface UserRecord {
   id: string;
   email: string;
   name?: string | null;
+  /** Authoring / content-edit access (admin login or ADMIN_EMAILS). */
+  admin?: boolean;
 }
 
 export interface ValidationSpec {
@@ -25,12 +27,22 @@ export interface SparkPlatformLimits {
   executors: number;
   executorCores: number;
   executorMemory: string;
+  /** Adaptive Query Execution (spark.sql.adaptive.enabled). */
+  aqe?: boolean;
+  /** spark.sql.shuffle.partitions */
+  shufflePartitions?: number;
+  /** spark.sql.adaptive.skewJoin.enabled */
+  skewJoin?: boolean;
+  /** spark.sql.autoBroadcastJoinThreshold (Spark byte string, e.g. "-1", "10m"). */
+  autoBroadcastJoinThreshold?: string;
+  /** Wall-clock seconds from submit; Spark Platform watcher kills the job. */
+  hardTimeoutSeconds?: number;
 }
 
 /** Metadata for batch Spark challenges (Daily Product Sales, etc.). */
 export interface SparkPlatformSpec {
-  /** Submit input (full / aggregate). */
-  inputPath: string;
+  /** Submit input (full / aggregate). Optional when txnInputPath + rateInputPath are set. */
+  inputPath?: string;
   outputPath?: string;
   /** Author golden — challenges/<challengeId>/eval/solution.json for Submit grading. */
   evalSolutionPath: string;
@@ -44,18 +56,60 @@ export interface SparkPlatformSpec {
   submitCases?: string[];
   /** Row-diff key columns for Parquet grading (default transaction_id). */
   gradeKeys?: string[];
-  /** Candidate OUTPUT_PATH shape: json file (default) or parquet directory. */
-  outputFormat?: 'json' | 'parquet';
+  /** Candidate OUTPUT_PATH shape: json file (default), parquet directory, or csv directory. */
+  outputFormat?: 'json' | 'parquet' | 'csv';
   businessDate?: string;
   /** Optional dimension path injected as PRODUCTS_PATH (e.g. join labs). */
   productsPath?: string;
+  /** Fact path injected as TXN_INPUT_PATH (payment / dual-fact labs). Submit uses this. */
+  txnInputPath?: string;
+  /** Rate-card path injected as RATE_INPUT_PATH. Submit uses this. */
+  rateInputPath?: string;
+  /** Run smoke fact path. Falls back to txnInputPath. */
+  runTxnInputPath?: string;
+  /** Run smoke rate-card path. Falls back to rateInputPath. */
+  runRateInputPath?: string;
+  /** Events path injected as INPUT_A_PATH. Submit uses this. */
+  eventsInputPath?: string;
+  /** Catalog path injected as INPUT_B_PATH. Submit uses this. */
+  catalogInputPath?: string;
+  /** Run smoke events path. Falls back to eventsInputPath. */
+  runEventsInputPath?: string;
+  /** Run smoke catalog path. Falls back to catalogInputPath. */
+  runCatalogInputPath?: string;
+  /** Per-challenge grader script (s3a). Receives --candidate and --reference dirs. */
+  gradeScript?: string;
   /** When true, stage testcases/<id>/input/ + input_b/ as INPUT_A_PATH / INPUT_B_PATH. */
   dualInput?: boolean;
   language: 'python';
   starterFileName: string;
   limits: SparkPlatformLimits;
+  /**
+   * Problem-setter Spark knobs shown in the Knobs tab.
+   * Learners may change these within the listed options; cluster size stays fixed.
+   */
+  knobs?: Array<{
+    id: string;
+    conf: string;
+    label: string;
+    help?: string;
+    default: string;
+    options: Array<{ value: string; label: string }>;
+  }>;
+  /** Fixed spark_conf applied to every Run/Submit (not learner-tunable). */
+  sparkConf?: Record<string, string>;
   /** Checklist items shown in the brief (human-readable). */
   gradeChecks: string[];
+  /** Per-challenge scoring. Functional match is required; then optional execution-time points. */
+  scoring?: {
+    executionTime?: {
+      /** Spark jobs wall that earns maxPoints (History Server). */
+      targetSeconds: number;
+      maxPoints: number;
+      /** Extra points per second faster than the target. */
+      bonusPerSecond?: number;
+    };
+  };
   /** When "minio", Play loads description/hints/spec/starter from MinIO. */
   contentSource?: 'minio' | string;
 }
@@ -113,6 +167,13 @@ export type SparkJobStatus =
   | 'succeeded'
   | 'failed';
 
+export interface SparkRunMetrics {
+  sparkJobsDurationMs: number | null;
+  sparkAppDurationMs: number | null;
+  sparkJobCount: number;
+  fetchedAt: number;
+}
+
 export interface SparkJobRecord {
   id: string;
   name: string;
@@ -120,6 +181,17 @@ export interface SparkJobRecord {
   mode?: 'run' | 'submit';
   submittedAt: number;
   finishedAt?: number | null;
+  /** Platform wall: submit → finished (includes image pull / pod setup). */
+  wallDurationMs?: number | null;
+  /**
+   * Spark jobs wall from History Server (first job submit → last job complete).
+   * Excludes K8s/image-pull overhead; preferred execution time for playground trails.
+   */
+  executionDurationMs?: number | null;
+  /** Full Spark application attempt duration (includes SparkContext / executor register). */
+  sparkAppDurationMs?: number | null;
+  sparkJobCount?: number | null;
+  runMetrics?: SparkRunMetrics | null;
   logs: string[];
   error?: string | null;
   gradeStatus?: 'pending' | 'grading' | 'passed' | 'failed' | null;
@@ -128,6 +200,15 @@ export interface SparkJobRecord {
     kind?: string;
     summary?: string;
     checks?: Array<{ id: string; label: string; passed: boolean; detail?: string }>;
+    score?: {
+      functionalPassed: boolean;
+      executionMs: number | null;
+      targetMs?: number;
+      maxPoints?: number;
+      points?: number;
+      bonusPerSecond?: number;
+      pace?: { label: string; tone: 'quick' | 'brisk' | 'steady' | 'slow' } | null;
+    };
   } | null;
   gradedAt?: number | null;
   /** Spark application id (e.g. spark-xxxx) once the cluster assigns it. */
@@ -135,6 +216,7 @@ export interface SparkJobRecord {
   /** Deep link to this app on the History Server (or server root if id pending). */
   historyUrl?: string | null;
   historyServerUrl?: string | null;
+  outputPath?: string | null;
 }
 
 export interface ActiveSession {
@@ -170,6 +252,8 @@ export interface AppState {
   setActiveTab: (tab: WorkspaceTab) => void;
   ending: boolean;
   onSelectChallenge: (challenge: ChallengePublic | ChallengeFull) => Promise<void>;
+  /** Open freeform Spark Playground (Run-only; no default INPUT_PATH). */
+  onOpenSparkPlayground?: () => Promise<void>;
   onBackToLibrary: () => void;
   onEnd: () => Promise<void>;
   onLogout: () => void;

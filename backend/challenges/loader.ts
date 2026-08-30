@@ -104,6 +104,16 @@ function getPublicChallenge(id: string): Record<string, unknown> | null {
   };
 }
 
+function putChallenge(full: ChallengeFull): void {
+  cache.set(full.id, full);
+}
+
+function cacheFromRow(row: ChallengeRow): ChallengeFull {
+  const full = fullFields(row);
+  cache.set(full.id, full);
+  return full;
+}
+
 module.exports = {
   seedChallengesFromDisk,
   loadChallengesFromDB,
@@ -111,4 +121,6 @@ module.exports = {
   listChallenges,
   listPublicChallenges,
   getPublicChallenge,
+  putChallenge,
+  cacheFromRow,
 };

@@ -22,6 +22,7 @@ const challengeRoutes = require('./routes/challenges');
 const sessionRoutes = require('./routes/session');
 const papersRoutes = require('./routes/papers');
 const quizzesRoutes = require('./routes/quizzes');
+const adminRoutes = require('./routes/admin');
 const devDbRoutes = require('./routes/devDb');
 
 const terminalService = require('./observability/terminalService');
@@ -45,6 +46,7 @@ app.use('/api/challenges', challengeRoutes);
 app.use('/api/session', sessionRoutes);
 app.use('/api/papers', papersRoutes);
 app.use('/api/quizzes', quizzesRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/dev/db', devDbRoutes);
 
 app.use((err: Error & { status?: number }, _req: ExpressRequest, res: ExpressResponse, _next: ExpressNextFunction) => {
@@ -104,6 +106,13 @@ async function start(): Promise<void> {
 
   console.log('[boot] loading challenges from db...');
   await loadChallengesFromDB();
+
+  try {
+    const { syncSparkJobWatcherToPlatform } = require('./admin/settings');
+    await syncSparkJobWatcherToPlatform();
+  } catch (e: unknown) {
+    console.warn('[boot] spark watcher sync skipped:', (e as Error).message);
+  }
 
   server.listen(PORT, () => {
     console.log(`[boot] backend listening on http://localhost:${PORT}`);

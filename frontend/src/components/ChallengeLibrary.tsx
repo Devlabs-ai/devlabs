@@ -11,11 +11,12 @@ interface ChallengeLibraryProps {
 
 function difficultyClass(d: string | undefined): string {
   const s = (d || '').trim().toLowerCase();
-  if (s === 'l1' || s.includes('easy')) return 'l1';
-  if (s === 'l2' || s.includes('medium')) return 'l2';
-  if (s === 'l3') return 'l3';
-  if (s === 'l4' || s.includes('hard')) return 'l4';
-  return 'l2';
+  if (s === 'l0' || s.includes('easy')) return 'l0';
+  if (s === 'l1' || s.includes('medium')) return 'l1';
+  if (s === 'l2') return 'l2';
+  if (s === 'l3' || s.includes('hard')) return 'l3';
+  if (s === 'l4') return 'l4';
+  return 'l1';
 }
 
 export default function ChallengeLibrary({

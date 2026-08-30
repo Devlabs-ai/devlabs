@@ -36,6 +36,9 @@ function defineTheme(monaco: typeof Monaco): void {
 
 function detectLanguage(filePath: string): string {
   const base = filePath.split('/').pop() ?? '';
+  const lower = base.toLowerCase();
+  if (lower === 'makefile' || lower === 'dockerfile') return 'shell';
+  if (lower === 'go.mod' || lower === 'go.sum') return 'plaintext';
   const ext = (base.split('.').pop() ?? '').toLowerCase();
   if (ext === 'py') return 'python';
   if (ext === 'md') return 'markdown';
@@ -43,6 +46,11 @@ function detectLanguage(filePath: string): string {
   if (ext === 'yml' || ext === 'yaml') return 'yaml';
   if (ext === 'sh') return 'shell';
   if (ext === 'sql') return 'sql';
+  if (ext === 'go') return 'go';
+  if (ext === 'rs') return 'rust';
+  if (ext === 'java') return 'java';
+  if (ext === 'c' || ext === 'h') return 'c';
+  if (ext === 'toml') return 'ini';
   return 'plaintext';
 }
 
@@ -204,6 +212,9 @@ interface SparkProjectEditorProps {
   onFileCreated?: (path: string, content: string) => void;
   onFileDeleted?: (path: string) => void;
   onFileRenamed?: (from: string, to: string) => void;
+  /** Open a read-only tab (e.g. a previous submission snapshot). */
+  previewOpenRequest?: { key: string; fileName: string; content: string } | null;
+  onActivePathChange?: (path: string) => void;
 }
 
 export default function SparkProjectEditor({
@@ -214,6 +225,8 @@ export default function SparkProjectEditor({
   onFileCreated,
   onFileDeleted,
   onFileRenamed,
+  previewOpenRequest = null,
+  onActivePathChange,
 }: SparkProjectEditorProps): JSX.Element {
   const paths = Object.keys(files);
   const initialFile = paths.includes(entryFile) ? entryFile : paths[0] || '';
@@ -221,6 +234,7 @@ export default function SparkProjectEditor({
   const [openTabs, setOpenTabs] = useState<string[]>(() => (initialFile ? [initialFile] : []));
   const [activePath, setActivePath] = useState<string>(initialFile);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const [ghostFiles, setGhostFiles] = useState<Record<string, string>>({});
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [newPathOpen, setNewPathOpen] = useState(false);
@@ -233,16 +247,25 @@ export default function SparkProjectEditor({
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const tree = useMemo(() => buildTree(files), [files]);
+  const allFiles = useMemo(() => ({ ...files, ...ghostFiles }), [files, ghostFiles]);
   const viewingPath = previewPath || activePath;
   const language = detectLanguage(viewingPath);
-  const content = files[viewingPath] ?? '';
-  const isPreview = Boolean(previewPath);
+  const content = allFiles[viewingPath] ?? '';
+  const isPreview = Boolean(previewPath) || ghostFiles[viewingPath] != null;
+
+  function isGhostPath(path: string): boolean {
+    return ghostFiles[path] != null;
+  }
 
   function ensureTab(path: string): void {
     setOpenTabs((prev) => (prev.includes(path) ? prev : [...prev, path]));
   }
 
   function openFile(path: string): void {
+    if (isGhostPath(path)) {
+      openPreview(path);
+      return;
+    }
     setPreviewPath(null);
     ensureTab(path);
     setActivePath(path);
@@ -256,6 +279,12 @@ export default function SparkProjectEditor({
 
   function closeTab(path: string, e?: React.MouseEvent): void {
     e?.stopPropagation();
+    setGhostFiles((prev) => {
+      if (prev[path] == null) return prev;
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
     setOpenTabs((prev) => {
       const next = prev.filter((p) => p !== path);
       if (activePath === path) {
@@ -294,6 +323,19 @@ export default function SparkProjectEditor({
     const t = window.setTimeout(() => setToast(null), 1800);
     return () => window.clearTimeout(t);
   }, [toast]);
+
+  useEffect(() => {
+    if (!previewOpenRequest?.key || !previewOpenRequest.fileName) return;
+    const path = `.submissions/${previewOpenRequest.fileName}`;
+    setGhostFiles((prev) => ({ ...prev, [path]: previewOpenRequest.content }));
+    setOpenTabs((prev) => (prev.includes(path) ? prev : [...prev, path]));
+    setActivePath(path);
+    setPreviewPath(path);
+  }, [previewOpenRequest]);
+
+  useEffect(() => {
+    if (activePath) onActivePathChange?.(activePath);
+  }, [activePath, onActivePathChange]);
 
   function handleMount(editor: MonacoEditorNS.IStandaloneCodeEditor, monaco: typeof Monaco): void {
     editorRef.current = editor;
@@ -340,6 +382,11 @@ export default function SparkProjectEditor({
   }
 
   function deletePath(path: string): void {
+    if (isGhostPath(path)) {
+      closeTab(path);
+      setMenu(null);
+      return;
+    }
     const next = { ...files };
     if (files[path] != null) {
       delete next[path];
@@ -375,6 +422,10 @@ export default function SparkProjectEditor({
   }
 
   function startRename(path: string): void {
+    if (isGhostPath(path)) {
+      setMenu(null);
+      return;
+    }
     setRenamePath(path);
     setRenameValue(path);
     setMenu(null);
@@ -496,14 +547,21 @@ export default function SparkProjectEditor({
                   aria-selected={active}
                   className={`spark-editor-tab${active ? ' active' : ''}${previewPath === path ? ' preview' : ''}`}
                   title={path}
-                  onClick={() => openFile(path)}
+                  onClick={() => {
+                    if (ghostFiles[path] != null) openPreview(path);
+                    else openFile(path);
+                  }}
                   onContextMenu={(e) => showContextMenu(e, path, 'file')}
                   onAuxClick={(e) => {
                     if (e.button === 1) closeTab(path, e);
                   }}
                 >
                   <span className="spark-editor-tab-label">{fileLabel(path)}</span>
-                  {previewPath === path && <span className="spark-editor-tab-preview">Preview</span>}
+                  {previewPath === path && (
+                    <span className="spark-editor-tab-preview">
+                      {ghostFiles[path] != null ? 'Submission' : 'Preview'}
+                    </span>
+                  )}
                   <span
                     className="spark-editor-tab-close"
                     role="presentation"

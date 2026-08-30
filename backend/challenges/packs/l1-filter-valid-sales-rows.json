@@ -3,11 +3,11 @@
   "number": 1,
   "title": "Filter Valid Sales Rows",
   "contentSource": "minio",
-  "description": "Acme Retail closes every store each night and drops a single Parquet sales file into the data lake. This morning Finance opened their dashboard and the overnight revenue numbers looked wrong \u2014 cancelled tickets, missing products, wild quantities, and odd currencies had slipped into the feed.\n\nYour job is to clean that overnight drop before the BI team aggregates it. Read the input Parquet, keep only rows that Finance can safely total, and write the cleaned dataset as Parquet with overwrite. Do not repair values; if a row fails any rule, drop it.\n\nThe file has ten columns: `transaction_id`, `store_id`, `product_id`, `customer_id`, `quantity`, `unit_price`, `discount_pct`, `currency`, `status`, and `transaction_timestamp`. Most columns are already well-formed in the seed data and should simply be preserved. Only four fields are under validation:\n\n- `product_id` must not be null\n- `quantity` must not be null, must be greater than 0, and must be less than or equal to 100\n- `currency` must be one of `USD`, `EUR`, or `GBP`\n- `status` must equal `COMPLETED`\n\nA row is valid only when every check above passes. Implement the filter with Spark DataFrame APIs (`isNotNull`, comparisons, `isin`, equality) \u2014 no Python loops over collected rows. **Run** uses two smoke testcases; **Submit** uses all full testcases and row-diffs your Parquet against each case\u2019s `expected/`.",
-  "difficulty": "L1",
+  "description": "Vesper Markets closes every store each night and drops a single Parquet sales file into the data lake. This morning Finance opened their dashboard and the overnight revenue numbers looked wrong \u2014 cancelled tickets, missing products, wild quantities, and odd currencies had slipped into the feed.\n\nYour job is to clean that overnight drop before the BI team aggregates it. Read the input Parquet from `INPUT_PATH`, keep only rows that Finance can safely total, and write the cleaned dataset as Parquet to `OUTPUT_PATH`.\n\n**Do not repair values; if a row fails any rule, drop it.**\n\nThe file has ten columns: `transaction_id`, `store_id`, `product_id`, `customer_id`, `quantity`, `unit_price`, `discount_pct`, `currency`, `status`, and `transaction_timestamp`. Most columns are already well-formed in the seed data and should simply be preserved. Only four fields are under validation:\n\n- `product_id` must not be null\n- `quantity` must not be null, must be greater than 0, and must be less than or equal to 100\n- `currency` must be one of `USD`, `EUR`, or `GBP`\n- `status` must equal `COMPLETED`\n\nA row is valid only when every check above passes. Implement the filter with Spark DataFrame APIs.\n\n**Note: Prefer DataFrame transformations \u2014 do not collect rows and filter them in Python loops.**",
+  "difficulty": "L0",
   "tags": [
     "spark",
-    "l1",
+    "l0",
     "filter",
     "dataframe",
     "parquet"
@@ -19,24 +19,7 @@
     "panelId": "spark"
   },
   "problemStatement": {
-    "overview": "Clean Acme\u2019s overnight sales Parquet so Finance only sees rows that can be totaled: filter with Spark DataFrame APIs and write cleaned Parquet to OUTPUT_PATH.",
-    "symptoms": [
-      "Overnight revenue is inflated or incomplete when cancelled tickets and bad quantities slip through.",
-      "Null product ids and unsupported currencies must never appear in the cleaned feed."
-    ],
-    "yourTaskSteps": [
-      "Read input Parquet from INPUT_PATH (platform stages selected testcase inputs).",
-      "Keep rows that pass all validity rules on product_id, quantity, currency, and status.",
-      "Write cleaned Parquet to OUTPUT_PATH with mode overwrite (all 10 columns).",
-      "Submit is graded with a row-level compare against each selected testcase expected/."
-    ],
-    "yourTask": "Implement src/main.py that filters valid sales rows and writes Parquet output.",
-    "hints": [
-      "Combine conditions with & in filter/where.",
-      "currency: col('currency').isin('USD','EUR','GBP').",
-      "quantity: > 0 and <= 100; status must equal COMPLETED.",
-      "spark.read.parquet(INPUT_PATH) reads every staged testcase file."
-    ],
+    "hints": [],
     "inputSchema": [
       {
         "column": "transaction_id",
@@ -113,10 +96,7 @@
       "executorMemory": "1g"
     },
     "gradeChecks": [
-      "Spark job succeeds on selected Submit testcases",
-      "OUTPUT_PATH Parquet readable with all 10 columns",
-      "Each Submit testcase expected/ matches candidate rows (key + values)",
-      "No extra rows beyond the union of selected expected testcases"
+      "Once the Spark job succeeds, we evaluate your output against the expected results for every Submit testcase. Pass all cases to mark this lab Solved."
     ]
   },
   "dataGen": {

@@ -4,10 +4,10 @@
   "title": "Aggregate Product Totals",
   "contentSource": "minio",
   "description": "Store managers don\u2019t want every receipt \u2014 they want one line per product for the day: units moved, money in after discounts, how many tickets touched that SKU, and how many stores sold it.\n\nRead the input Parquet, group by `product_id`, and write one summary row per product as Parquet with overwrite. Line revenue uses the same formula as Derive Revenue Column: `quantity * unit_price * (1 - discount_pct)`, rounded half-up to 2 decimals per line, then summed.\n\nOutput columns: `product_id`, `total_units` (sum of quantity), `total_revenue` (sum of line revenue as DECIMAL(12,2)), `txn_count` (row count), `store_count` (countDistinct store_id). Do not keep leftover input columns.\n\nInput columns: `txn_id`, `product_id`, `store_id`, `quantity`, `unit_price`, `discount_pct` (fraction in [0, 0.50]). Implement with Spark DataFrame `groupBy` / `agg` \u2014 no Python loops over collected rows. **Run** uses two smoke testcases; **Submit** uses the full set and row-diffs your Parquet against each case\u2019s `expected/`.\n\nWrite results with `df.write.mode(\"overwrite\").parquet(OUTPUT_PATH)`. `OUTPUT_PATH` is set by the platform for **this Run/Submit only**.",
-  "difficulty": "L1",
+  "difficulty": "L0",
   "tags": [
     "spark",
-    "l1",
+    "l0",
     "aggregation",
     "groupby",
     "dataframe",
