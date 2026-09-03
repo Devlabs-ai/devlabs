@@ -156,18 +156,3 @@ export function IconSubmissions({ color = '#34d399' }: { color?: string }): JSX.
   );
 }
 
-export function IconClock({ color = '#c8cce0' }: { color?: string }): JSX.Element {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden focusable="false">
-      <circle cx="12" cy="12" r="9" fill="none" stroke={color} strokeWidth="1.75" />
-      <path
-        fill="none"
-        stroke={color}
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M12 7v5l3 2"
-      />
-    </svg>
-  );
-}

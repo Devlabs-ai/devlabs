@@ -1,6 +1,7 @@
 /** Play catalog taxonomy (sidebar filters + ordered challenge ids). */
 
 import { SPARK_PLAYGROUND_CHALLENGE_ID } from './playgroundDatasets';
+import { whiteboardSectionForTags, whiteboardSectionPath } from './whiteboard';
 
 export type PlayDomainId =
   | 'data-engineer'
@@ -38,13 +39,19 @@ export const PLAY_DOMAINS: PlayDomain[] = [
         challengeIds: [
           'l1-filter-valid-sales-rows',
           'l1-derive-revenue-column',
+          'l1-sample-qa-slice',
+          'l1-distinct-store-list',
+          'l1-store-contribution-hours',
+          'l1-store-rollup-totals',
+          'l1-store-payment-profile',
+          'l1-store-customer-segments',
+          'l1-enrich-auth-mcc',
           'l1-normalize-product-codes',
           'l1-business-date-features',
           'l1-aggregate-product-totals',
           'l1-top-products-by-revenue',
           'l1-left-join-product-names',
           'l1-inner-join-matched-sales',
-          'l1-find-orphan-sales',
           'l1-deduplicate-transactions',
           'l1-merge-two-store-drops',
           'l1-same-job-in-spark-sql',
@@ -157,9 +164,16 @@ export function listPlayTopics(): Array<{ id: string; label: string; domainId: P
   return topics;
 }
 
-/** Back to flat Play library (filters live in the UI, not deep panel routes). */
-export function catalogPathForChallenge(challengeId?: string | null): string {
+/** Back to the right shelf after a session ends or fails to start. */
+export function catalogPathForChallenge(
+  challengeId?: string | null,
+  sandboxType?: string | null,
+  tags?: string[] | null,
+): string {
   if (challengeId === SPARK_PLAYGROUND_CHALLENGE_ID) return '/play/spark-playground';
+  if ((sandboxType || '') === 'board') {
+    return whiteboardSectionPath(whiteboardSectionForTags(tags).id);
+  }
   return '/play';
 }
 
@@ -175,3 +189,4 @@ export function getPlayPanel(
   if (!domain || !panelId) return null;
   return domain.panels.find((p) => p.id === panelId) || null;
 }
+// Force HMR reload - Tue Sep  1 19:19:50 IST 2026

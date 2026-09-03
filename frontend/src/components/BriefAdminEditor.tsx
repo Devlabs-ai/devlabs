@@ -39,6 +39,7 @@ function specPayload(challenge: ChallengePublic | ChallengeFull, platform: Spark
     catalogInputPath: platform.catalogInputPath ?? '',
     evalSolutionPath: platform.evalSolutionPath ?? '',
     gradeScript: platform.gradeScript ?? '',
+    scoring: platform.scoring ?? {},
   };
 }
 

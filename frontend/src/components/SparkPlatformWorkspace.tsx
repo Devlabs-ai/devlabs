@@ -3,8 +3,9 @@ import ProblemStatement, { type ProblemStatementTab } from './ProblemStatement';
 import SparkProjectEditor from './SparkProjectEditor';
 import {
   type SparkProjectFiles,
+  buildDailyProductSalesProject,
 } from '../fixtures/dailyProductSalesL1';
-import { buildSparkPlaygroundPlatform } from '../fixtures/sparkPlaygroundStarter';
+import { buildSparkPlaygroundPlatform, buildSparkPlaygroundStarter } from '../fixtures/sparkPlaygroundStarter';
 import { SPARK_PLAYGROUND_CHALLENGE_ID } from '../constants/playgroundDatasets';
 import {
   PLAYGROUND_DRIVER_CORES,
@@ -43,6 +44,7 @@ import {
   fetchWorkspace,
   killSparkJob,
   putWorkspaceFile,
+  resetWorkspace,
   startSparkJob,
 } from '../services/workspaceApi';
 import { fetchChallengeSolution } from '../services/challengeApi';
@@ -76,7 +78,6 @@ function defaultBriefWidth(shellWidth: number): number {
 interface SparkPlatformWorkspaceProps {
   challenge: ChallengePublic | ChallengeFull | null | undefined;
   session: ActiveSession | null;
-  onClose?: () => void;
 }
 
 function isSparkChallenge(
@@ -100,19 +101,175 @@ function isTerminalStatus(status: SparkJobStatus): boolean {
 
 function isJobSettled(job: SparkJobRecord): boolean {
   if (!isTerminalStatus(job.status)) return false;
-  if (job.mode === 'submit') {
+  if (job.mode === 'submit' || job.mode === 'run') {
     const g = job.gradeStatus;
-    if (!g || g === 'pending' || g === 'grading') return false;
+    if (g === 'pending' || g === 'grading') return false;
   }
   return true;
 }
 
 function gradeBadge(job: SparkJobRecord): string {
-  if (job.mode !== 'submit') return '';
+  if (job.mode !== 'submit' && job.mode !== 'run') return '';
+  if (!job.gradeStatus) return '';
   if (job.gradeStatus === 'passed') return 'PASSED';
   if (job.gradeStatus === 'failed') return 'FAILED';
   if (job.gradeStatus === 'grading' || job.gradeStatus === 'pending') return 'GRADING';
   return '';
+}
+
+function sparkOutcomeLabel(job: SparkJobRecord): string {
+  if ((job.mode === 'submit' || job.mode === 'run') && isTerminalStatus(job.status)) {
+    return job.status === 'succeeded' ? 'Spark succeeded' : 'Spark failed';
+  }
+  return job.status;
+}
+
+function gradeBadgeClass(job: SparkJobRecord): string {
+  if (job.gradeStatus === 'passed') return 'spark-grade-badge--ok';
+  if (job.gradeStatus === 'failed') return 'spark-grade-badge--fail';
+  return 'spark-grade-badge--run';
+}
+
+type GradeCheck = NonNullable<NonNullable<SparkJobRecord['gradeResult']>['checks']>[number];
+
+function evaluationChecks(job: SparkJobRecord): GradeCheck[] {
+  const fromResult = job.gradeResult?.checks;
+  if (fromResult && fromResult.length > 0) return fromResult;
+  const logs = job.logs || [];
+  const start = logs.findIndex((l) => l.startsWith('── Evaluation'));
+  if (start < 0) return [];
+  const parsed: GradeCheck[] = [];
+  for (const raw of logs.slice(start + 1)) {
+    const line = String(raw).trim();
+    if (!line || line.startsWith('──')) continue;
+    const mark = line.startsWith('✓') || line.startsWith('✗') || line.startsWith('–')
+      ? line[0]
+      : '';
+    if (!mark) continue;
+    const rest = line.slice(1).trim();
+    const detailMatch = rest.match(/^(.*?) \((.+)\)$/);
+    parsed.push({
+      id: `log-${parsed.length}`,
+      label: detailMatch ? detailMatch[1] : rest,
+      passed: mark === '✓' || mark === '–',
+      skipped: mark === '–',
+      ...(detailMatch ? { detail: detailMatch[2] } : {}),
+    });
+  }
+  return parsed;
+}
+
+function hasEvaluation(job: SparkJobRecord): boolean {
+  if (job.mode !== 'submit' && job.mode !== 'run') return false;
+  if (job.gradeStatus === 'passed' || job.gradeStatus === 'failed') return true;
+  return evaluationChecks(job).length > 0;
+}
+
+function shortCheckDetail(detail: string | undefined): string {
+  if (!detail) return '';
+  return detail.split(/;\s*e\.g\./i)[0].trim();
+}
+
+function evaluationSummary(job: SparkJobRecord, checks: GradeCheck[]): string {
+  const stored = displayGradeSummary(job.gradeResult?.summary);
+  const failed = job.gradeStatus === 'failed' || job.gradeResult?.passed === false;
+  if (!failed) return stored || 'Passed';
+  const failedChecks = checks.filter(
+    (c) => !c.passed && !c.skipped && c.id !== 'functional' && c.label !== 'Functional',
+  );
+  const rowCount = failedChecks.find((c) => c.id === 'row_count');
+  const extras = failedChecks.find((c) => c.id === 'no_extra_rows');
+  const rowsMatch = failedChecks.find((c) => c.id === 'rows_match');
+  if (rowCount) {
+    const d = shortCheckDetail(rowCount.detail);
+    return d ? `Failed — row count does not match (${d})` : 'Failed — row count does not match';
+  }
+  if (extras) {
+    const d = shortCheckDetail(extras.detail);
+    return d ? `Failed — extra rows beyond expected (${d})` : 'Failed — extra rows beyond expected';
+  }
+  if (rowsMatch) {
+    const d = shortCheckDetail(rowsMatch.detail);
+    return d ? `Failed — rows do not match expected (${d})` : 'Failed — rows do not match expected';
+  }
+  const first = failedChecks[0];
+  if (first) {
+    const d = shortCheckDetail(first.detail);
+    return d ? `Failed — ${first.label} (${d})` : `Failed — ${first.label}`;
+  }
+  const clipped = stored.split(/;\s*e\.g\./i)[0].trim();
+  return clipped || 'Failed';
+}
+
+function visibleEvaluationChecks(job: SparkJobRecord, checks: GradeCheck[]): GradeCheck[] {
+  const otherFailed = checks.some((c) => c.id !== 'all_cases' && !c.passed && !c.skipped);
+  return checks.filter((c) => {
+    if (c.id === 'all_cases' && c.passed && otherFailed) return false;
+    if (job.mode === 'run' && (c.section === 'performance' || c.id === 'performance')) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function pendingEvalMessage(job: SparkJobRecord): string {
+  if (job.gradeStatus === 'grading') return 'Grading…';
+  if (job.status === 'failed') return 'Grader did not run — Spark application failed.';
+  return 'Grader not yet run';
+}
+
+function runSampleNotice(): string {
+  return 'Run sample — functional check only. This is not the full Submit testcase and does not count as a final submission.';
+}
+
+function GradeEvaluationPanel({ job }: { job: SparkJobRecord }): JSX.Element {
+  const checks = visibleEvaluationChecks(job, evaluationChecks(job));
+  const graded =
+    job.gradeStatus === 'passed'
+    || job.gradeStatus === 'failed'
+    || checks.length > 0;
+  const isRun = job.mode === 'run';
+  if (!graded) {
+    return (
+      <div className="spark-eval">
+        <div className="spark-eval-heading">Evaluation</div>
+        {isRun && <div className="spark-eval-notice">{runSampleNotice()}</div>}
+        <div className="spark-eval-pending">{pendingEvalMessage(job)}</div>
+      </div>
+    );
+  }
+  const summary = evaluationSummary(job, checks);
+  const failed = job.gradeStatus === 'failed' || job.gradeResult?.passed === false;
+  return (
+    <div className="spark-eval">
+      <div className="spark-eval-heading">Evaluation</div>
+      {isRun && <div className="spark-eval-notice">{runSampleNotice()}</div>}
+      {summary && (
+        <div className={`spark-eval-summary ${failed ? 'is-fail' : 'is-ok'}`}>
+          {summary}
+        </div>
+      )}
+      {checks.length > 0 && (
+        <ul className="spark-eval-checks">
+          {checks.map((c) => {
+            const tone = c.skipped ? 'is-skip' : c.passed ? 'is-ok' : 'is-fail';
+            const mark = c.skipped ? '–' : c.passed ? '✓' : '✗';
+            return (
+              <li key={c.id} className={tone}>
+                <span className="spark-eval-mark" aria-hidden>{mark}</span>
+                <span className="spark-eval-label">
+                  {c.label}
+                  {shortCheckDetail(c.detail) ? (
+                    <span className="spark-eval-detail">{` (${shortCheckDetail(c.detail)})`}</span>
+                  ) : null}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 function paceBadge(job: SparkJobRecord): { label: string; tone: string } | null {
@@ -120,6 +277,59 @@ function paceBadge(job: SparkJobRecord): { label: string; tone: string } | null 
   const pace = job.gradeResult?.score?.pace;
   if (!pace?.label) return null;
   return { label: pace.label, tone: pace.tone || 'steady' };
+}
+
+type PaceBandSpec = {
+  label?: string;
+  tone?: string;
+  maxMs?: number | null;
+  maxSeconds?: number;
+};
+
+function bandCeilingMs(band: PaceBandSpec): number | null {
+  if (typeof band.maxMs === 'number' && Number.isFinite(band.maxMs) && band.maxMs > 0) {
+    return band.maxMs;
+  }
+  if (typeof band.maxSeconds === 'number' && Number.isFinite(band.maxSeconds) && band.maxSeconds > 0) {
+    return band.maxSeconds * 1000;
+  }
+  return null;
+}
+
+function formatPaceMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const sec = ms / 1000;
+  if (Number.isInteger(sec)) return `${sec}s`;
+  const rounded = Math.round(sec * 10) / 10;
+  return `${rounded}s`;
+}
+
+function executionPaceRows(bands: PaceBandSpec[]): Array<{ label: string; tone: string; range: string }> {
+  const parsed = bands
+    .map((band) => ({
+      label: String(band.label || '').trim(),
+      tone: String(band.tone || 'steady').trim().toLowerCase() || 'steady',
+      maxMs: bandCeilingMs(band),
+    }))
+    .filter((band) => band.label);
+  parsed.sort((a, b) => {
+    if (a.maxMs == null) return 1;
+    if (b.maxMs == null) return -1;
+    return a.maxMs - b.maxMs;
+  });
+  let prev: number | null = null;
+  return parsed.map((band) => {
+    let range: string;
+    if (band.maxMs == null) {
+      range = prev != null ? `${formatPaceMs(prev)} and over` : 'any duration';
+    } else if (prev != null) {
+      range = `${formatPaceMs(prev)} – ${formatPaceMs(band.maxMs)}`;
+    } else {
+      range = `under ${formatPaceMs(band.maxMs)}`;
+    }
+    prev = band.maxMs ?? prev;
+    return { label: band.label, tone: band.tone, range };
+  });
 }
 
 function jobExecMs(job: SparkJobRecord): number | null {
@@ -149,6 +359,12 @@ function formatJobLogs(logs: string[] | undefined): string {
   return (logs || [])
     .map((line) => String(line).replace(/\r\n/g, '\n').replace(/\r/g, '\n'))
     .join('\n');
+}
+
+function sparkDriverLogs(logs: string[] | undefined): string {
+  const lines = logs || [];
+  const evalIdx = lines.findIndex((l) => l.startsWith('── Evaluation'));
+  return formatJobLogs(evalIdx >= 0 ? lines.slice(0, evalIdx) : lines);
 }
 
 function shortAppId(id: string | null | undefined): string {
@@ -338,6 +554,7 @@ export default function SparkPlatformWorkspace({
   const [submissions, setSubmissions] = useState<SparkJobRecord[]>([]);
   const [submissionsPage, setSubmissionsPage] = useState(0);
   const [resultsOpen, setResultsOpen] = useState(false);
+  const [resultsPane, setResultsPane] = useState<'evaluation' | 'logs'>('evaluation');
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [submissionPreview, setSubmissionPreview] = useState<{
     key: string;
@@ -351,6 +568,8 @@ export default function SparkPlatformWorkspace({
   );
   const [briefCollapsed, setBriefCollapsed] = useState(false);
   const [workspaceLoadError, setWorkspaceLoadError] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const [editorEpoch, setEditorEpoch] = useState(0);
   const dragging = useRef(false);
   const resizingDrawer = useRef(false);
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -367,6 +586,7 @@ export default function SparkPlatformWorkspace({
     notifyCreated,
     notifyDeleted,
     notifyRenamed,
+    cancelPending,
   } = useWorkspaceSync({
     sessionId: session?.id,
     enabled: syncEnabled,
@@ -574,7 +794,7 @@ export default function SparkPlatformWorkspace({
       : latestJob
   );
 
-  const viewingSummary = displayGradeSummary(viewingJob?.gradeResult?.summary);
+  const viewingEvaluation = Boolean(viewingJob);
 
   const submissionsPageCount = Math.max(1, Math.ceil(submissions.length / SUBMISSIONS_PAGE_SIZE));
   const safeSubmissionsPage = Math.min(submissionsPage, submissionsPageCount - 1);
@@ -621,6 +841,7 @@ export default function SparkPlatformWorkspace({
   const launchJob = useCallback(async (mode: 'run' | 'submit') => {
     if (submitting || !platform || !session?.id) return;
     setSubmitting(true);
+    setResultsPane('logs');
     setResultsOpen(true);
     const starter = platform.starterFileName || 'src/main.py';
     let entrypoint = runEntrypoint || starter;
@@ -645,6 +866,8 @@ export default function SparkPlatformWorkspace({
       id: pendingId,
       name: mode === 'run' ? 'running…' : 'submitting…',
       status: 'submitted',
+      mode,
+      gradeStatus: isPlayground ? null : 'pending',
       submittedAt: Date.now(),
       logs: [
         'Flushing workspace to MinIO…',
@@ -694,6 +917,7 @@ export default function SparkPlatformWorkspace({
         gradeKeys: platform.gradeKeys,
         outputFormat: platform.outputFormat,
         productsPath: platform.productsPath,
+        dimPath: platform.dimPath,
         txnInputPath: mode === 'run'
           ? (platform.runTxnInputPath || platform.txnInputPath)
           : platform.txnInputPath,
@@ -783,6 +1007,42 @@ export default function SparkPlatformWorkspace({
     if (path.endsWith('.py')) setRunEntrypoint(path);
   }, []);
 
+  const handleResetToStarter = useCallback(async () => {
+    if (!session?.id || resetting) return;
+    if (!window.confirm('Reset to starter code? Your edits will be discarded.')) return;
+    cancelPending();
+    setResetting(true);
+    try {
+      const source = challenge?.contentSource || platform?.contentSource;
+      const starterOverride = isPlayground
+        ? buildSparkPlaygroundStarter()
+        : source === 'minio'
+          ? null
+          : (platform ? buildDailyProductSalesProject(platform) : null);
+      const remote = await resetWorkspace(session.id, starterOverride);
+      if (!remote.files || Object.keys(remote.files).length === 0) {
+        throw new Error('Starter files were empty');
+      }
+      setFiles(remote.files);
+      resetBaseline(remote.files);
+      setRunEntrypoint(remote.entrypoint || platform?.starterFileName || 'src/main.py');
+      setEditorEpoch((n) => n + 1);
+    } catch (e) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      window.alert(err?.response?.data?.error || err.message || 'Failed to reset to starter code');
+    } finally {
+      setResetting(false);
+    }
+  }, [
+    session?.id,
+    resetting,
+    cancelPending,
+    challenge?.contentSource,
+    platform,
+    isPlayground,
+    resetBaseline,
+  ]);
+
   const refreshPlaygroundRuns = useCallback(async () => {
     if (!session?.id || !isPlayground) return;
     try {
@@ -801,6 +1061,7 @@ export default function SparkPlatformWorkspace({
   if (!session || !challenge || !platform) return null;
 
   const gradeChecks = platform.gradeChecks || [];
+  const paceRows = executionPaceRows(platform.scoring?.executionTime?.bands || []);
   const briefTabs: Array<[ProblemStatementTab, string]> = isPlayground
     ? [
         ['notes', 'Notes'],
@@ -933,6 +1194,7 @@ export default function SparkPlatformWorkspace({
                                 onClick={() => {
                                   upsertJob(job);
                                   setSelectedJobId(job.id);
+                                  setResultsPane(hasEvaluation(job) ? 'evaluation' : 'logs');
                                   setResultsOpen(true);
                                   void openJobSnapshot(job);
                                 }}
@@ -1279,6 +1541,7 @@ export default function SparkPlatformWorkspace({
                                   onClick={() => {
                                     upsertJob(sub);
                                     setSelectedJobId(sub.id);
+                                    setResultsPane('evaluation');
                                     setResultsOpen(true);
                                     void openJobSnapshot(sub);
                                     if (session?.id) {
@@ -1294,17 +1557,11 @@ export default function SparkPlatformWorkspace({
                                   <span className="spark-submission-name">{sub.name}</span>
                                   <span className="spark-submission-flags">
                                     <span className={`spark-job-status ${statusClass(sub.status)}`}>
-                                      {sub.status}
+                                      {sparkOutcomeLabel(sub)}
                                     </span>
                                     {gradeBadge(sub) && (
                                       <span
-                                        className={`spark-grade-badge ${
-                                          sub.gradeStatus === 'passed'
-                                            ? 'spark-grade-badge--ok'
-                                            : sub.gradeStatus === 'failed'
-                                              ? 'spark-grade-badge--fail'
-                                              : 'spark-grade-badge--run'
-                                        }`}
+                                        className={`spark-grade-badge ${gradeBadgeClass(sub)}`}
                                       >
                                         {gradeBadge(sub)}
                                       </span>
@@ -1388,6 +1645,7 @@ export default function SparkPlatformWorkspace({
                             Read and write through them — you do not need raw storage paths.
                           </p>
                           {(platform.dualInput || platform.businessDate || platform.productsPath
+                            || platform.dimPath
                             || platform.txnInputPath || platform.rateInputPath
                             || platform.eventsInputPath || platform.catalogInputPath) && (
                             <ul className="spark-grade-list">
@@ -1443,6 +1701,11 @@ export default function SparkPlatformWorkspace({
                               {platform.productsPath && (
                                 <li style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                                   Products: <code>PRODUCTS_PATH</code>
+                                </li>
+                              )}
+                              {platform.dimPath && (
+                                <li style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                                  Dimension: <code>DIM_PATH</code>
                                 </li>
                               )}
                             </ul>
@@ -1506,9 +1769,9 @@ export default function SparkPlatformWorkspace({
                         )}
                         {platform.sparkConf && Object.keys(platform.sparkConf).length > 0 && (
                           <section className="statement-section">
-                            <h4>Locked Spark conf</h4>
+                            <h4>Job Config</h4>
                             <p className="dim" style={{ fontSize: 12, margin: '4px 0 8px' }}>
-                              Set by the problem setter. Not tunable from the Knobs tab.
+                              SparkSubmit config locked for this lab.
                             </p>
                             <div className="statement-table-wrap">
                               <table className="statement-table">
@@ -1540,6 +1803,38 @@ export default function SparkPlatformWorkspace({
                                 </li>
                               ))}
                             </ul>
+                          </section>
+                        )}
+                        {paceRows.length > 0 && (
+                          <section className="statement-section">
+                            <h4>Execution pace</h4>
+                            <p className="dim" style={{ fontSize: 12, margin: '4px 0 8px' }}>
+                              Functional match still decides pass or fail. After Spark History
+                              reports jobs wall, the submission is labeled. Time never turns a
+                              pass into a fail.
+                            </p>
+                            <div className="statement-table-wrap">
+                              <table className="statement-table">
+                                <thead>
+                                  <tr>
+                                    <th>Pace</th>
+                                    <th>Jobs wall</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {paceRows.map((row) => (
+                                    <tr key={row.label}>
+                                      <td className="statement-table-col">
+                                        <span className={`spark-pace-badge spark-pace-badge--${row.tone}`}>
+                                          {row.label}
+                                        </span>
+                                      </td>
+                                      <td className="statement-table-type">{row.range}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
                           </section>
                         )}
                       </div>
@@ -1698,7 +1993,7 @@ export default function SparkPlatformWorkspace({
               </div>
             ) : (
               <SparkProjectEditor
-                key={`${session?.id || challenge.id}-ready`}
+                key={`${session?.id || challenge.id}-ready-${editorEpoch}`}
                 files={files}
                 onChangeFiles={setFiles}
                 entryFile={platform.starterFileName || 'src/main.py'}
@@ -1708,6 +2003,8 @@ export default function SparkPlatformWorkspace({
                 onFileRenamed={notifyRenamed}
                 previewOpenRequest={submissionPreview}
                 onActivePathChange={handleActivePathChange}
+                onResetToStarter={() => { void handleResetToStarter(); }}
+                resetting={resetting}
               />
             )}
 
@@ -1720,9 +2017,19 @@ export default function SparkPlatformWorkspace({
               >
                 <span>Result</span>
                 {latestJob && (
-                  <span className={`spark-job-status ${statusClass((viewingJob || latestJob).status)}`}>
-                    {(viewingJob || latestJob).status}
-                  </span>
+                  <>
+                    <span className={`spark-job-status ${statusClass((viewingJob || latestJob).status)}`}>
+                      {sparkOutcomeLabel(viewingJob || latestJob)}
+                    </span>
+                    {(viewingJob || latestJob).mode === 'run' && (
+                      <span className="spark-run-sample-badge">RUN SAMPLE</span>
+                    )}
+                    {gradeBadge(viewingJob || latestJob) && (
+                      <span className={`spark-grade-badge ${gradeBadgeClass(viewingJob || latestJob)}`}>
+                        {gradeBadge(viewingJob || latestJob)}
+                      </span>
+                    )}
+                  </>
                 )}
                 <span className="spark-results-reopen-chevron" aria-hidden>
                   ⌃
@@ -1748,7 +2055,26 @@ export default function SparkPlatformWorkspace({
                 />
                 <div className="spark-job-drawer-header spark-results-tabs-header">
                   <div className="spark-results-tabs" aria-label="Results">
-                    <span className="spark-results-tab active">Result</span>
+                    {viewingEvaluation ? (
+                      <>
+                        <button
+                          type="button"
+                          className={`spark-results-tab${resultsPane === 'evaluation' ? ' active' : ''}`}
+                          onClick={() => setResultsPane('evaluation')}
+                        >
+                          Evaluation
+                        </button>
+                        <button
+                          type="button"
+                          className={`spark-results-tab${resultsPane === 'logs' ? ' active' : ''}`}
+                          onClick={() => setResultsPane('logs')}
+                        >
+                          Logs
+                        </button>
+                      </>
+                    ) : (
+                      <span className="spark-results-tab active">Result</span>
+                    )}
                     {viewingJob?.name && (
                       <span className="spark-results-job-name" title={viewingJob.name}>
                         {viewingJob.name}
@@ -1759,17 +2085,16 @@ export default function SparkPlatformWorkspace({
                     {viewingJob && (
                       <div className="spark-results-meta">
                         <span className={`spark-job-status ${statusClass(viewingJob.status)}`}>
-                          {viewingJob.status}
+                          {sparkOutcomeLabel(viewingJob)}
                         </span>
+                        {viewingJob.mode === 'run' && (
+                          <span className="spark-run-sample-badge" title="Functional check on the Run sample only">
+                            RUN SAMPLE
+                          </span>
+                        )}
                         {gradeBadge(viewingJob) && (
                           <span
-                            className={`spark-grade-badge ${
-                              viewingJob.gradeStatus === 'passed'
-                                ? 'spark-grade-badge--ok'
-                                : viewingJob.gradeStatus === 'failed'
-                                  ? 'spark-grade-badge--fail'
-                                  : 'spark-grade-badge--run'
-                            }`}
+                            className={`spark-grade-badge ${gradeBadgeClass(viewingJob)}`}
                           >
                             {gradeBadge(viewingJob)}
                           </span>
@@ -1803,16 +2128,17 @@ export default function SparkPlatformWorkspace({
                   <div className="muted spark-results-empty">
                     Run or Submit to see job output and grading here.
                   </div>
+                ) : resultsPane === 'evaluation' ? (
+                  <div className="spark-job-drawer-body">
+                    <GradeEvaluationPanel job={viewingJob} />
+                  </div>
                 ) : (
                   <div className="spark-job-drawer-body">
                     {viewingJob.error && (
                       <div className="alert spark-job-error">{viewingJob.error}</div>
                     )}
-                    {viewingSummary && (
-                      <div className="spark-grade-summary">{viewingSummary}</div>
-                    )}
                     <SparkDebugMeta job={viewingJob} />
-                    <pre className="spark-job-logs">{formatJobLogs(viewingJob.logs)}</pre>
+                    <pre className="spark-job-logs">{sparkDriverLogs(viewingJob.logs)}</pre>
                   </div>
                 )}
               </div>

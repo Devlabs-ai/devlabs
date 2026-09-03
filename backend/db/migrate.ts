@@ -61,6 +61,7 @@ const STATEMENTS: string[] = [
   `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS workspace_prefix TEXT`,
   `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS entrypoint TEXT`,
   `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS workspace_updated_at BIGINT`,
+  `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS board_state JSONB`,
   `CREATE TABLE IF NOT EXISTS session_workspace_files (
      session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
      path         TEXT NOT NULL,

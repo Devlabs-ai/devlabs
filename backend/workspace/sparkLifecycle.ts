@@ -205,6 +205,30 @@ function wrapSeedError(err: unknown): Error {
   return wrapped;
 }
 
+async function resetWorkspace(
+  session: GameSession & Record<string, unknown>,
+  starterFiles?: Record<string, string> | null,
+): Promise<{ files: Record<string, string>; entrypoint: string }> {
+  const challengeId = String(session.challengeId || '');
+  const workspacePrefix = String(session.workspacePrefix || '');
+  if (!challengeId || !workspacePrefix) {
+    const e = new Error('session has no workspace');
+    (e as Error & { status?: number }).status = 409;
+    throw e;
+  }
+  const resolvedStarter = await resolveStarterFiles(challengeId, starterFiles);
+  try {
+    await workspaceStore.replaceAllFiles(session.id, workspacePrefix, resolvedStarter);
+  } catch (err: unknown) {
+    throw wrapSeedError(err);
+  }
+  const entrypoint = await resolveEntrypoint(challengeId, session.entrypoint as string | undefined);
+  session.entrypoint = entrypoint;
+  session.workspaceUpdatedAt = Date.now();
+  await sessionStore.persistRow(session);
+  return { files: resolvedStarter, entrypoint };
+}
+
 async function endSparkSession(sessionId: string): Promise<GameSession> {
   const session = sessionStore.get(sessionId) as (GameSession & Record<string, unknown>) | null;
   if (!session) {
@@ -221,5 +245,6 @@ async function endSparkSession(sessionId: string): Promise<GameSession> {
 
 module.exports = {
   startSparkSession,
+  resetWorkspace,
   endSparkSession,
 };

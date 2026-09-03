@@ -17,7 +17,7 @@ export interface ValidationSpec {
 }
 
 /** Play runtime. compose = per-session Docker sandbox; spark-platform = shared batch cluster. */
-export type SandboxType = 'compose' | 'spark-platform';
+export type SandboxType = 'compose' | 'spark-platform' | 'board';
 
 export interface SparkPlatformLimits {
   /** Driver cores requested for each Run/Submit job. */
@@ -61,6 +61,8 @@ export interface SparkPlatformSpec {
   businessDate?: string;
   /** Optional dimension path injected as PRODUCTS_PATH (e.g. join labs). */
   productsPath?: string;
+  /** Dimension path injected as DIM_PATH (Helix / Card Rails join labs). */
+  dimPath?: string;
   /** Fact path injected as TXN_INPUT_PATH (payment / dual-fact labs). Submit uses this. */
   txnInputPath?: string;
   /** Rate-card path injected as RATE_INPUT_PATH. Submit uses this. */
@@ -100,14 +102,25 @@ export interface SparkPlatformSpec {
   sparkConf?: Record<string, string>;
   /** Checklist items shown in the brief (human-readable). */
   gradeChecks: string[];
-  /** Per-challenge scoring. Functional match is required; then optional execution-time points. */
+  /** Per-challenge scoring. Functional match is required; then optional execution-time pace. */
   scoring?: {
     executionTime?: {
-      /** Spark jobs wall that earns maxPoints (History Server). */
-      targetSeconds: number;
-      maxPoints: number;
+      /** Spark jobs wall used as the target (History Server). */
+      targetSeconds?: number;
+      targetMs?: number;
+      maxPoints?: number;
       /** Extra points per second faster than the target. */
       bonusPerSecond?: number;
+      /**
+       * Ordered pace labels for this lab. First matching ceiling wins
+       * (`executionMs < maxMs` / `maxSeconds`). Omit max* on the last band (catch-all).
+       */
+      bands?: Array<{
+        label: string;
+        tone?: 'quick' | 'brisk' | 'steady' | 'slow' | string;
+        maxMs?: number | null;
+        maxSeconds?: number;
+      }>;
     };
   };
   /** When "minio", Play loads description/hints/spec/starter from MinIO. */
@@ -133,6 +146,76 @@ export interface ChallengePublic {
   contentSource?: 'minio' | string;
   problemStatement?: Record<string, unknown> | string | null;
   sparkPlatform?: SparkPlatformSpec | null;
+  boardSpec?: PublicBoardSpec | null;
+}
+
+export type BoardLaneId = string;
+
+export interface BoardLane {
+  id: BoardLaneId;
+  label: string;
+  hint: string;
+}
+
+export interface PublicBoardPiece {
+  id: string;
+  title: string;
+  blurb: string;
+  kind: 'stage' | 'mechanism';
+}
+
+export interface PublicBoardSlot {
+  id: string;
+  optional: boolean;
+  x: number;
+  y: number;
+}
+
+export interface PublicBoardShadow {
+  slots: PublicBoardSlot[];
+  edges: BoardGraphEdge[];
+}
+
+export interface PublicBoardSpec {
+  pieces: PublicBoardPiece[];
+  shadow: PublicBoardShadow;
+}
+
+export interface BoardGraphNode {
+  id: string;
+  x: number;
+  y: number;
+}
+
+export interface BoardGraphEdge {
+  from: string;
+  to: string;
+}
+
+export interface BoardGradeCheck {
+  id: string;
+  label: string;
+  passed: boolean;
+  detail?: string;
+  required?: boolean;
+  skipped?: boolean;
+}
+
+export interface BoardGradeResult {
+  passed: boolean;
+  summary: string;
+  checks: BoardGradeCheck[];
+  correctRequired: number;
+  requiredCount: number;
+  trapsPlaced: number;
+}
+
+export interface BoardState {
+  trayOrder: string[];
+  fills: Record<string, string | null>;
+  nodes?: BoardGraphNode[];
+  edges?: BoardGraphEdge[];
+  lastGrade?: BoardGradeResult | null;
 }
 
 export interface ChallengeFull extends ChallengePublic {
@@ -141,6 +224,7 @@ export interface ChallengeFull extends ChallengePublic {
   validationSpec: ValidationSpec | null;
   /** Present when sandboxType === 'spark-platform'. */
   sparkPlatform?: SparkPlatformSpec | null;
+  boardSpec?: PublicBoardSpec | null;
 }
 
 // ── App-level state types ─────────────────────────────────────────────────────
@@ -199,7 +283,18 @@ export interface SparkJobRecord {
     passed?: boolean;
     kind?: string;
     summary?: string;
-    checks?: Array<{ id: string; label: string; passed: boolean; detail?: string }>;
+    checks?: Array<{
+      id: string;
+      label: string;
+      passed: boolean;
+      detail?: string;
+      skipped?: boolean;
+      section?: 'functional' | 'performance';
+    }>;
+    sections?: {
+      functional?: { passed: boolean };
+      performance?: { skipped?: boolean; passed?: boolean; detail?: string };
+    };
     score?: {
       functionalPassed: boolean;
       executionMs: number | null;

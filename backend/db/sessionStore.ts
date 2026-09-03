@@ -61,8 +61,8 @@ async function persistRow(session: GameSession): Promise<void> {
   const sql = `
     INSERT INTO sessions
       (id, challenge_id, status, candidate_name, start_time, end_time, recovered, created_at,
-       runtime, user_id, workspace_prefix, entrypoint, workspace_updated_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       runtime, user_id, workspace_prefix, entrypoint, workspace_updated_at, board_state)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
     ON CONFLICT (id) DO UPDATE SET
       challenge_id         = EXCLUDED.challenge_id,
       status               = EXCLUDED.status,
@@ -74,7 +74,8 @@ async function persistRow(session: GameSession): Promise<void> {
       user_id              = EXCLUDED.user_id,
       workspace_prefix     = EXCLUDED.workspace_prefix,
       entrypoint           = EXCLUDED.entrypoint,
-      workspace_updated_at = EXCLUDED.workspace_updated_at
+      workspace_updated_at = EXCLUDED.workspace_updated_at,
+      board_state          = EXCLUDED.board_state
   `;
   await pool.query(sql, [
     session.id,
@@ -90,6 +91,7 @@ async function persistRow(session: GameSession): Promise<void> {
     s.workspacePrefix ?? session.workspacePrefix ?? null,
     s.entrypoint ?? session.entrypoint ?? null,
     s.workspaceUpdatedAt ?? session.workspaceUpdatedAt ?? null,
+    s.boardState ?? session.boardState ?? null,
   ]);
 }
 
@@ -101,7 +103,7 @@ async function persistRuntime(session: GameSession): Promise<void> {
 async function restoreFromDB(): Promise<void> {
   const { rows } = await pool.query(
     `SELECT id, challenge_id, status, candidate_name, start_time, end_time, recovered,
-            runtime, user_id, workspace_prefix, entrypoint, workspace_updated_at
+            runtime, user_id, workspace_prefix, entrypoint, workspace_updated_at, board_state
        FROM sessions
       WHERE status IN ('pending', 'active')`,
   );
@@ -135,6 +137,7 @@ async function restoreFromDB(): Promise<void> {
     session.workspaceUpdatedAt = row.workspace_updated_at
       ? Number(row.workspace_updated_at)
       : session.workspaceUpdatedAt || null;
+    session.boardState = row.board_state || session.boardState || null;
 
     sessions.set(row.id, session);
   }

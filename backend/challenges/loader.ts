@@ -3,6 +3,7 @@
 import type { ChallengeRow, ChallengePublic, ChallengeFull } from '../types/domain';
 
 const pool = require('../db/pool');
+const { publicBoardSpec, parseBoardSpec } = require('../workspace/boardGrade');
 
 const cache = new Map<string, ChallengeFull>();
 
@@ -22,14 +23,17 @@ function publicFields(row: ChallengeRow): ChallengePublic {
 
 function fullFields(row: ChallengeRow): ChallengeFull {
   const platformSpec = row.platform_spec || null;
+  const sandbox = row.sandbox_type || null;
+  const boardSpec = sandbox === 'board' ? parseBoardSpec(platformSpec) : null;
   return {
     ...publicFields(row),
     verifiedDir: row.verified_dir || null,
     problemStatement: row.problem_statement || null,
     validationSpec: row.validation_spec || null,
-    sparkPlatform: platformSpec
+    sparkPlatform: sandbox === 'spark-platform'
       ? (platformSpec as ChallengeFull['sparkPlatform'])
       : null,
+    boardSpec,
   };
 }
 
@@ -80,6 +84,7 @@ function listPublicChallenges(): Record<string, unknown>[] {
     contentSource: contentSourceOf(c),
     problemStatement: c.problemStatement,
     sparkPlatform: c.sparkPlatform || null,
+    boardSpec: publicBoardSpec(c.boardSpec || null),
   }));
 }
 
@@ -101,6 +106,7 @@ function getPublicChallenge(id: string): Record<string, unknown> | null {
     problemStatement: c.problemStatement,
     validationSpec: c.validationSpec,
     sparkPlatform: c.sparkPlatform || null,
+    boardSpec: publicBoardSpec(c.boardSpec || null),
   };
 }
 

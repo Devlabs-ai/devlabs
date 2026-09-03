@@ -18,6 +18,7 @@ interface CatalogRow {
   tags: string[];
   category: string;
   sandboxType: string;
+  finalized: boolean;
   problemStatement: Record<string, unknown>;
   platformSpec: Record<string, unknown>;
 }
@@ -40,6 +41,7 @@ function loadPackRows(): CatalogRow[] {
         tags: raw.tags || [],
         category: raw.category,
         sandboxType: raw.sandboxType,
+        finalized: raw.finalized === true,
         problemStatement: raw.problemStatement || {},
         platformSpec: raw.platformSpec || {},
       } as CatalogRow;
@@ -58,7 +60,7 @@ async function upsertChallenge(c: CatalogRow): Promise<void> {
         finalized, sandbox_type, verified_dir,
         problem_statement, validation_spec, platform_spec,
         created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8,NULL,$9,NULL,$10,$11,$11)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,$10,NULL,$11,$12,$12)
      ON CONFLICT (id) DO UPDATE SET
        number = EXCLUDED.number,
        title = EXCLUDED.title,
@@ -79,6 +81,7 @@ async function upsertChallenge(c: CatalogRow): Promise<void> {
       c.difficulty,
       JSON.stringify(c.tags),
       c.category,
+      c.finalized,
       c.sandboxType,
       JSON.stringify(c.problemStatement),
       JSON.stringify(c.platformSpec),

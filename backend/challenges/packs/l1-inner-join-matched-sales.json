@@ -1,6 +1,7 @@
 {
   "id": "l1-inner-join-matched-sales",
-  "number": 8,
+  "number": 28,
+  "finalized": false,
   "title": "Inner Join Matched Sales",
   "contentSource": "minio",
   "description": "Finance only wants overnight sales that exist in the merchandising catalog. Orphan SKUs (new ids not yet in products) should be dropped \u2014 not kept with a null name.\n\n**Inner-join** sales (`INPUT_PATH`) to products (`PRODUCTS_PATH`) on `product_id` and add `product_name`. Keep only sales rows that match the catalog. Write Parquet with overwrite.\n\nSales columns: `txn_id`, `product_id`, `store_id`, `quantity`. Products columns: `product_id` (unique), `product_name`. Output: all sales columns plus `product_name`. Use an explicit inner join (`how=\"inner\"`) \u2014 a left join would keep orphans with null names. Implement with Spark DataFrame APIs \u2014 no driver-side nested loops over `collect`. **Run** uses two smoke testcases; **Submit** uses the full set and row-diffs your Parquet against each case\u2019s `expected/`.\n\nWrite results with `df.write.mode(\"overwrite\").parquet(OUTPUT_PATH)`. `OUTPUT_PATH` is set by the platform for **this Run/Submit only**.",

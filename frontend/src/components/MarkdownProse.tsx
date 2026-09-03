@@ -271,6 +271,21 @@ function renderMarkdown(text: string): React.ReactNode[] | null {
       } else {
         elements.push(<p key={key++}>{inlineMarkdown(line)}</p>);
       }
+    } else if (/^\s*>/.test(line)) {
+      const raw: string[] = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) {
+        raw.push(lines[i].replace(/^\s*>\s?/, ''));
+        i += 1;
+      }
+      i -= 1;
+      const paras = raw.join('\n').split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+      elements.push(
+        <aside key={key++} className="markdown-callout">
+          {paras.map((para, pi) => (
+            <p key={pi}>{inlineMarkdown(para.replace(/\n/g, ' '))}</p>
+          ))}
+        </aside>,
+      );
     } else if (/^[-*]\s/.test(line)) {
       const items: React.ReactNode[] = [];
       while (i < lines.length && /^[-*]\s/.test(lines[i])) {

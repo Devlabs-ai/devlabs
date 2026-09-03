@@ -1,6 +1,7 @@
 {
   "id": "l1-left-join-product-names",
-  "number": 7,
+  "number": 27,
+  "finalized": false,
   "title": "Left Join Product Names",
   "contentSource": "minio",
   "description": "The sales feed only has cryptic `product_id`s. Merchandising keeps a small product catalog with human-readable names. Some ids in sales are brand new and not in the catalog yet \u2014 those sales still need to show up, just without a name.\n\n**Left-join** sales (`INPUT_PATH`) to products (`PRODUCTS_PATH`) on `product_id` and add `product_name`. Keep every sales row; missing catalog matches \u2192 `product_name` is null. Write Parquet with overwrite.\n\nSales columns: `txn_id`, `product_id`, `store_id`, `quantity`. Products columns: `product_id` (unique), `product_name`. Output: all sales columns plus `product_name`. Use an explicit left join (`how=\"left\"`) \u2014 an inner join would drop unmatched sales. Implement with Spark DataFrame APIs \u2014 no driver-side nested loops over `collect`. **Run** uses two smoke testcases; **Submit** uses the full set and row-diffs your Parquet against each case\u2019s `expected/`.\n\nWrite results with `df.write.mode(\"overwrite\").parquet(OUTPUT_PATH)`. `OUTPUT_PATH` is set by the platform for **this Run/Submit only**.",

@@ -9,6 +9,8 @@ const { requireSessionAccess } = require('../auth/middleware');
 const lifecycle = require('../sandbox/sessionLifecycle');
 const sparkLifecycle = require('../workspace/sparkLifecycle');
 const sparkJobs = require('../workspace/sparkJobs');
+const boardLifecycle = require('../workspace/boardLifecycle');
+const { publicBoardSpec } = require('../workspace/boardGrade');
 const workspaceStore = require('../workspace/workspaceStore');
 const sessionStore = require('../db/sessionStore');
 const loader = require('../challenges/loader');
@@ -24,6 +26,27 @@ function safeWorkspacePath(p: unknown): string | null {
   const trimmed = p.replace(/^\/+/, '');
   if (!trimmed || trimmed.includes('..') || trimmed.includes('\\')) return null;
   return trimmed;
+}
+
+function parseStarterFiles(raw: unknown): Record<string, string> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const path = safeWorkspacePath(key);
+    if (!path || typeof value !== 'string') continue;
+    out[path] = value;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function getBoardSession(id: string, res: ExpressResponse): GameSession | null {
+  const session = sessionStore.get(id);
+  if (!session) { res.status(404).json({ error: 'session not found' }); return null; }
+  if (session.runtime !== 'board') {
+    res.status(409).json({ error: 'not a board session' });
+    return null;
+  }
+  return session;
 }
 
 function getSparkSession(id: string, res: ExpressResponse): GameSession | null {
@@ -176,6 +199,7 @@ function publicSession(
     workspacePrefix: s.workspacePrefix || null,
     entrypoint: s.entrypoint || null,
     workspaceUpdatedAt: s.workspaceUpdatedAt || null,
+    boardState: s.runtime === 'board' ? (s.boardState || null) : null,
     services: candidateServices(
       Array.isArray(s.services) && s.services.length > 0
         ? s.services
@@ -196,6 +220,7 @@ function publicSession(
           contentSource: c.contentSource || null,
           problemStatement: c.problemStatement,
           sparkPlatform: c.sparkPlatform || null,
+          boardSpec: publicBoardSpec(c.boardSpec || null),
         }
       : null,
   };
@@ -235,6 +260,15 @@ router.post('/spark/start', requireSessionAccess, async (req: ExpressRequest, re
       || (req.user as { sub?: string; id?: string } | undefined)?.id
       || null;
 
+    if (challengeId && challengeId !== 'spark-playground') {
+      const listed = loader.getChallenge(challengeId);
+      if (listed && !listed.finalized) {
+        const err = new Error('This lab is not open yet');
+        (err as Error & { status?: number }).status = 403;
+        throw err;
+      }
+    }
+
     const { session, created } = await sparkLifecycle.startSparkSession({
       challengeId,
       userId,
@@ -255,6 +289,105 @@ router.post('/spark/start', requireSessionAccess, async (req: ExpressRequest, re
       entrypoint: session.entrypoint,
       session: pub,
       challenge: pub.challenge,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/session/board/start  { challengeId }
+router.post('/board/start', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const body = (req.body as Record<string, unknown>) || {};
+    const challengeId = body.challengeId as string;
+    const userId = (req.user as { sub?: string; id?: string } | undefined)?.sub
+      || (req.user as { sub?: string; id?: string } | undefined)?.id
+      || null;
+
+    if (challengeId) {
+      const listed = loader.getChallenge(challengeId);
+      if (listed && !listed.finalized) {
+        const err = new Error('This lab is not open yet');
+        (err as Error & { status?: number }).status = 403;
+        throw err;
+      }
+    }
+
+    const { session, created } = await boardLifecycle.startBoardSession({
+      challengeId,
+      userId,
+      candidateName: null,
+    });
+
+    const base = loader.getPublicChallenge(challengeId) || loader.getChallenge(challengeId);
+    const challenge = await hydrateChallengeFromMinio(base);
+    const pub = publicSession(session, challenge, req.user);
+    res.status(created ? 201 : 200).json({
+      sessionId: session.id,
+      created,
+      status: session.status,
+      runtime: 'board',
+      session: pub,
+      challenge: pub.challenge,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/:id/board', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getBoardSession(req.params.id, res);
+    if (!session) return;
+    const challenge = session.challengeId ? loader.getChallenge(session.challengeId) : null;
+    const spec = boardLifecycle.specFromChallenge(challenge);
+    const boardState = spec
+      ? boardLifecycle.coerceBoardState(session.boardState, spec)
+      : session.boardState || null;
+    res.json({
+      sessionId: session.id,
+      boardState,
+      updatedAt: session.workspaceUpdatedAt || null,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.put('/:id/board', requireSessionAccess, express.json({ limit: '256kb' }), async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getBoardSession(req.params.id, res);
+    if (!session) return;
+    const challenge = session.challengeId ? loader.getChallenge(session.challengeId) : null;
+    const spec = boardLifecycle.specFromChallenge(challenge);
+    if (!spec) return res.status(500).json({ error: 'board spec missing' });
+    const body = (req.body as Record<string, unknown>) || {};
+    const state = boardLifecycle.savePlaced(session, spec, body);
+    session.status = 'active';
+    session.endTime = null;
+    await sessionStore.persistRow(session);
+    res.json({ ok: true, boardState: state, updatedAt: session.workspaceUpdatedAt || null });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/:id/board/submit', requireSessionAccess, express.json({ limit: '256kb' }), async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getBoardSession(req.params.id, res);
+    if (!session) return;
+    const challenge = session.challengeId ? loader.getChallenge(session.challengeId) : null;
+    const spec = boardLifecycle.specFromChallenge(challenge);
+    if (!spec) return res.status(500).json({ error: 'board spec missing' });
+    const body = (req.body as Record<string, unknown>) || {};
+    session.status = 'active';
+    session.endTime = null;
+    const { state, grade } = await boardLifecycle.submitBoard(session, spec, body);
+    res.json({
+      ok: true,
+      passed: grade.passed,
+      grade,
+      boardState: state,
     });
   } catch (e) {
     next(e);
@@ -342,6 +475,27 @@ router.post('/:id/workspace/rename', express.json({ limit: '1mb' }), async (req:
   }
 });
 
+// POST /api/session/:id/workspace/reset  { starterFiles? }
+// Restore published starter (MinIO challenges/<id>/starter/, or starterFiles for playground / legacy).
+router.post('/:id/workspace/reset', express.json({ limit: '2mb' }), async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getSparkSession(req.params.id, res);
+    if (!session) return;
+    const body = (req.body as Record<string, unknown>) || {};
+    const starterFiles = parseStarterFiles(body.starterFiles);
+    const result = await sparkLifecycle.resetWorkspace(session, starterFiles);
+    res.json({
+      ok: true,
+      sessionId: session.id,
+      entrypoint: result.entrypoint,
+      files: result.files,
+      updatedAt: session.workspaceUpdatedAt || null,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // POST /api/session/:id/spark/jobs  { mode, inputPath, businessDate, evalSolutionPath?, limits? }
 router.post('/:id/spark/jobs', express.json({ limit: '256kb' }), async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
   try {
@@ -371,6 +525,8 @@ router.post('/:id/spark/jobs', express.json({ limit: '256kb' }), async (req: Exp
         : undefined;
     const productsPath =
       typeof body.productsPath === 'string' ? body.productsPath : undefined;
+    const dimPath =
+      typeof body.dimPath === 'string' ? body.dimPath : undefined;
     const txnInputPath =
       typeof body.txnInputPath === 'string' ? body.txnInputPath : undefined;
     const rateInputPath =
@@ -412,6 +568,7 @@ router.post('/:id/spark/jobs', express.json({ limit: '256kb' }), async (req: Exp
       gradeKeys,
       outputFormat,
       productsPath: productsPath || undefined,
+      dimPath: dimPath || undefined,
       txnInputPath: txnInputPath || undefined,
       rateInputPath: rateInputPath || undefined,
       eventsInputPath: eventsInputPath || undefined,
@@ -542,6 +699,8 @@ router.post('/:id/end', async (req: ExpressRequest, res: ExpressResponse, next: 
     let session: GameSession;
     if (before.runtime === 'spark-platform') {
       session = await sparkLifecycle.endSparkSession(sessionId);
+    } else if (before.runtime === 'board') {
+      session = await boardLifecycle.endBoardSession(sessionId);
     } else {
       session = await lifecycle.end(sessionId);
       await sessionStore.persistRow(session);

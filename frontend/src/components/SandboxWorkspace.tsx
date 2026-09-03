@@ -84,7 +84,7 @@ export default function SandboxWorkspace({
                     onClick={onClose}
                     disabled={closing}
                   >
-                    {closing ? 'Closing…' : '← Back'}
+                    {closing ? 'Ending…' : 'End session'}
                   </button>
                 </>
               )}

@@ -94,3 +94,56 @@ export async function endSession(id: string): Promise<unknown> {
   const { data } = await axios.post(`/api/session/${id}/end`);
   return data;
 }
+
+export async function startBoardSession(challengeId: string): Promise<SessionStartResult> {
+  const { data } = await axios.post(
+    '/api/session/board/start',
+    { challengeId },
+    { headers: getAuthHeader() },
+  );
+  return data as SessionStartResult;
+}
+
+export async function fetchBoardState(sessionId: string): Promise<{
+  sessionId: string;
+  boardState: import('../types/domain').BoardState | null;
+  updatedAt: number | null;
+}> {
+  const { data } = await axios.get(`/api/session/${sessionId}/board`, {
+    headers: getAuthHeader(),
+  });
+  return data;
+}
+
+export async function saveBoardGraph(
+  sessionId: string,
+  graph: {
+    fills: Record<string, string | null>;
+    reset?: boolean;
+  },
+): Promise<import('../types/domain').BoardState> {
+  const { data } = await axios.put(
+    `/api/session/${sessionId}/board`,
+    graph,
+    { headers: getAuthHeader() },
+  );
+  return (data as { boardState: import('../types/domain').BoardState }).boardState;
+}
+
+export async function submitBoard(
+  sessionId: string,
+  graph: {
+    fills: Record<string, string | null>;
+  },
+): Promise<{
+  passed: boolean;
+  grade: import('../types/domain').BoardGradeResult;
+  boardState: import('../types/domain').BoardState;
+}> {
+  const { data } = await axios.post(
+    `/api/session/${sessionId}/board/submit`,
+    graph,
+    { headers: getAuthHeader() },
+  );
+  return data;
+}

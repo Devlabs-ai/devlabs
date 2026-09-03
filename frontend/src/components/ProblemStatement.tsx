@@ -58,6 +58,10 @@ interface ProblemStatementData {
       format?: string;
       schema?: Array<{ column: string; type: string }>;
     }>;
+    testcases?: {
+      run?: Array<{ name?: string; rows?: number; detail?: string }>;
+      submit?: Array<{ name?: string; rows?: number; detail?: string }>;
+    };
   };
   [key: string]: unknown;
 }
@@ -86,6 +90,109 @@ function sortSolutionPaths(paths: string[], entrypoint?: string | null): string[
 
 function formatDatasetRows(n: number): string {
   return n.toLocaleString('en-US');
+}
+
+function formatTestcaseCount(n: number): string {
+  return n === 1 ? '1 testcase' : `${n} testcases`;
+}
+
+type TestcaseNote = { name: string; rows: number | null; detail: string };
+
+function parseTestcaseGroup(raw: unknown): TestcaseNote[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+      const rec = item as { name?: unknown; rows?: unknown; detail?: unknown };
+      const name = typeof rec.name === 'string' ? rec.name.trim() : '';
+      const rows = typeof rec.rows === 'number' && Number.isFinite(rec.rows) ? rec.rows : null;
+      const detail = typeof rec.detail === 'string' ? rec.detail.trim() : '';
+      if (!name && rows == null && !detail) return null;
+      return { name, rows, detail };
+    })
+    .filter((item): item is TestcaseNote => item != null);
+}
+
+function TestcasesBlock({
+  run,
+  submit,
+}: {
+  run: TestcaseNote[];
+  submit: TestcaseNote[];
+}): JSX.Element | null {
+  if (run.length === 0 && submit.length === 0) return null;
+  return (
+    <section className="statement-section">
+      <h4>Testcases</h4>
+      <div className="statement-testcase-grid">
+        {([
+          ['Run', run],
+          ['Submit', submit],
+        ] as Array<[string, TestcaseNote[]]>).map(([label, cases]) => {
+          if (cases.length === 0) return null;
+          const totalRows = cases.reduce((sum, c) => sum + (c.rows ?? 0), 0);
+          const allHaveRows = cases.every((c) => c.rows != null);
+          return (
+            <div key={label} className="statement-testcase-group">
+              <h5>{label}</h5>
+              <p className="statement-dataset-stats">
+                {[
+                  formatTestcaseCount(cases.length),
+                  allHaveRows && totalRows > 0
+                    ? `${formatDatasetRows(totalRows)} rows`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+              {cases.map((c, i) => (
+                <div key={`${label}-${c.name || i}`} className="statement-testcase-item">
+                  {c.name && <p className="statement-testcase-name">{c.name}</p>}
+                  {cases.length > 1 && c.rows != null && (
+                    <p className="statement-dataset-stats">
+                      {formatDatasetRows(c.rows)} rows
+                    </p>
+                  )}
+                  {c.detail && <p className="statement-caption">{c.detail}</p>}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ExpectedOutputBlock({
+  columns,
+}: {
+  columns: Array<{ column: string; description: string }>;
+}): JSX.Element | null {
+  if (columns.length === 0) return null;
+  return (
+    <section className="statement-section">
+      <h4>Expected output</h4>
+      <div className="statement-table-wrap">
+        <table className="statement-table">
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {columns.map((col) => (
+              <tr key={col.column}>
+                <td className="statement-table-col">{col.column}</td>
+                <td>{col.description}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
 }
 
 function formatDatasetBytes(bytes: number): string {
@@ -122,6 +229,9 @@ export default function ProblemStatement({
   const expectedOutput = Array.isArray(ps.expectedOutput) ? ps.expectedOutput : [];
   const dataOverview = typeof ps.data?.overview === 'string' ? ps.data.overview.trim() : '';
   const datasets = Array.isArray(ps.data?.datasets) ? ps.data.datasets : [];
+  const runTestcases = parseTestcaseGroup(ps.data?.testcases?.run);
+  const submitTestcases = parseTestcaseGroup(ps.data?.testcases?.submit);
+  const hasTestcases = runTestcases.length > 0 || submitTestcases.length > 0;
   const solutionText = (
     (typeof ps.solution === 'string' && ps.solution.trim())
     || (typeof ps.solutionWriteup === 'string' && ps.solutionWriteup.trim())
@@ -292,6 +402,7 @@ export default function ProblemStatement({
             );
           })
         )}
+        <ExpectedOutputBlock columns={expectedOutput} />
       </div>
     );
   }
@@ -302,33 +413,11 @@ export default function ProblemStatement({
         <h2>Spec</h2>
         <hr className="statement-rule" aria-hidden="true" />
 
-        {expectedOutput.length > 0 && (
-          <section className="statement-section">
-            <h4>Expected output</h4>
-            <div className="statement-table-wrap">
-              <table className="statement-table">
-                <thead>
-                  <tr>
-                    <th>Column</th>
-                    <th>Description</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {expectedOutput.map((col) => (
-                    <tr key={col.column}>
-                      <td className="statement-table-col">{col.column}</td>
-                      <td>{col.description}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
+        <TestcasesBlock run={runTestcases} submit={submitTestcases} />
 
         {specExtra}
 
-        {expectedOutput.length === 0 && !specExtra && (
+        {!hasTestcases && !specExtra && (
           <p className="dim" style={{ fontSize: 13 }}>
             No schema details — see README.md in the project workspace.
           </p>

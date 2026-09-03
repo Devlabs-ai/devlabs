@@ -23,7 +23,18 @@ export interface GradeResult {
   passed: boolean;
   kind: 'submission' | 'preview';
   summary: string;
-  checks: Array<{ id: string; label: string; passed: boolean; detail?: string }>;
+  checks: Array<{
+    id: string;
+    label: string;
+    passed: boolean;
+    detail?: string;
+    skipped?: boolean;
+    section?: 'functional' | 'performance';
+  }>;
+  sections?: {
+    functional?: { passed: boolean };
+    performance?: { skipped?: boolean; passed?: boolean; detail?: string };
+  };
   candidateKey: string;
   solutionKey: string;
   gradedAt: number;
@@ -230,12 +241,88 @@ async function downloadPrefixAll(
   return local;
 }
 
+function resolveGradePython(): string {
+  if (process.env.DEVLABS_GRADE_PYTHON) return process.env.DEVLABS_GRADE_PYTHON;
+  if (process.env.PYTHON) return process.env.PYTHON;
+  for (const candidate of ['/tmp/devlabs-datagen/bin/python', '/tmp/l1-gen-venv/bin/python']) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return process.env.PYTHON3 || 'python3';
+}
+
+function pushScriptChecks(
+  checks: GradeResult['checks'],
+  parsed: {
+    passed?: boolean;
+    summary?: string;
+    checks?: Array<{ id?: string; label?: string; passed?: boolean; detail?: string; skipped?: boolean }>;
+    sections?: {
+      functional?: {
+        passed?: boolean;
+        checks?: Array<{ id?: string; label?: string; passed?: boolean; detail?: string }>;
+      };
+      performance?: { skipped?: boolean; passed?: boolean; detail?: string };
+    };
+  },
+): { functionalPassed: boolean; usedSections: boolean } {
+  const sections = parsed.sections;
+  if (sections && (sections.functional || sections.performance)) {
+    const func = sections.functional || {};
+    const functionalPassed = Boolean(func.passed);
+    checks.push({
+      id: 'functional',
+      label: 'Functional',
+      passed: functionalPassed,
+      section: 'functional',
+      detail: functionalPassed ? 'Passed' : 'Failed',
+    });
+    for (const c of func.checks || []) {
+      if (!c || typeof c !== 'object') continue;
+      checks.push({
+        id: String(c.id || 'check'),
+        label: String(c.label || c.id || 'check'),
+        passed: Boolean(c.passed),
+        section: 'functional',
+        ...(c.detail ? { detail: String(c.detail) } : {}),
+      });
+    }
+    const perf = sections.performance;
+    if (perf) {
+      const skipped = Boolean(perf.skipped);
+      checks.push({
+        id: 'performance',
+        label: 'Performance',
+        passed: skipped ? true : Boolean(perf.passed),
+        skipped,
+        section: 'performance',
+        detail: perf.detail
+          ? String(perf.detail)
+          : (skipped ? 'No performance spec for this lab' : undefined),
+      });
+    }
+    return { functionalPassed, usedSections: true };
+  }
+
+  for (const c of parsed.checks || []) {
+    if (!c || typeof c !== 'object') continue;
+    checks.push({
+      id: String(c.id || 'check'),
+      label: String(c.label || c.id || 'check'),
+      passed: Boolean(c.passed),
+      ...(c.skipped ? { skipped: true } : {}),
+      ...(c.detail ? { detail: String(c.detail) } : {}),
+    });
+  }
+  return { functionalPassed: Boolean(parsed.passed), usedSections: false };
+}
+
 async function gradeWithScript(opts: {
   candidateOutputS3a: string;
   evalSolutionS3a: string;
   gradeScriptS3a: string;
   kind: 'submission' | 'preview';
   sparkSucceeded: boolean;
+  gradeCases?: string[];
 }): Promise<GradeResult> {
   const gradedAt = Date.now();
   const candidateKey = s3aToKey(opts.candidateOutputS3a);
@@ -298,7 +385,14 @@ async function gradeWithScript(opts: {
 
     const expectedDir = path.join(tmp, 'reference');
     const candidateDir = path.join(tmp, 'candidate');
-    const expectedFiles = await downloadPrefixAll(store, solutionKey, expectedDir);
+    const expectedFiles = opts.gradeCases?.length
+      ? (await downloadTestcaseExpectedFiles(
+        store,
+        solutionKey,
+        opts.gradeCases,
+        expectedDir,
+      )).map((d) => d.file)
+      : await downloadPrefixAll(store, solutionKey, expectedDir);
     const candidateFiles = await downloadPrefixAll(store, candidateKey, candidateDir);
     checks.push({
       id: 'reference_present',
@@ -326,7 +420,7 @@ async function gradeWithScript(opts: {
       };
     }
 
-    const py = process.env.PYTHON || process.env.PYTHON3 || 'python3';
+    const py = resolveGradePython();
     const spawned = spawnSync(
       py,
       [scriptPath, '--candidate', candidateDir, '--reference', expectedDir],
@@ -372,7 +466,14 @@ async function gradeWithScript(opts: {
     let parsed: {
       passed?: boolean;
       summary?: string;
-      checks?: Array<{ id?: string; label?: string; passed?: boolean; detail?: string }>;
+      checks?: Array<{ id?: string; label?: string; passed?: boolean; detail?: string; skipped?: boolean }>;
+      sections?: {
+        functional?: {
+          passed?: boolean;
+          checks?: Array<{ id?: string; label?: string; passed?: boolean; detail?: string }>;
+        };
+        performance?: { skipped?: boolean; passed?: boolean; detail?: string };
+      };
     };
     try {
       parsed = JSON.parse(String(spawned.stdout || '').trim() || '{}');
@@ -395,17 +496,13 @@ async function gradeWithScript(opts: {
     }
 
     checks.push({ id: 'grade_runner', label: 'Grade script ran', passed: true });
-    for (const c of parsed.checks || []) {
-      if (!c || typeof c !== 'object') continue;
-      checks.push({
-        id: String(c.id || 'check'),
-        label: String(c.label || c.id || 'check'),
-        passed: Boolean(c.passed),
-        ...(c.detail ? { detail: String(c.detail) } : {}),
-      });
-    }
-
-    const passed = checks.every((c) => c.passed);
+    const { functionalPassed, usedSections } = pushScriptChecks(checks, parsed);
+    const infraPassed = checks
+      .filter((c) => c.section !== 'functional' && c.section !== 'performance')
+      .every((c) => c.skipped || c.passed);
+    const passed = usedSections
+      ? infraPassed && functionalPassed
+      : checks.every((c) => c.skipped || c.passed);
     return {
       passed,
       kind: opts.kind,
@@ -414,6 +511,23 @@ async function gradeWithScript(opts: {
         || (passed ? 'Passed — grade script accepted the output' : 'Failed — grade script rejected the output'),
       ),
       checks,
+      ...(usedSections
+        ? {
+            sections: {
+              functional: { passed: functionalPassed },
+              ...(parsed.sections?.performance
+                ? {
+                    performance: {
+                      skipped: Boolean(parsed.sections.performance.skipped),
+                      ...(parsed.sections.performance.detail
+                        ? { detail: String(parsed.sections.performance.detail) }
+                        : {}),
+                    },
+                  }
+                : {}),
+            },
+          }
+        : {}),
       candidateKey,
       solutionKey,
       gradedAt,
@@ -599,16 +713,16 @@ async function downloadTestcaseExpectedFiles(
   fs.mkdirSync(destDir, { recursive: true });
   const out: Array<{ caseId: string; file: string }> = [];
   for (const caseId of caseIds) {
-    const keys = (await store.listKeys(`${root}${caseId}/expected/`)).filter(
-      (k: string) => k.endsWith('.parquet') && !k.includes('_temporary'),
-    );
-    if (!keys.length) continue;
-    const src = keys.sort()[0];
-    const buf = await store.getObject(src);
-    if (!buf) continue;
-    const local = path.join(destDir, `${caseId}.parquet`);
-    fs.writeFileSync(local, buf);
-    out.push({ caseId, file: local });
+    const files = (
+      await downloadPrefixAll(
+        store,
+        `${root}${caseId}/expected/`,
+        path.join(destDir, caseId),
+      )
+    ).filter((f) => f.endsWith('.parquet'));
+    for (const file of files) {
+      out.push({ caseId, file });
+    }
   }
   return out;
 }
@@ -662,6 +776,7 @@ async function gradeParquetAgainstExpected(opts: {
     const expectedDir = path.join(tmp, 'expected');
     const candidateDir = path.join(tmp, 'candidate');
     let expectedFiles: string[] = [];
+    let expectedByCase: Array<{ caseId: string; files: string[] }> = [];
     if (opts.gradeCases?.length) {
       const downloaded = await downloadTestcaseExpectedFiles(
         store,
@@ -670,8 +785,22 @@ async function gradeParquetAgainstExpected(opts: {
         expectedDir,
       );
       expectedFiles = downloaded.map((d) => d.file).sort();
+      const grouped = new Map<string, string[]>();
+      for (const d of downloaded) {
+        const parts = grouped.get(d.caseId) || [];
+        parts.push(d.file);
+        grouped.set(d.caseId, parts);
+      }
+      expectedByCase = [...grouped.entries()].map(([caseId, files]) => ({
+        caseId,
+        files: files.sort(),
+      }));
     } else {
       expectedFiles = (await downloadParquetPrefix(store, solutionKey, expectedDir)).sort();
+      expectedByCase = expectedFiles.map((file) => ({
+        caseId: path.basename(file, '.parquet'),
+        files: [file],
+      }));
     }
     const candidateFiles = await downloadParquetPrefix(store, candidateKey, candidateDir);
 
@@ -731,9 +860,8 @@ async function gradeParquetAgainstExpected(opts: {
     let casesPassed = 0;
     let casesFailed = 0;
 
-    for (const expFile of expectedFiles) {
-      const caseId = path.basename(expFile, '.parquet');
-      const expLoaded = await rowsByKeyFromFiles([expFile], keys, expectedDir);
+    for (const { caseId, files } of expectedByCase) {
+      const expLoaded = await rowsByKeyFromFiles(files, keys, expectedDir);
       if (expLoaded.error) {
         casesFailed += 1;
         checks.push({
@@ -779,8 +907,8 @@ async function gradeParquetAgainstExpected(opts: {
     }
     // Recompute extras against union of all successfully loaded expected keys.
     const allExpectedKeys = new Set<string>();
-    for (const expFile of expectedFiles) {
-      const expLoaded = await rowsByKeyFromFiles([expFile], keys, expectedDir);
+    for (const { files } of expectedByCase) {
+      const expLoaded = await rowsByKeyFromFiles(files, keys, expectedDir);
       if (expLoaded.error) continue;
       for (const k of expLoaded.map.keys()) allExpectedKeys.add(k);
     }
@@ -795,20 +923,31 @@ async function gradeParquetAgainstExpected(opts: {
       passed: extra === 0,
       detail: `extra=${extra}`,
     });
+    const overallOk =
+      casesFailed === 0 && extra === 0 && casesPassed === expectedByCase.length;
     checks.push({
       id: 'all_cases',
       label: 'All testcases passed',
-      passed: casesFailed === 0 && casesPassed === expectedFiles.length,
-      detail: `passed=${casesPassed} failed=${casesFailed} total=${expectedFiles.length}`,
+      passed: overallOk,
+      detail: extra > 0
+        ? `passed=${casesPassed} failed=${casesFailed} extra=${extra} total=${expectedByCase.length}`
+        : `passed=${casesPassed} failed=${casesFailed} total=${expectedByCase.length}`,
     });
 
     const passed = checks.every((c) => c.passed);
+    const failParts: string[] = [];
+    if (casesFailed > 0) {
+      failParts.push(`${casesFailed} testcase(s) differ from expected/`);
+    }
+    if (extra > 0) {
+      failParts.push(`${extra} extra row(s) beyond expected`);
+    }
     return {
       passed,
       kind: opts.kind,
       summary: passed
         ? `Passed — ${casesPassed} testcase(s) match expected/`
-        : `Failed — ${casesFailed} testcase(s) differ from expected/`,
+        : `Failed — ${failParts.join('; ') || 'output does not match expected/'}`,
       checks,
       candidateKey,
       solutionKey,
@@ -842,6 +981,7 @@ async function gradeOutputAgainstSolution(opts: {
       gradeScriptS3a: opts.gradeScript.trim(),
       kind: opts.kind,
       sparkSucceeded: opts.sparkSucceeded,
+      gradeCases: opts.gradeCases,
     });
   }
   const solutionKeyEarly = s3aToKey(opts.evalSolutionS3a);

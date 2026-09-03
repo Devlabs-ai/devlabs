@@ -40,6 +40,8 @@ export interface SparkPlatformSpec {
   outputFormat?: 'json' | 'parquet' | 'csv';
   businessDate?: string;
   productsPath?: string;
+  /** Dimension path injected as DIM_PATH (fact-to-dim join labs). */
+  dimPath?: string;
   txnInputPath?: string;
   rateInputPath?: string;
   /** Run smoke fact; falls back to txnInputPath. */
@@ -87,12 +89,112 @@ export interface SparkPlatformSpec {
     executionTime?: {
       targetSeconds?: number;
       targetMs?: number;
-      maxPoints: number;
+      maxPoints?: number;
       /** Extra points per whole/fractional second under targetSeconds. */
       bonusPerSecond?: number;
+      bands?: Array<{
+        label: string;
+        tone?: string;
+        maxMs?: number | null;
+        maxSeconds?: number;
+      }>;
     };
   };
   [key: string]: unknown;
+}
+
+export type BoardLaneId = string;
+
+export interface BoardLane {
+  id: BoardLaneId;
+  label: string;
+  hint: string;
+}
+
+export interface BoardPiece {
+  id: string;
+  title: string;
+  blurb: string;
+  kind: 'stage' | 'mechanism';
+  gold: 'required' | 'optional' | 'tray';
+  /** Gold incoming nodes. Empty = root. */
+  parents: string[];
+  /** Optional splice: if this node is placed, it sits on the gold edge parent → child. */
+  child: string | null;
+  trapIfPlaced: string | null;
+}
+
+export interface BoardSpec {
+  pieces: BoardPiece[];
+}
+
+export interface PublicBoardPiece {
+  id: string;
+  title: string;
+  blurb: string;
+  kind: 'stage' | 'mechanism';
+}
+
+export interface PublicBoardSlot {
+  id: string;
+  optional: boolean;
+  x: number;
+  y: number;
+}
+
+export interface PublicBoardShadow {
+  slots: PublicBoardSlot[];
+  edges: BoardGraphEdge[];
+}
+
+export interface PublicBoardSpec {
+  pieces: PublicBoardPiece[];
+  shadow: PublicBoardShadow;
+}
+
+export interface BoardGraphNode {
+  id: string;
+  x: number;
+  y: number;
+}
+
+export interface BoardGraphEdge {
+  from: string;
+  to: string;
+}
+
+/** @deprecated lane bins — coerced into a graph when loading old sessions. */
+export interface BoardPlacement {
+  id: string;
+  lane: BoardLaneId;
+  order: number;
+}
+
+export interface BoardGradeCheck {
+  id: string;
+  label: string;
+  passed: boolean;
+  detail?: string;
+  required?: boolean;
+  skipped?: boolean;
+}
+
+export interface BoardGradeResult {
+  passed: boolean;
+  summary: string;
+  checks: BoardGradeCheck[];
+  correctRequired: number;
+  requiredCount: number;
+  trapsPlaced: number;
+}
+
+export interface BoardState {
+  trayOrder: string[];
+  /** slot id → piece id. Empty slots are omitted or null. */
+  fills: Record<string, string | null>;
+  nodes?: BoardGraphNode[];
+  edges?: BoardGraphEdge[];
+  lastGrade?: BoardGradeResult | null;
 }
 
 export interface ChallengeFull extends ChallengePublic {
@@ -101,6 +203,8 @@ export interface ChallengeFull extends ChallengePublic {
   validationSpec: ValidationSpec | null;
   /** Mapped from platform_spec when sandboxType is spark-platform. */
   sparkPlatform?: SparkPlatformSpec | null;
+  /** Full spec (with gold) in cache; public APIs strip gold. */
+  boardSpec?: BoardSpec | PublicBoardSpec | null;
 }
 
 export interface ValidationSpec {
@@ -149,12 +253,13 @@ export interface GameSession {
   services: string[];
   commandHistory: unknown[];
   challenge?: ChallengePublic | ChallengeFull | null;
-  /** compose | spark-platform */
+  /** compose | spark-platform | board */
   runtime?: string | null;
   userId?: string | null;
   workspacePrefix?: string | null;
   entrypoint?: string | null;
   workspaceUpdatedAt?: number | null;
+  boardState?: BoardState | null;
 }
 
 export type PortMap = Record<string, string | number>;

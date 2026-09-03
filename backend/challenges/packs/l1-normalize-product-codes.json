@@ -1,6 +1,7 @@
 {
   "id": "l1-normalize-product-codes",
-  "number": 3,
+  "number": 19,
+  "finalized": false,
   "title": "Normalize Product Codes",
   "contentSource": "minio",
   "description": "Acme\u2019s merchandising feed has the right products, but the SKUs are a mess \u2014 mixed case, stray spaces, underscores, and double hyphens. Downstream joins against the catalog fail unless every code is normalized the same way.\n\nNormalize `product_code` on every row and write the result as Parquet with overwrite. Keep every other column unchanged; only replace `product_code` (do not add a second code column).\n\nApply these rules in order: (1) trim leading/trailing whitespace, (2) uppercase, (3) replace any run of spaces, underscores, or hyphens with a single hyphen `-`, (4) drop any character that is not `A\u2013Z`, `0\u20139`, or `-`.\n\nInput columns: `product_id`, `product_code`, `product_name`. Implement with Spark DataFrame / `pyspark.sql.functions` APIs (`trim`, `upper`, `regexp_replace`, `withColumn`) \u2014 no Python loops over collected rows. **Run** uses two smoke testcases; **Submit** uses the full set and row-diffs your Parquet against each case\u2019s `expected/`.\n\nWrite results with `df.write.mode(\"overwrite\").parquet(OUTPUT_PATH)`. `OUTPUT_PATH` is set by the platform for **this Run/Submit only**.",

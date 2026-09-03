@@ -1,26 +1,29 @@
 import React from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import BrandMark from '../components/BrandMark';
-import SessionController from '../components/SessionController';
 import { useAppState } from '../context/AppStateContext';
 import { PlayChromeProvider } from '../context/PlayChromeContext';
 import { PLAYGROUNDS_PATH, SPARK_PLAYGROUND_PATH } from '../constants/playgrounds';
 import { MAJORS_PATH } from '../constants/projects';
 import { MINORS_PATH } from '../constants/minors';
+import { WHITEBOARD_PATH } from '../constants/whiteboard';
+
+const PAPERS_PATH = '/play/papers';
 
 /** Play routes that bring their own page chrome instead of the catalog's. */
 const PLAY_SUBROUTES = [
   '/play/quiz/',
-  '/play/papers',
+  PAPERS_PATH,
   '/play/quests',
   PLAYGROUNDS_PATH,
   MAJORS_PATH,
   MINORS_PATH,
+  WHITEBOARD_PATH,
   '/play/projects',
   SPARK_PLAYGROUND_PATH,
 ];
 
-/** Thin brand bar — Run/Submit live in the IDE action bar (TensorTonic-style). */
+/** Thin brand bar — session actions live in the workspace, not the header. */
 function ChallengeTopBar(): JSX.Element {
   return (
     <div className="topbar topbar--challenge">
@@ -43,8 +46,6 @@ function AppLayoutInner(): React.JSX.Element {
     authMode,
     playState,
     activeSession,
-    ending,
-    onEnd,
     onLogout,
   } = useAppState();
 
@@ -60,6 +61,7 @@ function AppLayoutInner(): React.JSX.Element {
   const playgroundsActive =
     location.pathname.startsWith(PLAYGROUNDS_PATH) ||
     location.pathname.startsWith(SPARK_PLAYGROUND_PATH);
+  const papersActive = location.pathname.startsWith(PAPERS_PATH);
 
   return (
     <div className={`app${challengeOpen ? ' app--challenge' : ''}${usePlayChrome ? ' app--play' : ''}`}>
@@ -75,14 +77,6 @@ function AppLayoutInner(): React.JSX.Element {
             </NavLink>
 
             <div className="topbar-trailing">
-              {playState === 'active' && activeSession && (
-                <SessionController
-                  session={activeSession}
-                  onEnd={onEnd}
-                  ending={ending}
-                />
-              )}
-
               {showNav && (
                 <nav className="topnav topnav--actions" aria-label="Sections">
                   <NavLink
@@ -96,6 +90,12 @@ function AppLayoutInner(): React.JSX.Element {
                     className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
                   >
                     Minors
+                  </NavLink>
+                  <NavLink
+                    to={PAPERS_PATH}
+                    className={`topnav-pill topnav-action${papersActive ? ' active' : ''}`}
+                  >
+                    Papers
                   </NavLink>
                   <NavLink
                     to={PLAYGROUNDS_PATH}

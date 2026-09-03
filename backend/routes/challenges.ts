@@ -77,14 +77,16 @@ async function syncCatalogRow(meta: {
   const now = Date.now();
   const result = await pool.query(
     `UPDATE challenges
-        SET description = COALESCE($2, description),
-            problem_statement = COALESCE($3::jsonb, problem_statement),
-            platform_spec = COALESCE($4::jsonb, platform_spec),
-            updated_at = $5
+        SET title = COALESCE($2, title),
+            description = COALESCE($3, description),
+            problem_statement = COALESCE($4::jsonb, problem_statement),
+            platform_spec = COALESCE($5::jsonb, platform_spec),
+            updated_at = $6
       WHERE id = $1
       RETURNING *`,
     [
       meta.id,
+      meta.title ?? null,
       meta.description ?? null,
       meta.problemStatement ? JSON.stringify(meta.problemStatement) : null,
       meta.platformSpec ? JSON.stringify(meta.platformSpec) : null,
@@ -175,6 +177,7 @@ router.put(
           if ('catalogInputPath' in patch) spec.catalogInputPath = patch.catalogInputPath;
           if ('evalSolutionPath' in patch) spec.evalSolutionPath = patch.evalSolutionPath;
           if ('gradeScript' in patch) spec.gradeScript = patch.gradeScript;
+          if ('scoring' in patch) spec.scoring = patch.scoring;
           meta.problemStatement = ps;
           meta.platformSpec = spec;
         } else if (tab === 'knobs') {
@@ -188,6 +191,7 @@ router.put(
         await writeChallengeMeta(meta);
         await syncCatalogRow({
           id,
+          title: meta.title,
           description: meta.description,
           problemStatement: meta.problemStatement,
           platformSpec: meta.platformSpec,

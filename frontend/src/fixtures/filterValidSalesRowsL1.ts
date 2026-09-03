@@ -21,8 +21,7 @@ def main() -> None:
 
     df = spark.read.parquet(INPUT_PATH)
 
-    # TODO: keep rows that pass all validity rules, then:
-    #   filtered.write.parquet(OUTPUT_PATH)
+    # TODO: apply the column rules, then write Parquet to OUTPUT_PATH.
     _ = F
 
     spark.stop()

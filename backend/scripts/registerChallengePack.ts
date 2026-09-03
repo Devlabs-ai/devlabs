@@ -32,6 +32,7 @@ interface ChallengePack {
   tags: string[];
   category: string;
   sandboxType: string;
+  finalized?: boolean;
   contentSource?: string;
   problemStatement: Record<string, unknown>;
   platformSpec: Record<string, unknown>;
@@ -111,7 +112,7 @@ async function upsertPack(c: ChallengePack): Promise<void> {
         finalized, sandbox_type, verified_dir,
         problem_statement, validation_spec, platform_spec,
         created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8,NULL,$9,NULL,$10,$11,$11)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,$10,NULL,$11,$12,$12)
      ON CONFLICT (id) DO UPDATE SET
        number = EXCLUDED.number,
        title = EXCLUDED.title,
@@ -132,6 +133,7 @@ async function upsertPack(c: ChallengePack): Promise<void> {
       thin.difficulty,
       JSON.stringify(thin.tags || []),
       thin.category,
+      thin.finalized === true,
       thin.sandboxType,
       JSON.stringify(thin.problemStatement || {}),
       JSON.stringify(thin.platformSpec || {}),

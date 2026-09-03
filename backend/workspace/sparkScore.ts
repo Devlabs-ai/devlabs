@@ -6,7 +6,8 @@
  * Functional match is required first (the existing grader). A challenge may
  * then declare scoring.executionTime:
  *
- *   bands     — adjective from Spark History jobs-wall (no points)
+ *   bands     — per-challenge labels from Spark History jobs-wall (no points)
+ *               e.g. quick / steady / slow with maxSeconds ceilings
  *   maxPoints — optional later; slower than target → maxPoints * (target/actual)
  */
 

@@ -29,6 +29,8 @@ export function useWorkspaceSync({
   notifyCreated: (path: string, content: string) => void;
   notifyDeleted: (path: string) => void;
   notifyRenamed: (from: string, to: string) => void;
+  /** Drop pending content timers without writing (e.g. before a starter reset). */
+  cancelPending: () => void;
 } {
   const [syncStatus, setSyncStatus] = useState<WorkspaceSyncStatus>(enabled ? 'idle' : 'offline');
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -147,6 +149,11 @@ export function useWorkspaceSync({
     });
   }, [canSync, sessionId, enqueueStructural]);
 
+  const cancelPending = useCallback(() => {
+    for (const t of Object.values(timersRef.current)) window.clearTimeout(t);
+    timersRef.current = {};
+  }, []);
+
   useEffect(() => () => {
     for (const t of Object.values(timersRef.current)) window.clearTimeout(t);
   }, []);
@@ -160,5 +167,6 @@ export function useWorkspaceSync({
     notifyCreated,
     notifyDeleted,
     notifyRenamed,
+    cancelPending,
   };
 }

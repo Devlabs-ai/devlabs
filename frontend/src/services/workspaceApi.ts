@@ -76,6 +76,20 @@ export async function renameWorkspaceFile(
   );
 }
 
+export async function resetWorkspace(
+  sessionId: string,
+  starterFiles?: SparkProjectFiles | null,
+): Promise<{ files: SparkProjectFiles; entrypoint: string | null }> {
+  const body: Record<string, unknown> = {};
+  if (starterFiles && Object.keys(starterFiles).length > 0) {
+    body.starterFiles = starterFiles;
+  }
+  const { data } = await axios.post(`/api/session/${sessionId}/workspace/reset`, body, {
+    headers: getAuthHeader(),
+  });
+  return data as { files: SparkProjectFiles; entrypoint: string | null };
+}
+
 export interface StartSparkJobBody {
   mode: 'run' | 'submit';
   /** Legacy direct INPUT_PATH; omit when using testcasesPrefix + cases. */
@@ -90,6 +104,8 @@ export interface StartSparkJobBody {
   outputFormat?: 'json' | 'parquet' | 'csv';
   /** Dimension Parquet path → job env PRODUCTS_PATH. */
   productsPath?: string;
+  /** Dimension Parquet path → job env DIM_PATH. */
+  dimPath?: string;
   /** Fact path → job env TXN_INPUT_PATH. */
   txnInputPath?: string;
   /** Rate-card path → job env RATE_INPUT_PATH. */

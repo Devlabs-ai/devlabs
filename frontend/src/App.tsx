@@ -11,6 +11,7 @@ import LandingPage from './pages/LandingPage';
 import PlayPage from './pages/PlayPage';
 import QuizPage from './pages/QuizPage';
 import WhitePapersPage from './pages/WhitePapersPage';
+import WhiteboardPage from './pages/WhiteboardPage';
 import SideQuestsPage from './pages/SideQuestsPage';
 import PlaygroundsPage from './pages/PlaygroundsPage';
 import ProjectsPage from './pages/ProjectsPage';
@@ -24,7 +25,7 @@ import AppLayout from './layouts/AppLayout';
 import { AppStateProvider } from './context/AppStateContext';
 import { getToken, getCurrentUser, logout } from './services/authApi';
 import { fetchChallenges, fetchChallenge } from './services/challengeApi';
-import { startSession, endSession, restoreSession } from './services/sessionApi';
+import { startSession, startBoardSession, endSession, restoreSession } from './services/sessionApi';
 import { startSparkSession } from './services/workspaceApi';
 import { buildDailyProductSalesProject } from './fixtures/dailyProductSalesL1';
 import {
@@ -32,6 +33,7 @@ import {
   buildSparkPlaygroundStarter,
 } from './fixtures/sparkPlaygroundStarter';
 import { isSparkPlatformChallenge } from './components/SparkPlatformWorkspace';
+import { isBoardChallenge } from './components/BoardWorkspace';
 import { SPARK_PLAYGROUND_CHALLENGE_ID } from './constants/playgroundDatasets';
 import { catalogPathForChallenge, isPlayDomainId, looksLikePlaySessionId } from './constants/playCatalog';
 import type {
@@ -102,6 +104,44 @@ export default function App(): React.JSX.Element {
     setPlayState('loading');
     setActiveChallenge(challenge);
 
+    if (isBoardChallenge(challenge)) {
+      try {
+        const full = await fetchChallenge(challenge.id);
+        const res = await startBoardSession(full.id);
+        const hydrated =
+          (res.challenge as ChallengeFull | undefined)
+          || (res.session as { challenge?: ChallengeFull } | undefined)?.challenge
+          || full;
+        setActiveSession({
+          id: res.sessionId,
+          startTime: Date.now(),
+          recovered: false,
+          terminalWsUrl: null,
+          metricsWsUrl: null,
+          portMap: null,
+          services: [],
+          terminalService: null,
+          runtime: 'board',
+        });
+        setActiveChallenge(hydrated);
+        openingSessionRef.current = res.sessionId;
+        setPlayState('active');
+        navigate(`/play/${res.sessionId}`);
+      } catch (e) {
+        const err = e as { response?: { data?: { error?: string } }; message?: string };
+        setActiveChallenge(null);
+        setActiveSession(null);
+        setPlayState('library');
+        navigate(catalogPathForChallenge(challenge.id, challenge.sandboxType, challenge.tags), { replace: true });
+        setStartError(
+          err?.response?.data?.error
+            || err.message
+            || 'Failed to start board session',
+        );
+      }
+      return;
+    }
+
     // Spark-platform: hydrate meta from MinIO; seed starter from MinIO when contentSource=minio.
     if (isSparkPlatformChallenge(challenge)) {
       try {
@@ -147,7 +187,7 @@ export default function App(): React.JSX.Element {
         setActiveChallenge(null);
         setActiveSession(null);
         setPlayState('library');
-        navigate(catalogPathForChallenge(challenge.id), { replace: true });
+        navigate(catalogPathForChallenge(challenge.id, challenge.sandboxType, challenge.tags), { replace: true });
         setStartError(
           err?.response?.data?.error
             || err.message
@@ -183,7 +223,7 @@ export default function App(): React.JSX.Element {
       const err = e as { response?: { data?: { error?: string } }; message?: string };
       setStartError(err?.response?.data?.error || err.message || 'Unknown error');
       setPlayState('library');
-      navigate(catalogPathForChallenge(challenge.id), { replace: true });
+      navigate(catalogPathForChallenge(challenge.id, challenge.sandboxType, challenge.tags), { replace: true });
     }
   };
 
@@ -204,6 +244,7 @@ export default function App(): React.JSX.Element {
       a === 'quiz' ||
       a === 'papers' ||
       a === 'quests' ||
+      a === 'whiteboard' ||
       a === 'playgrounds' ||
       a === 'projects' ||
       a === 'majors' ||
@@ -247,15 +288,20 @@ export default function App(): React.JSX.Element {
     void (async () => {
       try {
         const res = await restoreSession(sessionId);
+        const runtime =
+          (res?.session as { runtime?: string } | null | undefined)?.runtime ||
+          (res as { runtime?: string } | null | undefined)?.runtime ||
+          null;
+
+        if (runtime === 'board' || isBoardChallenge(res?.challenge || null)) {
+          await restoreBoardWorkspace(sessionId, res);
+          return;
+        }
+
         if (!res || res.status === 'ended') {
           await restoreSparkWorkspace(sessionId, null);
           return;
         }
-
-        const runtime =
-          (res.session as { runtime?: string } | null | undefined)?.runtime ||
-          (res as { runtime?: string }).runtime ||
-          null;
 
         if (runtime === 'spark-platform' || sessionId.startsWith('spark-')) {
           await restoreSparkWorkspace(sessionId, res);
@@ -287,6 +333,37 @@ export default function App(): React.JSX.Element {
         }
       }
     })();
+
+    async function restoreBoardWorkspace(
+      sid: string,
+      sessionRes: Awaited<ReturnType<typeof restoreSession>>,
+    ): Promise<void> {
+      const challengeId =
+        (sessionRes?.session as { challengeId?: string } | null | undefined)?.challengeId ||
+        sessionRes?.challenge?.id ||
+        null;
+      let full: ChallengeFull | ChallengePublic | null = sessionRes?.challenge || null;
+      if (challengeId) {
+        try {
+          full = await fetchChallenge(challengeId);
+        } catch {
+          /* keep session challenge payload */
+        }
+      }
+      setActiveSession({
+        id: sid,
+        startTime: sessionRes?.startTime || Date.now(),
+        recovered: true,
+        terminalWsUrl: null,
+        metricsWsUrl: null,
+        portMap: null,
+        services: [],
+        terminalService: null,
+        runtime: 'board',
+      });
+      setActiveChallenge(full);
+      setPlayState('active');
+    }
 
     async function restoreSparkWorkspace(
       sid: string,
@@ -336,6 +413,12 @@ export default function App(): React.JSX.Element {
     if (!activeSession) return;
     setEnding(true);
     try {
+      if (activeSession.runtime === 'board') {
+        const res = await endSession(activeSession.id);
+        setEndResult(res as EndSessionResult);
+        setPlayState('ended');
+        return;
+      }
       if (activeSession.runtime === 'spark-platform' || activeSession.id.startsWith('spark-')) {
         setEndResult({
           sessionId: activeSession.id,
@@ -397,7 +480,7 @@ export default function App(): React.JSX.Element {
   };
 
   const handleBackToLibrary = (): void => {
-    const dest = catalogPathForChallenge(activeChallenge?.id);
+    const dest = catalogPathForChallenge(activeChallenge?.id, activeChallenge?.sandboxType, activeChallenge?.tags);
     setPlayState('library');
     setActiveSession(null);
     setActiveChallenge(null);
@@ -488,6 +571,8 @@ export default function App(): React.JSX.Element {
           <Route path="play/quiz/:quizId" element={<QuizPage />} />
           <Route path="play/papers" element={<WhitePapersPage />} />
           <Route path="play/papers/:sectionId" element={<WhitePapersPage />} />
+          <Route path="play/whiteboard" element={<WhiteboardPage />} />
+          <Route path="play/whiteboard/:sectionId" element={<WhiteboardPage />} />
           <Route path="play/quests" element={<SideQuestsPage />} />
           <Route path="play/quests/:topicId" element={<SideQuestsPage />} />
           <Route path="play/playgrounds" element={<PlaygroundsPage />} />

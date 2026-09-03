@@ -204,6 +204,22 @@ async function seedMissingFiles(
   }
 }
 
+/** Replace the workspace with `files`: overwrite starter paths, delete extras. */
+async function replaceAllFiles(
+  sessionId: string,
+  workspacePrefix: string,
+  files: WorkspaceFiles,
+): Promise<void> {
+  const current = await loadAllFiles(sessionId, workspacePrefix);
+  const keep = new Set(Object.keys(files));
+  for (const filePath of Object.keys(current)) {
+    if (!keep.has(filePath)) {
+      await deleteFile(sessionId, workspacePrefix, filePath);
+    }
+  }
+  await seedFiles(sessionId, workspacePrefix, files);
+}
+
 module.exports = {
   putFile,
   getFile,
@@ -213,6 +229,7 @@ module.exports = {
   loadAllFiles,
   seedFiles,
   seedMissingFiles,
+  replaceAllFiles,
   reindexFromStore,
   buildWorkspacePrefix,
   sanitizeOwner,

@@ -215,6 +215,9 @@ interface SparkProjectEditorProps {
   /** Open a read-only tab (e.g. a previous submission snapshot). */
   previewOpenRequest?: { key: string; fileName: string; content: string } | null;
   onActivePathChange?: (path: string) => void;
+  /** Restore published starter code (parent handles persist + confirm). */
+  onResetToStarter?: () => void;
+  resetting?: boolean;
 }
 
 export default function SparkProjectEditor({
@@ -227,6 +230,8 @@ export default function SparkProjectEditor({
   onFileRenamed,
   previewOpenRequest = null,
   onActivePathChange,
+  onResetToStarter,
+  resetting = false,
 }: SparkProjectEditorProps): JSX.Element {
   const paths = Object.keys(files);
   const initialFile = paths.includes(entryFile) ? entryFile : paths[0] || '';
@@ -575,6 +580,18 @@ export default function SparkProjectEditor({
             })}
           </div>
           <div className="spark-editor-tabs-actions">
+            {onResetToStarter && (
+              <button
+                type="button"
+                className="spark-editor-reset"
+                title="Reset to starter code"
+                aria-label="Reset to starter code"
+                disabled={resetting}
+                onClick={onResetToStarter}
+              >
+                {resetting ? 'Resetting…' : 'Reset'}
+              </button>
+            )}
             <button
               type="button"
               className={`spark-explorer-arrow${explorerOpen ? ' active' : ''}`}

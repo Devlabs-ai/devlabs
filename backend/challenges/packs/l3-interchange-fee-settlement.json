@@ -1,6 +1,7 @@
 {
   "id": "l3-interchange-fee-settlement",
   "number": 18,
+  "finalized": true,
   "title": "Interchange Fee Settlement Summary",
   "contentSource": "minio",
   "description": "Helix Payments is a payment network. One of their products is an interchange fee summary of all the merchants in a country and mode of card transaction.\n\nInterchange is the fee on an approved card payment. The rate depends on merchant category (`mcc`), country (`country_code`), and how the card was presented (`entry_mode` \u2014 chip, swipe, or contactless). Each rate is valid only between `effective_from` and `effective_to`.\n\nOnly approved payments (`response_code == \"00\"`) are in scope. Each of those payments must be priced with the rate that matches `(mcc, country_code, entry_mode)` and whose window contains the payment date:\n\n```\ninterchange_fee = round(amount * rate_bps / 10000 + fixed_fee, 2)\n```\n\nApproved payments with no matching rate are out of scope. Helix cannot publish a fee without a rate.\n\n**Run** uses a 20,000-row sample and a pruned rate card so you can check the CSV quickly. **Submit** uses the shared 100 million payment drop.\n\nThe output is one row per `(country_code, entry_mode)`:\n\n| Column | Meaning |\n| --- | --- |\n| `txn_count` | How many payments were priced in the group |\n| `total_fee` | Sum of `interchange_fee` in the group |\n| `distinct_rate_versions_used` | How many distinct `rate_id`s were used in the group |\n",
@@ -202,6 +203,7 @@
     ],
     "sparkConf": {
       "spark.sql.adaptive.enabled": "false",
+      "spark.sql.shuffle.partitions": "32",
       "spark.task.maxFailures": "3",
       "spark.yarn.maxAppAttempts": "1"
     },
@@ -214,42 +216,7 @@
           { "label": "Slow", "tone": "slow" }
         ]
       }
-    },
-    "knobs": [
-      {
-        "id": "shufflePartitions",
-        "conf": "spark.sql.shuffle.partitions",
-        "label": "Shuffle partitions",
-        "help": "Partitions used for shuffle exchanges (joins and aggregations).",
-        "default": "32",
-        "options": [
-          {
-            "value": "8",
-            "label": "8"
-          },
-          {
-            "value": "16",
-            "label": "16"
-          },
-          {
-            "value": "32",
-            "label": "32"
-          },
-          {
-            "value": "64",
-            "label": "64"
-          },
-          {
-            "value": "128",
-            "label": "128"
-          },
-          {
-            "value": "200",
-            "label": "200"
-          }
-        ]
-      }
-    ]
+    }
   },
   "dataGen": {
     "pattern": "A",

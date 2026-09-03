@@ -5,6 +5,7 @@ import SandboxWorkspace from '../components/SandboxWorkspace';
 import SparkPlatformWorkspace, {
   isSparkPlatformChallenge,
 } from '../components/SparkPlatformWorkspace';
+import BoardWorkspace, { isBoardChallenge } from '../components/BoardWorkspace';
 import {
   PLAY_DOMAINS,
   getPlayDomain,
@@ -15,6 +16,7 @@ import {
   playCatalogPath,
   type PlayDomainId,
 } from '../constants/playCatalog';
+import { WHITEBOARD_PATH } from '../constants/whiteboard';
 import type { ChallengePublic } from '../types/domain';
 
 type DifficultyFilter = 'all' | 'l0' | 'l1' | 'l2' | 'l3' | 'l4';
@@ -39,6 +41,17 @@ function difficultyClass(d: string | undefined): string {
 function matchesDifficulty(challenge: ChallengePublic, filter: DifficultyFilter): boolean {
   if (filter === 'all') return true;
   return difficultyClass(challenge.difficulty) === filter;
+}
+
+function catalogIdLabel(challenge: ChallengePublic): string {
+  const ps = challenge.problemStatement;
+  const fromPs =
+    ps && typeof ps === 'object' && typeof (ps as { idLabel?: unknown }).idLabel === 'string'
+      ? (ps as { idLabel: string }).idLabel.trim()
+      : '';
+  if (fromPs) return fromPs;
+  if (challenge.number != null) return String(challenge.number);
+  return '—';
 }
 
 function LibraryView({ challenges, challengesError, startError, onSelectChallenge }: LibraryViewProps): JSX.Element {
@@ -73,6 +86,7 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
       .map((entry) => {
         const challenge = byId.get(entry.challengeId);
         if (!challenge) return null;
+        if (isBoardChallenge(challenge)) return null;
         return { ...entry, challenge };
       })
       .filter((row): row is NonNullable<typeof row> => Boolean(row));
@@ -89,7 +103,7 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
         if (!matchesDifficulty(row.challenge, difficulty)) return false;
         if (!q) return true;
         const hay = [
-          row.challenge.number != null ? String(row.challenge.number) : '',
+          catalogIdLabel(row.challenge),
           row.challenge.title,
           row.challenge.description,
           row.challenge.difficulty,
@@ -100,11 +114,6 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
           .join(' ')
           .toLowerCase();
         return hay.includes(q);
-      })
-      .sort((a, b) => {
-        const an = a.challenge.number ?? Number.POSITIVE_INFINITY;
-        const bn = b.challenge.number ?? Number.POSITIVE_INFINITY;
-        return an - bn;
       });
   }, [catalogRows, domainId, activeTopicId, difficulty, search]);
 
@@ -119,20 +128,20 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
 
       <div className="play-problems-layout">
         <aside className="play-problems-sidebar" aria-label="Tracks">
-          <NavLink to="/play/papers" className="play-sidebar-card play-sidebar-papers">
-            <strong>Explore white papers</strong>
-            <p>Landmark data-systems papers — storage, compute, and query engines that shaped the field.</p>
-            <span className="play-sidebar-papers-cta">
-              Browse papers
-              <span aria-hidden>→</span>
-            </span>
-          </NavLink>
-
           <NavLink to="/play/quests" className="play-sidebar-card play-sidebar-papers play-sidebar-quests">
             <strong>Side Quests</strong>
             <p>Quirkier quizzes — no code, just Spark brain snacks. Browse by topic.</p>
             <span className="play-sidebar-papers-cta">
               Browse quests
+              <span aria-hidden>→</span>
+            </span>
+          </NavLink>
+
+          <NavLink to={WHITEBOARD_PATH} className="play-sidebar-card play-sidebar-papers play-sidebar-board">
+            <strong>Whiteboard</strong>
+            <p>Reconstruct what the engine does. Fill the empty blocks — no cluster.</p>
+            <span className="play-sidebar-papers-cta">
+              Browse boards
               <span aria-hidden>→</span>
             </span>
           </NavLink>
@@ -267,7 +276,7 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                           className="play-problem-id"
                           title={challenge.id}
                         >
-                          {challenge.number != null ? String(challenge.number) : '—'}
+                          {catalogIdLabel(challenge)}
                         </span>
                         <span className="play-problem-title">{challenge.title}</span>
                         <span className="play-problem-topics">
@@ -307,6 +316,8 @@ export default function PlayPage(): JSX.Element | null {
     endResult,
     onSelectChallenge,
     onBackToLibrary,
+    onEnd,
+    ending,
   } = useAppState();
   const params = useParams<{ domainId?: string; panelId?: string }>();
   const restoringSession =
@@ -317,12 +328,20 @@ export default function PlayPage(): JSX.Element | null {
 
   if (restoringSession || playState === 'loading') {
     const spark = isSparkPlatformChallenge(activeChallenge);
+    const board = isBoardChallenge(activeChallenge);
     return (
       <div className="app-page app-page-centered">
         <div className="loading-card app-surface-card">
           <span className="spinner" />
           <div>
-            {spark ? (
+            {board ? (
+              <>
+                Opening board for <strong>{activeChallenge?.title}</strong>…
+                <div style={{ color: 'var(--text-dim)', fontSize: 14, marginTop: 6 }}>
+                  No cluster — fill the empty blocks from Unused.
+                </div>
+              </>
+            ) : spark ? (
               <>
                 Opening Spark workspace for <strong>{activeChallenge?.title}</strong>…
                 <div style={{ color: 'var(--text-dim)', fontSize: 14, marginTop: 6 }}>
@@ -361,12 +380,20 @@ export default function PlayPage(): JSX.Element | null {
   }
 
   if (playState === 'active' && activeSession) {
+    if (isBoardChallenge(activeChallenge) || activeSession.runtime === 'board') {
+      return (
+        <BoardWorkspace
+          challenge={activeChallenge}
+          session={activeSession}
+          onClose={onBackToLibrary}
+        />
+      );
+    }
     if (isSparkPlatformChallenge(activeChallenge) || activeSession.runtime === 'spark-platform') {
       return (
         <SparkPlatformWorkspace
           challenge={activeChallenge}
           session={activeSession}
-          onClose={onBackToLibrary}
         />
       );
     }
@@ -374,27 +401,28 @@ export default function PlayPage(): JSX.Element | null {
       <SandboxWorkspace
         challenge={activeChallenge}
         session={activeSession}
+        onClose={onEnd}
+        closing={ending}
       />
     );
   }
 
   if (playState === 'ended' && endResult) {
-    const result = endResult as { elapsed?: number };
     const spark = activeSession?.runtime === 'spark-platform';
+    const board = activeSession?.runtime === 'board';
     return (
       <div className="app-page app-page-centered">
         <div className="score-card app-surface-card">
           <h2>Session ended</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '0 0 8px' }}>
-            Elapsed: {Math.floor((result.elapsed ?? 0) / 1000)}s
-          </p>
           <p style={{ color: 'var(--text-dim)', fontSize: 13, margin: '0 0 20px' }}>
-            {spark
+            {board
+              ? 'Board session closed. Open it again from Whiteboard to keep placing widgets.'
+              : spark
               ? 'Platform session closed. Evaluate the candidate from job outputs and your notes.'
               : 'The sandbox has been torn down. Evaluate the candidate from your notes.'}
           </p>
           <button type="button" onClick={onBackToLibrary}>
-            Back to library
+            {board ? 'Back to Whiteboard' : 'Back to library'}
           </button>
         </div>
       </div>

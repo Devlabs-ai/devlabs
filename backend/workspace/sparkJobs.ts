@@ -18,6 +18,10 @@ const {
 } = require('./sparkScore');
 
 const BUCKET = process.env.MINIO_BUCKET || process.env.S3_BUCKET || 'devlabs-data';
+
+/** Per user+challenge object-store retention (jobs/ + results/). Postgres rows stay. */
+const KEEP_RUN_ARTIFACTS = 1;
+const KEEP_SUBMIT_ARTIFACTS = 5;
 const PLATFORM_API =
   process.env.SPARK_PLATFORM_API_URL || 'http://192.168.1.9:30088';
 const HISTORY_UI_FALLBACK =
@@ -66,7 +70,8 @@ export interface StartSparkJobOpts {
   mode: SparkJobMode;
   /**
    * Direct INPUT_PATH (legacy / non-testcase challenges).
-   * Ignored when testcasesPrefix + cases are provided (platform stages inputs).
+   * Ignored when testcasesPrefix + cases are provided.
+   * A single testcase reads the canonical folder; multiple cases are staged.
    */
   inputPath?: string;
   businessDate: string;
@@ -82,6 +87,8 @@ export interface StartSparkJobOpts {
   outputFormat?: 'json' | 'parquet' | 'csv';
   /** Optional products dimension path → env PRODUCTS_PATH. */
   productsPath?: string;
+  /** Optional dimension path → env DIM_PATH (Helix Card Rails joins). */
+  dimPath?: string;
   /** Fact path → env TXN_INPUT_PATH. */
   txnInputPath?: string;
   /** Rate-card path → env RATE_INPUT_PATH. */
@@ -144,6 +151,59 @@ async function stageTestcaseInputs(
   return { inputPathS3a: s3aKey(destRoot), stagedFiles };
 }
 
+function testcaseFolderS3a(
+  testcasesPrefixS3a: string,
+  caseId: string,
+  folder: string = 'input',
+): string {
+  const tcRoot = s3aToKeyLocal(testcasesPrefixS3a).replace(/\/?$/, '/');
+  const folderName = (folder || 'input').replace(/^\/+|\/+$/g, '') || 'input';
+  return s3aKey(`${tcRoot}${caseId}/${folderName}/`);
+}
+
+/**
+ * Drop old Run/Submit object-store trees for this workspace.
+ * Keeps the newest Run and the newest N Submits. Grade rows in Postgres are not deleted.
+ */
+async function pruneWorkspaceJobArtifacts(opts: {
+  root: string;
+  challengeId: string;
+  owner: string;
+}): Promise<void> {
+  const challengeId = String(opts.challengeId || '').trim();
+  if (!challengeId || challengeId === 'spark-playground') return;
+
+  const store = getObjectStore();
+  const root = normalizeKey(opts.root).replace(/\/?$/, '');
+
+  async function pruneMode(mode: SparkJobMode, keep: number): Promise<void> {
+    const { rows } = await pool.query(
+      `SELECT id FROM submissions
+        WHERE challenge_id = $1 AND user_id = $2 AND mode = $3
+        ORDER BY submitted_at DESC, id DESC`,
+      [challengeId, opts.owner, mode],
+    );
+    const extra = rows.slice(keep);
+    let deleted = 0;
+    for (const row of extra) {
+      const id = String(row.id);
+      deleted += await store.deletePrefix(`${root}/jobs/${id}`);
+      deleted += await store.deletePrefix(`${root}/results/${id}`);
+      await store.purgeDeleteMarkers(`${root}/jobs/${id}/`);
+      await store.purgeDeleteMarkers(`${root}/results/${id}/`);
+    }
+    if (extra.length) {
+      console.log(
+        `[spark-jobs] pruned ${extra.length} ${mode} job(s) for ${challengeId}/${opts.owner} `
+        + `(kept ${keep}, objects=${deleted})`,
+      );
+    }
+  }
+
+  await pruneMode('run', KEEP_RUN_ARTIFACTS);
+  await pruneMode('submit', KEEP_SUBMIT_ARTIFACTS);
+}
+
 function s3aToKeyLocal(s3aOrKey: string): string {
   const raw = String(s3aOrKey || '').trim();
   if (!raw) return '';
@@ -182,6 +242,8 @@ type LabPlatformSpec = {
   catalogInputPath?: string;
   runEventsInputPath?: string;
   runCatalogInputPath?: string;
+  dimPath?: string;
+  productsPath?: string;
 };
 
 function safeWorkspacePy(raw: unknown, fallback: string): string {
@@ -341,18 +403,38 @@ async function writeManifest(
   await store.putObject(key, JSON.stringify(manifest, null, 2), 'application/json');
 }
 
+function formatFetchError(err: unknown): string {
+  const top = err instanceof Error ? err.message : String(err);
+  const cause = err instanceof Error ? (err as Error & { cause?: unknown }).cause : undefined;
+  const nested =
+    cause instanceof Error
+      ? cause.message
+      : cause && typeof cause === 'object' && 'code' in cause
+        ? String((cause as { code?: unknown }).code)
+        : cause
+          ? String(cause)
+          : '';
+  if (nested && nested !== top) return `${top} (${nested})`;
+  return top;
+}
+
 async function platformFetch(
   path: string,
   init?: RequestInit,
 ): Promise<{ status: number; json?: unknown; text?: string }> {
   const url = `${PLATFORM_API.replace(/\/$/, '')}${path}`;
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers || {}),
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers || {}),
+      },
+    });
+  } catch (err: unknown) {
+    throw new Error(`Spark Platform unreachable at ${url}: ${formatFetchError(err)}`);
+  }
   const ct = res.headers.get('content-type') || '';
   if (ct.includes('application/json')) {
     return { status: res.status, json: await res.json() };
@@ -684,7 +766,9 @@ async function enrichJobDebug(jobId: string): Promise<Record<string, unknown>> {
 
 async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, unknown>> {
   await resolveHistoryBase();
-  const { session, mode, businessDate, productsPath } = opts;
+  const { session, mode, businessDate } = opts;
+  let productsPath = (opts.productsPath || '').trim();
+  let dimPath = (opts.dimPath || '').trim();
   const dualInput = Boolean(opts.dualInput);
   let txnInputPath = (opts.txnInputPath || '').trim();
   let rateInputPath = (opts.rateInputPath || '').trim();
@@ -767,6 +851,10 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
       // Compat: INPUT_PATH points at side A for labs that only read one path by mistake.
       inputPath = inputAPath;
       stagedFiles = stagedA.stagedFiles + stagedB.stagedFiles;
+    } else if (cases.length === 1) {
+      // Single case: read the canonical drop. Do not copy it into the workspace.
+      inputPath = testcaseFolderS3a(testcasesPrefix, cases[0], 'input');
+      stagedFiles = 0;
     } else {
       const staged = await stageTestcaseInputs(
         store,
@@ -800,6 +888,8 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
       eventsInputPath = String(labSpec.eventsInputPath || eventsInputPath).trim();
       catalogInputPath = String(labSpec.catalogInputPath || catalogInputPath).trim();
     }
+    productsPath = String(labSpec.productsPath || productsPath).trim();
+    dimPath = String(labSpec.dimPath || dimPath).trim();
   }
 
   if (eventsInputPath && catalogInputPath) {
@@ -929,6 +1019,9 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
       ...(productsPath && String(productsPath).trim()
         ? { PRODUCTS_PATH: String(productsPath).trim() }
         : {}),
+      ...(dimPath && String(dimPath).trim()
+        ? { DIM_PATH: String(dimPath).trim() }
+        : {}),
       ...(txnInputPath ? { TXN_INPUT_PATH: txnInputPath } : {}),
       ...(rateInputPath ? { RATE_INPUT_PATH: rateInputPath } : {}),
       ...(inputAPath && inputBPath
@@ -946,7 +1039,7 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
   };
 
   const submittedAt = Date.now();
-  const gradeStatus = mode === 'submit' ? 'pending' : null;
+  const gradeStatus = playgroundTrail ? null : 'pending';
   await pool.query(
     `INSERT INTO submissions
        (id, session_id, challenge_id, user_id, mode, k8s_name, status,
@@ -973,7 +1066,9 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
       JSON.stringify([
         'Snapshot written',
         cases.length
-          ? `Staged ${stagedFiles} testcase input file(s): ${cases.join(', ')}`
+          ? stagedFiles
+            ? `Staged ${stagedFiles} testcase input file(s): ${cases.join(', ')}`
+            : `INPUT_PATH=${inputPath}`
           : inputPath
             ? 'Using provided INPUT_PATH'
             : 'No INPUT_PATH — job must use paths from code',
@@ -981,13 +1076,23 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
         `Submitting ${k8sName} to Spark Platform…`,
         mode === 'submit'
           ? 'Submit mode — will row-diff against each testcase expected/ when Spark succeeds'
-          : 'Run mode — output for your validation (not a scored submission)',
+          : 'Run mode — functional check on the Run sample only (not a final submission)',
       ]),
       gradeStatus,
       submittedAt,
       submittedAt,
     ],
   );
+
+  try {
+    await pruneWorkspaceJobArtifacts({
+      root,
+      challengeId: String(session.challengeId || ''),
+      owner,
+    });
+  } catch (err) {
+    console.warn('[spark-jobs] artifact prune failed:', err);
+  }
 
   let platformJob: unknown = null;
   try {
@@ -996,9 +1101,16 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
       body: JSON.stringify(platformBody),
     });
     if (res.status >= 400) {
+      console.error('[spark-jobs] platform error:', {
+        status: res.status,
+        json: JSON.stringify(res.json, null, 2),
+        text: res.text,
+      });
+      const rawDetail = (res.json as { detail?: unknown } | undefined)?.detail;
       const detail =
-        (res.json as { detail?: string } | undefined)?.detail
+        (typeof rawDetail === 'string' ? rawDetail : null)
         || res.text
+        || (res.json ? JSON.stringify(res.json, null, 2) : null)
         || `Spark Platform error ${res.status}`;
       await pool.query(
         `UPDATE submissions SET status='failed', error=$2, updated_at=$3 WHERE id=$1`,
@@ -1021,7 +1133,7 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
           `mainApplicationFile=${mainFile}`,
           mode === 'submit'
             ? 'Submit mode — will evaluate against expected output when Spark succeeds'
-            : 'Run mode — output for your validation (not a scored submission)',
+            : 'Run mode — functional check on the Run sample only (not a final submission)',
         ]),
         Date.now(),
       ],
@@ -1094,7 +1206,11 @@ function publicJob(row: Record<string, unknown> | null): Record<string, unknown>
 async function maybeGradeJob(jobId: string): Promise<void> {
   const row = await getJobRow(jobId);
   if (!row) return;
-  if (String(row.mode) !== 'submit') return;
+  const mode = String(row.mode || '');
+  const challengeId = String(row.challenge_id || '');
+  if (challengeId === 'spark-playground') return;
+  if (mode !== 'submit' && mode !== 'run') return;
+  const gradeKind = mode === 'run' ? 'preview' : 'submission';
   if (String(row.status) !== 'succeeded') {
     if (String(row.status) === 'failed' && row.grade_status === 'pending') {
       const sparkErr = String(row.error || '').trim();
@@ -1104,7 +1220,7 @@ async function maybeGradeJob(jobId: string): Promise<void> {
         : (sparkErr || 'Spark application failed');
       const failedGrade = await scoreGradeForJob(jobId, {
         passed: false,
-        kind: 'submission',
+        kind: gradeKind,
         summary,
         checks: [{
           id: 'spark_status',
@@ -1139,7 +1255,7 @@ async function maybeGradeJob(jobId: string): Promise<void> {
         jobId,
         JSON.stringify({
           passed: false,
-          kind: 'submission',
+          kind: gradeKind,
           summary: 'No expected/eval path configured for challenge',
           checks: [],
           gradedAt: Date.now(),
@@ -1181,18 +1297,18 @@ async function maybeGradeJob(jobId: string): Promise<void> {
       /* fall back to directory-style expected/ */
     }
 
-    const grade = await scoreGradeForJob(
-      jobId,
-      await gradeOutputAgainstSolution({
-        candidateOutputS3a: String(row.output_path),
-        evalSolutionS3a: String(row.results_path),
-        kind: 'submission',
-        sparkSucceeded: true,
-        gradeCases,
-        gradeKeys,
-        gradeScript,
-      }),
-    );
+    const rawGrade = await gradeOutputAgainstSolution({
+      candidateOutputS3a: String(row.output_path),
+      evalSolutionS3a: String(row.results_path),
+      kind: gradeKind,
+      sparkSucceeded: true,
+      gradeCases,
+      gradeKeys,
+      gradeScript,
+    });
+    const grade = mode === 'run'
+      ? rawGrade
+      : await scoreGradeForJob(jobId, rawGrade);
     const lines = (() => {
       try {
         return typeof row.logs === 'string' ? JSON.parse(row.logs as string) : (row.logs as string[]) || [];
@@ -1205,8 +1321,8 @@ async function maybeGradeJob(jobId: string): Promise<void> {
       '── Evaluation ──',
       grade.summary,
       ...grade.checks.map(
-        (c: { passed: boolean; label: string; detail?: string }) =>
-          `${c.passed ? '✓' : '✗'} ${c.label}${c.detail ? ` (${c.detail})` : ''}`,
+        (c: { passed: boolean; label: string; detail?: string; skipped?: boolean }) =>
+          `${c.skipped ? '–' : c.passed ? '✓' : '✗'} ${c.label}${c.detail ? ` (${c.detail})` : ''}`,
       ),
     ];
     await pool.query(
@@ -1238,7 +1354,7 @@ async function maybeGradeJob(jobId: string): Promise<void> {
         jobId,
         JSON.stringify({
           passed: false,
-          kind: 'submission',
+          kind: gradeKind,
           summary: msg,
           checks: [{ id: 'grader', label: 'Evaluation ran', passed: false, detail: msg }],
           gradedAt: Date.now(),

@@ -154,6 +154,7 @@ async function hydrateChallengeFromMinio(
   base: Record<string, unknown> | null,
 ): Promise<Record<string, unknown> | null> {
   if (!base || typeof base.id !== 'string') return base;
+  if ((base.sandboxType as string | undefined) === 'board') return base;
 
   const meta = await loadChallengeMeta(base.id);
   const wantsMinio = catalogWantsMinio(base)
