@@ -1,32 +1,13 @@
-BIN  := bin/cinder
-PORT ?= 7379
-
-.PHONY: build run test race loop vet smoke clean
-
-build:
-	go build -o $(BIN) ./cmd/cinder
-
-run: build
-	CINDER_ADDR=:$(PORT) $(BIN)
+.PHONY: test race run build
 
 test:
-	go test ./...
+	go test ./internal/eventloop/
 
-# The interesting one for this module: if command execution ever leaves the
-# loop goroutine, the race detector is what tells you.
 race:
-	go test -race ./...
+	go test -race ./internal/eventloop/
 
-# Loop-level tests only. They use a socketpair, so they pass before the server
-# TODOs are done.
-loop:
-	go test ./internal/evloop/
+build:
+	go build -o bin/cinder ./cmd/cinder/
 
-vet:
-	go vet ./...
-
-smoke: build
-	PORT=$(PORT) ./scripts/smoke.sh
-
-clean:
-	rm -rf bin
+run: build
+	./bin/cinder

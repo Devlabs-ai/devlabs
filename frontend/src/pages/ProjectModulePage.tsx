@@ -403,7 +403,7 @@ export default function ProjectModulePage(): JSX.Element {
   }
 
   const project = getProject(projectId);
-  if (!project) return <Navigate to={MAJORS_PATH} replace />;
+  if (!project || project.status !== 'ready') return <Navigate to={MAJORS_PATH} replace />;
 
   const module = getProjectModule(project, moduleId);
   if (!module) return <Navigate to={`${MAJORS_PATH}/${project.id}`} replace />;

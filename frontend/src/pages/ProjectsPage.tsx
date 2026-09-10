@@ -1,8 +1,52 @@
 import React from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
-import ModuleProgress from '../components/ModuleProgress';
-import { PROJECTS, MAJORS_PATH, getProject, type ProjectEntry } from '../constants/projects';
+import { PROJECTS, MAJORS_PATH, getProject, type ProjectEntry, type ProjectModule } from '../constants/projects';
 import { MINORS_PATH, minorsFor } from '../constants/minors';
+import { hasModuleContent } from '../fixtures/projectModules';
+
+function MilestoneRow({
+  projectId,
+  module,
+  index,
+}: {
+  projectId: string;
+  module: ProjectModule;
+  index: number;
+}): JSX.Element {
+  const open = module.status === 'ready' && hasModuleContent(projectId, module.id);
+  const ordinal = String(index + 1).padStart(2, '0');
+
+  const body = (
+    <>
+      <span className="project-milestone-ord">{ordinal}</span>
+      <span className="project-milestone-copy">
+        <span className="project-milestone-label">{module.label}</span>
+        <span className="project-milestone-sub">{module.subtitle}</span>
+      </span>
+      <span className={`project-milestone-state${open ? ' is-open' : ''}`}>
+        {open ? 'Open' : 'Soon'}
+      </span>
+    </>
+  );
+
+  if (open) {
+    return (
+      <li>
+        <Link to={`${MAJORS_PATH}/${projectId}/${module.id}`} className="project-milestone is-open">
+          {body}
+        </Link>
+      </li>
+    );
+  }
+
+  return (
+    <li>
+      <div className="project-milestone is-planned" aria-disabled="true">
+        {body}
+      </div>
+    </li>
+  );
+}
 
 function ProjectDetail({ project }: { project: ProjectEntry }): JSX.Element {
   const relatedMinors = minorsFor(project.minors);
@@ -19,10 +63,6 @@ function ProjectDetail({ project }: { project: ProjectEntry }): JSX.Element {
         <p className="project-detail-subtitle">{project.subtitle}</p>
       </header>
 
-      <section className="project-stages">
-        <ModuleProgress project={project} activeId={null} variant="hero" />
-      </section>
-
       {relatedMinors.length > 0 && (
         <ul className="project-minor-refs">
           {relatedMinors.map((minor) => (
@@ -37,11 +77,25 @@ function ProjectDetail({ project }: { project: ProjectEntry }): JSX.Element {
 
       <div className="project-about">
         {project.about.map((paragraph) => (
-          <p key={paragraph} className="project-about-body">
+          <p key={paragraph.slice(0, 48)} className="project-about-body">
             {paragraph}
           </p>
         ))}
       </div>
+
+      <section className="project-milestones" aria-label="Chapters">
+        <h2 className="project-milestones-heading">Chapters</h2>
+        <ol className="project-milestones-list">
+          {project.modules.map((module, index) => (
+            <MilestoneRow
+              key={module.id}
+              projectId={project.id}
+              module={module}
+              index={index}
+            />
+          ))}
+        </ol>
+      </section>
     </div>
   );
 }
@@ -51,7 +105,7 @@ export default function ProjectsPage(): JSX.Element {
 
   if (projectId) {
     const project = getProject(projectId);
-    if (!project) return <Navigate to={MAJORS_PATH} replace />;
+    if (!project || project.status !== 'ready') return <Navigate to={MAJORS_PATH} replace />;
     return <ProjectDetail project={project} />;
   }
 
@@ -73,31 +127,45 @@ export default function ProjectsPage(): JSX.Element {
       </header>
 
       <section className="playgrounds-grid">
-        {PROJECTS.map((project) => (
-          <Link key={project.id} to={`${MAJORS_PATH}/${project.id}`} className="playground-tile">
-            <strong className="playground-tile-title">
-              {project.name}
-              <span className="project-tile-level">{project.level}</span>
-            </strong>
-            <p className="project-tile-subtitle">{project.subtitle}</p>
-            <p className="playground-tile-blurb">{project.blurb}</p>
-            <ul className="playground-tile-facts">
-              <li className="playground-tile-fact">{project.language}</li>
-              <li className="playground-tile-fact">
-                {project.modules.filter((m) => m.status === 'ready').length} open
-              </li>
-              {project.facts.map((fact) => (
-                <li key={fact} className="playground-tile-fact">
-                  {fact}
+        {PROJECTS.map((project) => {
+          if (project.status !== 'ready') {
+            return (
+              <div key={project.id} className="playground-tile playground-tile--soon">
+                <strong className="playground-tile-title">
+                  {project.name}
+                  <span className="playground-tile-soon">Coming soon</span>
+                </strong>
+                <p className="project-tile-subtitle">{project.subtitle}</p>
+                <p className="playground-tile-blurb">{project.blurb}</p>
+              </div>
+            );
+          }
+          return (
+            <Link key={project.id} to={`${MAJORS_PATH}/${project.id}`} className="playground-tile">
+              <strong className="playground-tile-title">
+                {project.name}
+                <span className="project-tile-level">{project.level}</span>
+              </strong>
+              <p className="project-tile-subtitle">{project.subtitle}</p>
+              <p className="playground-tile-blurb">{project.blurb}</p>
+              <ul className="playground-tile-facts">
+                <li className="playground-tile-fact">{project.language}</li>
+                <li className="playground-tile-fact">
+                  {project.modules.filter((m) => m.status === 'ready').length} open
                 </li>
-              ))}
-            </ul>
-            <span className="playground-tile-cta">
-              View {project.name}
-              <span aria-hidden>→</span>
-            </span>
-          </Link>
-        ))}
+                {project.facts.map((fact) => (
+                  <li key={fact} className="playground-tile-fact">
+                    {fact}
+                  </li>
+                ))}
+              </ul>
+              <span className="playground-tile-cta">
+                View {project.name}
+                <span aria-hidden>→</span>
+              </span>
+            </Link>
+          );
+        })}
       </section>
     </div>
   );

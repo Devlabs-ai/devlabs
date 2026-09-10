@@ -48,15 +48,13 @@ const CINDER_MAP: ProjectMapSpec = {
   markers: [
     { moduleId: 'tcp-server', x: 0.07, y: 0.63, place: 'Harbour of Accept', anchor: 'right' },
     { moduleId: 'event-loop', x: 0.20, y: 0.34, place: 'Loop Light', anchor: 'top' },
-    { moduleId: 'resp-protocol', x: 0.255, y: 0.56, place: 'Protocol Narrows', anchor: 'bottom' },
-    { moduleId: 'commands', x: 0.365, y: 0.38, place: 'Dispatch Crossing', anchor: 'top' },
-    { moduleId: 'keyspace', x: 0.38, y: 0.70, place: 'Expiry Marsh', anchor: 'bottom' },
-    { moduleId: 'pubsub', x: 0.575, y: 0.255, place: 'Fanout Reach', anchor: 'top' },
-    { moduleId: 'streams', x: 0.50, y: 0.84, place: 'The Stream Delta', anchor: 'top' },
-    { moduleId: 'append-only-log', x: 0.68, y: 0.62, place: 'Append Foothills', anchor: 'bottom' },
-    { moduleId: 'recovery', x: 0.775, y: 0.33, place: 'Recovery Pass', anchor: 'top' },
-    { moduleId: 'compaction', x: 0.87, y: 0.56, place: 'Compaction Quarry', anchor: 'bottom' },
-    { moduleId: 'benchmarks', x: 0.915, y: 0.155, place: 'Benchmark Peak', anchor: 'left' },
+    { moduleId: 'csp-protocol', x: 0.30, y: 0.58, place: 'Protocol Narrows', anchor: 'bottom' },
+    { moduleId: 'commands', x: 0.42, y: 0.36, place: 'Dispatch Crossing', anchor: 'top' },
+    { moduleId: 'keyspace', x: 0.48, y: 0.72, place: 'Expiry Marsh', anchor: 'bottom' },
+    { moduleId: 'append-only-log', x: 0.64, y: 0.55, place: 'Append Foothills', anchor: 'bottom' },
+    { moduleId: 'recovery', x: 0.76, y: 0.32, place: 'Recovery Pass', anchor: 'top' },
+    { moduleId: 'compaction', x: 0.86, y: 0.58, place: 'Compaction Quarry', anchor: 'bottom' },
+    { moduleId: 'benchmarks', x: 0.92, y: 0.18, place: 'Benchmark Peak', anchor: 'left' },
   ],
 };
 

@@ -5,9 +5,14 @@ export const MAJORS_PATH = '/play/majors';
 export const PROJECTS_PATH = MAJORS_PATH;
 
 /**
- * A module is one sitting: theory on the left, a full repo on the right with the
- * pieces the candidate has to fill in. `ready` modules have authored content in
- * `fixtures/projectModules`; `planned` ones are the roadmap and render as locked.
+ * A module is one chapter: theory on the left, a scratch repo on the right that
+ * grows file-by-file across chapters. `ready` chapters have authored content in
+ * `fixtures/projectModules`; `planned` ones are the roadmap and render locked.
+ *
+ * Authoring rule (Cinder V0.1): chapter N only ships the files that chapter
+ * needs. Later packages appear as new placeholders when their chapter lands.
+ * Process wiring (logger, cmd/server, Makefile) is updated by authors across
+ * chapters — not a student TODO dump in chapter 1.
  */
 export interface ProjectModule {
   id: string;
@@ -35,97 +40,81 @@ export interface ProjectEntry {
   facts: string[];
   /** Independent minors this project points at. */
   minors?: string[];
+  /** `ready` majors are open; `planned` ones render as coming soon. */
+  status: 'ready' | 'planned';
   modules: ProjectModule[];
 }
 
 /**
- * Cinder — a single-threaded, Redis-shaped key–value store in Go.
+ * Cinder V0.1 — single-threaded KV store in Go.
  *
- * The order matters: the event loop comes first because every later module
- * (protocol, commands, expiry, durability) hangs off the same single-threaded
- * loop. The blocking TCP server is a separate minor, not a module you throw
- * away. Storage arrives only once there is a server to store things for.
+ * Chapters grow an empty scratch repo. No pub/sub or streams in this pass.
+ * Reference implementation: memkv tag v0.1.0.
  */
 const CINDER_MODULES: ProjectModule[] = [
   {
     id: 'event-loop',
-    label: 'The event loop',
-    subtitle: 'One thread, non-blocking sockets, readiness notification',
+    label: 'Event loop',
+    subtitle: 'One thread, readiness, non-blocking sockets',
     blurb:
-      'A single-threaded loop over epoll or kqueue. Non-blocking sockets, a readiness queue, and per-connection buffers — the reason the storage engine below never needs a lock. The blocking TCP server lives in a minor if you want that model in your hands first.',
+      'A single-threaded loop over epoll or kqueue. The scratch repo starts here — only the files this chapter needs.',
     status: 'ready',
     minors: ['tcp-server'],
   },
   {
-    id: 'resp-protocol',
-    label: 'Speaking RESP',
-    subtitle: 'Parse and serialize the Redis wire protocol',
+    id: 'csp-protocol',
+    label: 'CSP',
+    subtitle: 'Cinder Serialization Protocol',
     blurb:
-      'Swap the toy line protocol for RESP: bulk strings, arrays, integers, and errors. Handle partial frames, because a socket read gives you whatever arrived, not whatever you wanted.',
+      'Typed framing: bulk strings, arrays, integers, errors. Partial reads and leftovers become the codec’s job.',
     status: 'planned',
   },
   {
     id: 'commands',
-    label: 'The command layer',
-    subtitle: 'GET, SET, DEL, and a dispatch table',
+    label: 'Commands',
+    subtitle: 'Dispatch table and a CSP client',
     blurb:
-      'Route parsed commands to handlers, validate arity and types, and return errors the way a real client expects. The first module where redis-cli can talk to your server.',
+      'Verb → handler registry, arity checks, GET/SET/DEL. A small CLI proves the wire without hand-rolling frames.',
     status: 'planned',
   },
   {
     id: 'keyspace',
-    label: 'Keyspace and expiry',
-    subtitle: 'TTLs, lazy expiry, and an active sampling cycle',
+    label: 'Keyspace',
+    subtitle: 'Dict and lazy TTL',
     blurb:
-      'Attach deadlines to keys, expire them lazily on access, and add the background sampling pass that keeps dead keys from pinning memory forever.',
-    status: 'planned',
-  },
-  {
-    id: 'pubsub',
-    label: 'Pub/Sub',
-    subtitle: 'Fan-out delivery and the slow-subscriber problem',
-    blurb:
-      'The first commands where the server speaks first. SUBSCRIBE puts a connection into a different mode, PUBLISH fans one message to every listener, and a subscriber that stops reading forces you to decide who you are willing to drop.',
-    status: 'planned',
-  },
-  {
-    id: 'streams',
-    label: 'Streams',
-    subtitle: 'A log with entry IDs, blocking reads, and consumer groups',
-    blurb:
-      'Pub/Sub forgets a message the moment nobody is listening; a stream remembers it. Monotonic entry IDs, range queries, blocking XREAD that parks a client without parking the loop, and consumer groups that track what each reader acknowledged.',
+      'One map of entries with optional deadlines. Expire on access; sampling stays out of V0.1.',
     status: 'planned',
   },
   {
     id: 'append-only-log',
-    label: 'The append-only log',
-    subtitle: 'Durability by writing every mutation down first',
+    label: 'Append-only log',
+    subtitle: 'Checksummed records and fsync policy',
     blurb:
-      'Frame each mutation with a checksum, append it to a segment, and decide what fsync policy you are willing to defend when someone pulls the plug.',
+      'Frame mutations, append before ACK, pick always / everysec / no.',
     status: 'planned',
   },
   {
     id: 'recovery',
-    label: 'Crash recovery',
-    subtitle: 'Rebuild the keyspace from segments on boot',
+    label: 'Recovery',
+    subtitle: 'Torn tails and replay',
     blurb:
-      'Replay segments into memory, detect the torn record at the tail, and prove that an acknowledged write survives a hard kill.',
+      'On open: truncate a torn tail, replay complete records, refuse mid-file corruption.',
     status: 'planned',
   },
   {
     id: 'compaction',
-    label: 'Segment compaction',
-    subtitle: 'Reclaim space from overwritten and deleted keys',
+    label: 'Compaction',
+    subtitle: 'Rewrite live keys',
     blurb:
-      'Roll segments, merge live keys forward, and swap the index atomically — all without stalling the loop long enough for clients to notice.',
+      'Snapshot the dict, rewrite live SETs via temp + rename — not Truncate(0).',
     status: 'planned',
   },
   {
     id: 'benchmarks',
-    label: 'Benchmarks and observability',
-    subtitle: 'Measure throughput and tail latency, then explain it',
+    label: 'Benchmarks',
+    subtitle: 'INFO counters and p99',
     blurb:
-      'Drive the server with a load generator, read p99 instead of averages, and add the INFO counters you need to argue about where the time goes.',
+      'Measure what you built. Counters, INFO, and a load gen that prints tails not averages.',
     status: 'planned',
   },
 ];
@@ -238,18 +227,16 @@ export const PROJECTS: ProjectEntry[] = [
     name: 'Cinder',
     subtitle: 'Building a KV store',
     blurb:
-      'A single-threaded, Redis-shaped key–value store in Go. You start at the event loop — one thread, non-blocking sockets — and end with a durable append-only store you can benchmark and explain.',
+      'A single-threaded key–value store in Go. Eight chapters from an empty scratch repo to a durable store you can measure.',
     about: [
-      'Cinder is a Redis-shaped key–value store written in Go. You build the whole server, not a library: speak a wire protocol, keep a keyspace, and survive a crash with an append-only log you can replay. When you are done you have something redis-cli can talk to, that you can kill and restart, compact, and measure.',
-      'You start at the event loop, not at accept(). A blocking TCP server — one goroutine per connection — is a separate minor if that model is not already in your hands. Here you replace it with a single-threaded loop over epoll or kqueue: non-blocking sockets, a readiness queue, and per-connection buffers. From here on the rest of the server never takes a lock, because there is only one thread that mutates anything.',
-      'The toy line protocol comes out and RESP comes in — bulk strings, arrays, integers, and errors. A socket read gives you whatever arrived, not a complete frame, so the codec has to reassemble across reads. Parsed commands hit a dispatch table: GET, SET, DEL, arity checks, and errors the way a real client expects. That is the first point redis-cli can talk to your server.',
-      'Keys grow deadlines. Expire them lazily on access so a GET of a dead key looks like a miss, then add the sampling pass that walks random keys in the background so expired entries do not pin memory forever. Pub/sub is the first time the server speaks first: SUBSCRIBE puts a connection into a different mode, PUBLISH fans one message to every listener, and a subscriber that stops reading forces you to decide who you are willing to drop. Streams remember what pub/sub forgets — monotonic entry IDs, range queries, blocking XREAD that parks a client without parking the loop, and consumer groups that track what each reader acknowledged.',
-      'Durability arrives last because there has to be a server worth keeping. Frame each mutation with a checksum, append it to a segment, and pick an fsync policy you can defend when someone pulls the plug. Boot replays those segments into memory, detects the torn record at the tail, and proves an acknowledged write survives a hard kill. Compaction rolls segments, merges live keys forward, and swaps the index without stalling the loop long enough for clients to notice. The last sitting is measurement: drive the server with a load generator, read p99 instead of averages, and add the INFO counters you need to argue about where the time goes.',
+      'Cinder is a key–value store you build sitting by sitting. The workspace starts nearly empty: each chapter adds only the files that chapter needs, with TODOs where you work and author-owned wiring (logger, process main, Makefile) filled in as the tree grows.',
+      'When V0.1 is done you have CSP on the wire, a dispatch table, a lazy-TTL keyspace, a checksummed append-only log with recovery and compaction, and INFO/bench — something you can kill, restart, and explain. Pub/sub and streams are out of this pass.',
     ],
     level: 'Intermediate',
     language: 'Go',
-    facts: ['Event loop', 'Append-only log', `${CINDER_MODULES.length} modules`],
+    facts: ['Event loop', 'Append-only log', '8 chapters'],
     minors: ['tcp-server'],
+    status: 'ready',
     modules: CINDER_MODULES,
   },
   {
@@ -266,6 +253,7 @@ export const PROJECTS: ProjectEntry[] = [
     level: 'Advanced',
     language: 'Go',
     facts: ['LSM tree', 'SSTables + bloom filters', `${EMBER_MODULES.length} modules`],
+    status: 'planned',
     modules: EMBER_MODULES,
   },
   {
@@ -282,6 +270,7 @@ export const PROJECTS: ProjectEntry[] = [
     level: 'Advanced',
     language: 'Java',
     facts: ['Raft consensus', 'Controller quorum', `${QUORUM_MODULES.length} modules`],
+    status: 'planned',
     modules: QUORUM_MODULES,
   },
 ];

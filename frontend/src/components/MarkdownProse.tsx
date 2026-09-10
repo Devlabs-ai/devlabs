@@ -302,6 +302,25 @@ function renderMarkdown(text: string): React.ReactNode[] | null {
       }
       i--;
       elements.push(<ol key={key++} className="markdown-list markdown-list--ordered">{items}</ol>);
+    } else if (/^!\[[^\]]*\]\([^)]+\)\s*$/.test(line.trim())) {
+      const img = line.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+      if (img) {
+        const [, alt, src] = img;
+        const safe =
+          src.startsWith('/')
+          || src.startsWith('https://')
+          || src.startsWith('http://');
+        if (safe) {
+          elements.push(
+            <figure key={key++} className="markdown-figure">
+              <img src={src} alt={alt} className="markdown-image" loading="lazy" />
+              {alt ? <figcaption className="markdown-figcaption">{alt}</figcaption> : null}
+            </figure>,
+          );
+        } else {
+          elements.push(<p key={key++}>{line}</p>);
+        }
+      }
     } else if (line.trim() === '') {
       elements.push(<div key={key++} className="markdown-spacer" />);
     } else {

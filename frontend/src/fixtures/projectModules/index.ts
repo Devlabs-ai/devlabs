@@ -1,10 +1,14 @@
 /**
  * Registry of authored module content.
  *
- * `constants/projects.ts` is the plan — every module a project will ship. This
- * is what actually exists. A module marked `ready` there must have an entry
+ * `constants/projects.ts` is the plan — every chapter a project will ship. This
+ * is what actually exists. A chapter marked `ready` there must have an entry
  * here, and `hasModuleContent` is what the UI trusts when it decides whether a
- * module opens or renders as locked.
+ * chapter opens or stays locked.
+ *
+ * Cinder V0.1: chapters are authored one at a time. The scratch repo in each
+ * fixture only contains files that chapter needs; later chapters add paths.
+ * Do not register a full memkv tree in chapter 1.
  */
 
 import { TCP_SERVER_MINOR } from './tcpServerMinor';
@@ -13,6 +17,7 @@ import type { ProjectModuleContent } from './types';
 
 export type { ModuleTask, ProjectModuleContent } from './types';
 
+/** Cinder chapter fixtures land here as each chapter is authored. */
 const MODULE_CONTENT: ProjectModuleContent[] = [CINDER_EVENT_LOOP];
 
 const MINOR_CONTENT: ProjectModuleContent[] = [TCP_SERVER_MINOR];

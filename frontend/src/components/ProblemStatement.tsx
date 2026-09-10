@@ -7,6 +7,7 @@ export type ProblemStatementTab =
   | 'description'
   | 'data'
   | 'spec'
+  | 'cluster'
   | 'knobs'
   | 'solution'
   | 'moat'
@@ -79,7 +80,10 @@ function getPs(challenge: ChallengePublic | ChallengeFull): ProblemStatementData
 
 function sortSolutionPaths(paths: string[], entrypoint?: string | null): string[] {
   const entry = (entrypoint || 'src/main.py').replace(/^\/+/, '');
+  const readme = paths.find((p) => /^readme\.md$/i.test(p.replace(/^\/+/, '')));
   return [...paths].sort((a, b) => {
+    if (readme && a === readme) return -1;
+    if (readme && b === readme) return 1;
     if (a === entry) return -1;
     if (b === entry) return 1;
     if (a.startsWith('src/') && !b.startsWith('src/')) return -1;
@@ -337,6 +341,7 @@ export default function ProblemStatement({
         {dataOverview && (
           <p className="statement-overview" style={{ marginBottom: 16 }}>{dataOverview}</p>
         )}
+        <TestcasesBlock run={runTestcases} submit={submitTestcases} />
         {fallbackDatasets.length === 0 ? (
           <p className="dim" style={{ fontSize: 13 }}>
             No dataset notes for this lab — see the description for paths and grain.
