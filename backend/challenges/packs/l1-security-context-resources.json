@@ -1,0 +1,25 @@
+{
+  "id": "l1-security-context-resources",
+  "number": 39,
+  "finalized": false,
+  "title": "No Root, Hard Ceiling",
+  "description": "Platform policy just landed: Guestbook may not run as root, and it may not eat the node.\n\nHarden the Deployment \u2014 `securityContext` as specified, plus CPU/memory **requests and limits** that match the brief. Soft limits or privileged leftovers fail the audit.\n\n**Meant for:** securityContext + requests/limits.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "securityContext + resources",
+    "brief": "Harden Guestbook: non-root (and read-only root FS if required) plus CPU/memory requests and limits that match the brief."
+  },
+  "platformSpec": {}
+}

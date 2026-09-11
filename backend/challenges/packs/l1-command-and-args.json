@@ -1,0 +1,25 @@
+{
+  "id": "l1-command-and-args",
+  "number": 36,
+  "finalized": false,
+  "title": "The Entry That Lied",
+  "description": "The image\u2019s default entrypoint was written for a different job. Guestbook needs a specific command and argument list, and the image\u2019s CMD keeps winning.\n\nOverride `command` / `args` so the container runs what the brief says. If the defaults still win, the grade fails.\n\n**Meant for:** Container command / args.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "Container command / args",
+    "brief": "Override the image entrypoint so Guestbook runs the required command and args \u2014 image default CMD must not win."
+  },
+  "platformSpec": {}
+}

@@ -56,6 +56,12 @@ export interface SparkPlatformSpec {
   runEventsInputPath?: string;
   /** Run smoke catalog path. Falls back to catalogInputPath. */
   runCatalogInputPath?: string;
+  /** Job I/O label for INPUT_A_PATH. Defaults to "Events". */
+  inputALabel?: string;
+  /** Job I/O label for INPUT_B_PATH. Defaults to "Catalog". */
+  inputBLabel?: string;
+  /** Structured Streaming lab — platform injects CHECKPOINT_PATH. */
+  streaming?: boolean;
   gradeScript?: string;
   dualInput?: boolean;
   language: 'python';
@@ -100,6 +106,14 @@ export interface SparkPlatformSpec {
       }>;
     };
   };
+  [key: string]: unknown;
+}
+
+/** Namespaced Kubernetes lab (per-user Namespace + setup/grade scripts). */
+export interface K8sPlatformSpec {
+  quota?: { pods?: string; cpu?: string; memory?: string };
+  setup?: { script?: string };
+  grade?: { script?: string; timeoutSeconds?: number };
   [key: string]: unknown;
 }
 
@@ -203,6 +217,8 @@ export interface ChallengeFull extends ChallengePublic {
   validationSpec: ValidationSpec | null;
   /** Mapped from platform_spec when sandboxType is spark-platform. */
   sparkPlatform?: SparkPlatformSpec | null;
+  /** Mapped from platform_spec when sandboxType is kubernetes. */
+  k8sPlatform?: K8sPlatformSpec | null;
   /** Full spec (with gold) in cache; public APIs strip gold. */
   boardSpec?: BoardSpec | PublicBoardSpec | null;
 }
@@ -253,10 +269,12 @@ export interface GameSession {
   services: string[];
   commandHistory: unknown[];
   challenge?: ChallengePublic | ChallengeFull | null;
-  /** compose | spark-platform | board */
+  /** compose | spark-platform | board | kubernetes */
   runtime?: string | null;
   userId?: string | null;
   workspacePrefix?: string | null;
+  /** Learner Namespace name when runtime === kubernetes (also stored in workspacePrefix). */
+  k8sNamespace?: string | null;
   entrypoint?: string | null;
   workspaceUpdatedAt?: number | null;
   boardState?: BoardState | null;

@@ -1,0 +1,25 @@
+{
+  "id": "l1-labels-and-selectors",
+  "number": 40,
+  "finalized": false,
+  "title": "Find Your Own",
+  "description": "The Service says it fronts Guestbook. The pods disagree \u2014 labels drifted, selectors lie, and traffic hits nothing.\n\nRepair labels, selectors, and any required annotations so ownership is honest again. When selectors finally match, the right pods show up behind the Service.\n\n**Meant for:** Labels, selectors, annotations.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "Labels & selectors",
+    "brief": "Fix mismatched labels/selectors so the Service or ReplicaSet owns the intended Guestbook pods."
+  },
+  "platformSpec": {}
+}

@@ -1,0 +1,25 @@
+{
+  "id": "l1-schedule-affinity",
+  "number": 53,
+  "finalized": false,
+  "title": "Only These Nodes",
+  "description": "Kiosk workloads belong on the lobby node pool \u2014 not on the batch farm next door.\n\nUse affinity and/or tolerations so the Pod lands on the correct node set. Landing on the wrong node fails the grade even if the Pod is Running.\n\n**Meant for:** Node affinity / taints & tolerations.\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "l1",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "Affinity / tolerations",
+    "brief": "Schedule Guestbook onto the correct node set with affinity and/or tolerations \u2014 wrong node fails."
+  },
+  "platformSpec": {}
+}

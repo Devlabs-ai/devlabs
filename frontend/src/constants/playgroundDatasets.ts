@@ -102,7 +102,7 @@ const CARD_RAILS_TABLES: PlaygroundTable[] = [
     kind: 'fact',
     path: `${PAYMENT}/txns/50m-skew-key75/`,
     blurb:
-      '~50M wide (15-col) txns with the same extreme join-key skew as 100m-skew-key75: 33.0M of 44.0M approved rows (75%) are (mcc 5411, US, chip) — 903× the next key, against a median of ~800 across the other 5,250 keys. Half the scan cost of the 100m drop — use it to shape a key75 plan before paying for the full one.',
+      '~50M wide (15-col) txns with the same extreme join-key skew as 150m-skew-key75: 33.0M of 44.0M approved rows (75%) are (mcc 5411, US, chip) — 903× the next key, against a median of ~800 across the other 5,250 keys. A third of the scan cost of the 150m drop — use it to shape a key75 plan before paying for the full one.',
     schema: TXN_SCHEMA,
     rowCount: 50_000_000,
     sizeBytes: 1_798_187_969,
@@ -149,16 +149,16 @@ const CARD_RAILS_TABLES: PlaygroundTable[] = [
     ],
   },
   {
-    id: 'txns-100m-skew-key75',
-    label: 'txns / 100m-skew-key75',
+    id: 'txns-150m-skew-key75',
+    label: 'txns / 150m-skew-key75',
     kind: 'fact',
-    path: `${PAYMENT}/txns/100m-skew-key75/`,
+    path: `${PAYMENT}/txns/150m-skew-key75/`,
     blurb:
-      '~100M wide (15-col) txns with extreme join-key skew: 66.0M of 88.0M approved rows (75%) are (mcc 5411, US, chip) — 909× the next key, against a median of ~1.6k. Expect one very hot task and heavy spill on small executors.',
+      '~150M wide (15-col) txns with extreme join-key skew: ~99M of ~132M approved rows (75%) are (mcc 5411, US, chip) — ~909× the next key, against a median of ~2.4k. Expect one very hot task and heavy spill on small executors.',
     schema: TXN_SCHEMA,
-    rowCount: 100_000_000,
-    sizeBytes: 3_596_195_864,
-    fileCount: 1,
+    rowCount: 150_000_000,
+    sizeBytes: 5_394_095_542,
+    fileCount: 15,
     format: 'Parquet',
     compression: 'Snappy',
     seed: SEED,
@@ -822,7 +822,7 @@ export const PLAYGROUND_CLUSTERS: PlaygroundCluster[] = [
     category: 'transactional',
     tags: ['payments', 'acquiring', 'settlement'],
     blurb:
-      'Card-network authorization and settlement facts (15-col) at 50m/100m-skew-key75 for single-hot-key join skew, with opcode dims.',
+      'Card-network authorization and settlement facts (15-col) at 50m/150m-skew-key75 for single-hot-key join skew, with opcode dims.',
     prefix: 'datasets/payment-network',
     tables: CARD_RAILS_TABLES,
   },
@@ -883,7 +883,7 @@ export function formatPlaygroundRows(n: number): string {
 /** Path constants embedded in the starter template. */
 export const PLAYGROUND_PATH_CONSTANTS = {
   TXNS_50M_SKEW_KEY75: `${PAYMENT}/txns/50m-skew-key75/`,
-  TXNS_100M_SKEW_KEY75: `${PAYMENT}/txns/100m-skew-key75/`,
+  TXNS_150M_SKEW_KEY75: `${PAYMENT}/txns/150m-skew-key75/`,
   DIM_COUNTRY: `${PAYMENT}/dims/country/`,
   DIM_MCC: `${PAYMENT}/dims/mcc/`,
   DIM_INTERCHANGE_RATE: `${PAYMENT}/dims/interchange_rate/`,

@@ -1,0 +1,25 @@
+{
+  "id": "l1-storageclass-dynamic",
+  "number": 50,
+  "finalized": false,
+  "title": "Ask the Provisioner",
+  "description": "Ops will not hand-cut PVs for every lobby. Guestbook should **ask the provisioner**.\n\nUse a StorageClass so a PVC provisions dynamically, then mount the volume into a pod. Binding a pre-made static PV to skip the class fails the spirit of the lab.\n\n**Meant for:** StorageClass dynamic provisioning.\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "l1",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "StorageClass",
+    "brief": "Use a StorageClass so a PVC provisions dynamically and a pod mounts it \u2014 static PV cheating fails."
+  },
+  "platformSpec": {}
+}

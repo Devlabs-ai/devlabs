@@ -26,7 +26,7 @@ import { AppStateProvider } from './context/AppStateContext';
 import { getToken, getCurrentUser, logout } from './services/authApi';
 import { fetchChallenges, fetchChallenge } from './services/challengeApi';
 import { startSession, startBoardSession, endSession, restoreSession } from './services/sessionApi';
-import { startSparkSession } from './services/workspaceApi';
+import { startSparkSession, startK8sSession } from './services/workspaceApi';
 import { buildDailyProductSalesProject } from './fixtures/dailyProductSalesL1';
 import {
   buildSparkPlaygroundChallenge,
@@ -34,6 +34,7 @@ import {
 } from './fixtures/sparkPlaygroundStarter';
 import { isSparkPlatformChallenge } from './components/SparkPlatformWorkspace';
 import { isBoardChallenge } from './components/BoardWorkspace';
+import { isKubernetesChallenge } from './components/K8sLabWorkspace';
 import { SPARK_PLAYGROUND_CHALLENGE_ID } from './constants/playgroundDatasets';
 import { catalogPathForChallenge, isPlayDomainId, looksLikePlaySessionId } from './constants/playCatalog';
 import type {
@@ -197,6 +198,48 @@ export default function App(): React.JSX.Element {
       return;
     }
 
+    if (isKubernetesChallenge(challenge)) {
+      try {
+        const full = await fetchChallenge(challenge.id);
+        const res = await startK8sSession(full.id);
+        const hydrated =
+          (res.challenge as ChallengeFull | undefined)
+          || (res.session as { challenge?: ChallengeFull } | undefined)?.challenge
+          || full;
+        setActiveSession({
+          id: res.sessionId,
+          startTime: Date.now(),
+          recovered: false,
+          terminalWsUrl: res.terminalWsUrl ?? null,
+          metricsWsUrl: null,
+          portMap: null,
+          services: [],
+          terminalService: null,
+          runtime: 'kubernetes',
+          k8sNamespace: res.k8sNamespace
+            || (res.session as { k8sNamespace?: string } | undefined)?.k8sNamespace
+            || null,
+        });
+        setActiveChallenge(hydrated);
+        setActiveTab('problem');
+        openingSessionRef.current = res.sessionId;
+        setPlayState('active');
+        navigate(`/play/${res.sessionId}`);
+      } catch (e) {
+        const err = e as { response?: { data?: { error?: string } }; message?: string };
+        setActiveChallenge(null);
+        setActiveSession(null);
+        setPlayState('library');
+        navigate(catalogPathForChallenge(challenge.id, challenge.sandboxType, challenge.tags), { replace: true });
+        setStartError(
+          err?.response?.data?.error
+            || err.message
+            || 'Failed to start Kubernetes lab session',
+        );
+      }
+      return;
+    }
+
     try {
       const res = await startSession(challenge.id);
       const rawSession = res.session as {
@@ -295,6 +338,33 @@ export default function App(): React.JSX.Element {
 
         if (runtime === 'board' || isBoardChallenge(res?.challenge || null)) {
           await restoreBoardWorkspace(sessionId, res);
+          return;
+        }
+
+        if (runtime === 'kubernetes' || isKubernetesChallenge(res?.challenge || null)) {
+          const sess = res?.session as {
+            recovered?: boolean;
+            k8sNamespace?: string;
+            workspacePrefix?: string;
+          } | null | undefined;
+          setActiveSession({
+            id: res?.sessionId || sessionId,
+            startTime: res?.startTime || Date.now(),
+            recovered: sess?.recovered ?? false,
+            terminalWsUrl: res?.terminalWsUrl ?? null,
+            metricsWsUrl: null,
+            portMap: null,
+            services: [],
+            terminalService: null,
+            runtime: 'kubernetes',
+            k8sNamespace: sess?.k8sNamespace
+              || (res as { k8sNamespace?: string } | null)?.k8sNamespace
+              || sess?.workspacePrefix
+              || null,
+          });
+          setActiveChallenge((res?.challenge as ChallengeFull | null) || null);
+          setActiveTab('problem');
+          setPlayState('active');
           return;
         }
 

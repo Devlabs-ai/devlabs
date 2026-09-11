@@ -26,7 +26,14 @@ export async function fetchChallengeSolution(id: string): Promise<ChallengeSolut
   return data as ChallengeSolutionPayload;
 }
 
-export type ChallengeContentTab = 'description' | 'data' | 'spec' | 'knobs' | 'solution' | 'moat';
+export type ChallengeContentTab =
+  | 'description'
+  | 'data'
+  | 'spec'
+  | 'cluster'
+  | 'knobs'
+  | 'solution'
+  | 'moat';
 
 export async function saveChallengeContent(
   id: string,
@@ -35,6 +42,11 @@ export async function saveChallengeContent(
     markdown?: string;
     data?: unknown;
     spec?: unknown;
+    cluster?: {
+      limits?: unknown;
+      sparkConf?: Record<string, string>;
+      scoring?: unknown;
+    };
     knobs?: unknown;
     solutionFiles?: Record<string, string>;
   },

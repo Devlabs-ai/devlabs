@@ -146,6 +146,38 @@ async function upsertPack(c: ChallengePack): Promise<void> {
   );
 }
 
+/** Tell the running API to drop its in-memory challenge cache (DB alone is not enough). */
+async function notifyBackendReload(): Promise<void> {
+  const base = (process.env.DEVLABS_BACKEND_URL || 'http://127.0.0.1:4000').replace(/\/$/, '');
+  const token = String(process.env.CHALLENGE_RELOAD_TOKEN || 'devlabs-reload').trim();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['X-DevLabs-Reload-Token'] = token;
+
+  try {
+    const res = await fetch(`${base}/api/admin/challenges/reload`, {
+      method: 'POST',
+      headers,
+      body: '{}',
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.warn(
+        `[register] DB updated, but cache reload failed (${res.status}). `
+          + `Hard refresh will still show old titles until you restart the backend`
+          + (body ? `: ${body.slice(0, 160)}` : '.'),
+      );
+      return;
+    }
+    const json = (await res.json()) as { count?: number };
+    console.log(`[register] backend cache reloaded (${json.count ?? '?'} challenges)`);
+  } catch (err: unknown) {
+    console.warn(
+      `[register] DB updated, but could not reach ${base}/api/admin/challenges/reload `
+        + `(${(err as Error).message}). Restart the backend to refresh the in-memory cache.`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const all = args.includes('--all');
@@ -164,6 +196,7 @@ async function main(): Promise<void> {
     if (playground && fs.existsSync(playground)) {
       console.log(`[register] using playground meta ${playground}`);
       await upsertPack(loadPack(playground));
+      await notifyBackendReload();
       await pool.end?.();
       return;
     }
@@ -174,6 +207,7 @@ async function main(): Promise<void> {
     }
     console.log(`[register] using pack ${packFile}`);
     await upsertPack(loadPack(packFile));
+    await notifyBackendReload();
     await pool.end?.();
     return;
   }
@@ -195,6 +229,7 @@ async function main(): Promise<void> {
     await upsertPack(pack);
   }
 
+  await notifyBackendReload();
   await pool.end?.();
 }
 

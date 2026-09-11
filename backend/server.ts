@@ -26,6 +26,7 @@ const adminRoutes = require('./routes/admin');
 const devDbRoutes = require('./routes/devDb');
 
 const terminalService = require('./observability/terminalService');
+const k8sTerminalService = require('./observability/k8sTerminalService');
 const metricsService = require('./observability/metricsService');
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -69,6 +70,7 @@ server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
 
   const handlers: Record<string, (ws: unknown, req: IncomingMessage) => void> = {
     '/ws/terminal': terminalService.handleConnection,
+    '/ws/k8s-terminal': k8sTerminalService.handleConnection,
     '/ws/metrics': metricsService.handleConnection,
   };
 

@@ -33,6 +33,9 @@ function fullFields(row: ChallengeRow): ChallengeFull {
     sparkPlatform: sandbox === 'spark-platform'
       ? (platformSpec as ChallengeFull['sparkPlatform'])
       : null,
+    k8sPlatform: sandbox === 'kubernetes'
+      ? (platformSpec as ChallengeFull['k8sPlatform'])
+      : null,
     boardSpec,
   };
 }
@@ -84,6 +87,7 @@ function listPublicChallenges(): Record<string, unknown>[] {
     contentSource: contentSourceOf(c),
     problemStatement: c.problemStatement,
     sparkPlatform: c.sparkPlatform || null,
+    k8sPlatform: c.k8sPlatform || null,
     boardSpec: publicBoardSpec(c.boardSpec || null),
   }));
 }
@@ -106,6 +110,7 @@ function getPublicChallenge(id: string): Record<string, unknown> | null {
     problemStatement: c.problemStatement,
     validationSpec: c.validationSpec,
     sparkPlatform: c.sparkPlatform || null,
+    k8sPlatform: c.k8sPlatform || null,
     boardSpec: publicBoardSpec(c.boardSpec || null),
   };
 }

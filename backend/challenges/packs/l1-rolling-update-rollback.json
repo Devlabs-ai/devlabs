@@ -1,0 +1,25 @@
+{
+  "id": "l1-rolling-update-rollback",
+  "number": 44,
+  "finalized": false,
+  "title": "Ship It, Then Undo It",
+  "description": "A \u201cquick\u201d image bump went out. Error rates climbed. Leadership wants yesterday\u2019s revision back.\n\nChange the Deployment image, watch the rolling update, then **roll back**. The grade cares about the final image \u2014 the prior good one \u2014 not the bad adventure in the middle.\n\n**Meant for:** Rolling updates & rollback.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "Rollout & rollback",
+    "brief": "Roll a new Guestbook image, watch the rollout, then roll back \u2014 end state is the previous revision."
+  },
+  "platformSpec": {}
+}

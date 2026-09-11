@@ -1,0 +1,25 @@
+{
+  "id": "l1-network-policy-lockdown",
+  "number": 47,
+  "finalized": false,
+  "title": "Deny by Default",
+  "description": "Guestbook was reachable from every namespace on the cluster. That was fine for a pilot. It is not fine now.\n\nWrite NetworkPolicies that deny by default and allow only the clients the brief names. Unrelated namespaces must stay locked out.\n\n**Meant for:** NetworkPolicies.\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "l1",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "NetworkPolicies",
+    "brief": "Lock the namespace so only allowed clients reach Guestbook; unrelated namespaces stay blocked."
+  },
+  "platformSpec": {}
+}

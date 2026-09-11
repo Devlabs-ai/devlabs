@@ -1,0 +1,25 @@
+{
+  "id": "l1-statefulset-identity",
+  "number": 51,
+  "finalized": false,
+  "title": "Stable Names, Stable Disks",
+  "description": "Some Guestbook backends need sticky identity \u2014 stable DNS names and disks that follow the ordinal, not a random Pod name.\n\nDeploy a StatefulSet with ordered identity and per-pod claims. After a restart, names and volumes should still match.\n\n**Meant for:** StatefulSets + volumeClaimTemplates.\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "l1",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "StatefulSets",
+    "brief": "Deploy a StatefulSet with ordered identity and per-pod claims \u2014 DNS names and volumes sticky across restarts."
+  },
+  "platformSpec": {}
+}

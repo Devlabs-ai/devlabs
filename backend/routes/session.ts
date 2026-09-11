@@ -10,6 +10,9 @@ const lifecycle = require('../sandbox/sessionLifecycle');
 const sparkLifecycle = require('../workspace/sparkLifecycle');
 const sparkJobs = require('../workspace/sparkJobs');
 const boardLifecycle = require('../workspace/boardLifecycle');
+const k8sLifecycle = require('../workspace/k8sLifecycle');
+const k8sGrade = require('../workspace/k8sGrade');
+const k8sCluster = require('../workspace/k8sCluster');
 const { publicBoardSpec } = require('../workspace/boardGrade');
 const workspaceStore = require('../workspace/workspaceStore');
 const sessionStore = require('../db/sessionStore');
@@ -58,6 +61,25 @@ function getSparkSession(id: string, res: ExpressResponse): GameSession | null {
   }
   if (session.status !== 'active') {
     res.status(409).json({ error: 'session is not active' });
+    return null;
+  }
+  return session;
+}
+
+function getK8sSession(id: string, res: ExpressResponse): GameSession | null {
+  const session = sessionStore.get(id);
+  if (!session) { res.status(404).json({ error: 'session not found' }); return null; }
+  if (session.runtime !== 'kubernetes') {
+    res.status(409).json({ error: 'not a kubernetes lab session' });
+    return null;
+  }
+  if (session.status !== 'active') {
+    res.status(409).json({ error: 'session is not active' });
+    return null;
+  }
+  const ns = session.k8sNamespace || session.workspacePrefix;
+  if (!ns) {
+    res.status(409).json({ error: 'session missing namespace' });
     return null;
   }
   return session;
@@ -197,6 +219,9 @@ function publicSession(
     recovered: s.recovered,
     runtime: s.runtime || (s.buildDir ? 'compose' : null),
     workspacePrefix: s.workspacePrefix || null,
+    k8sNamespace: s.runtime === 'kubernetes'
+      ? (s.k8sNamespace || s.workspacePrefix || null)
+      : null,
     entrypoint: s.entrypoint || null,
     workspaceUpdatedAt: s.workspaceUpdatedAt || null,
     boardState: s.runtime === 'board' ? (s.boardState || null) : null,
@@ -220,6 +245,7 @@ function publicSession(
           contentSource: c.contentSource || null,
           problemStatement: c.problemStatement,
           sparkPlatform: c.sparkPlatform || null,
+          k8sPlatform: c.k8sPlatform || null,
           boardSpec: publicBoardSpec(c.boardSpec || null),
         }
       : null,
@@ -329,6 +355,129 @@ router.post('/board/start', requireSessionAccess, async (req: ExpressRequest, re
       runtime: 'board',
       session: pub,
       challenge: pub.challenge,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/session/k8s/start  { challengeId }
+router.post('/k8s/start', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const body = (req.body as Record<string, unknown>) || {};
+    const challengeId = body.challengeId as string;
+    const user = req.user as { sub?: string; id?: string; email?: string } | undefined;
+    const userId = user?.sub || user?.id || null;
+    const email = String(user?.email || '').trim().toLowerCase();
+    const userName = email.includes('@')
+      ? email.slice(0, email.indexOf('@'))
+      : (email || null);
+
+    if (challengeId) {
+      const listed = loader.getChallenge(challengeId);
+      if (listed && !listed.finalized) {
+        const err = new Error('This lab is not open yet');
+        (err as Error & { status?: number }).status = 403;
+        throw err;
+      }
+    }
+
+    const { session, created, provisioned } = await k8sLifecycle.startK8sSession({
+      challengeId,
+      userId,
+      candidateName: null,
+      userName,
+    });
+
+    const base = loader.getPublicChallenge(challengeId) || loader.getChallenge(challengeId);
+    const challenge = await hydrateChallengeFromMinio(base);
+    const pub = publicSession(session, challenge, req.user);
+    res.status(created ? 201 : 200).json({
+      sessionId: session.id,
+      created,
+      provisioned,
+      status: session.status,
+      runtime: 'kubernetes',
+      k8sNamespace: session.k8sNamespace || session.workspacePrefix,
+      terminalWsUrl: `ws://${BACKEND_HOST}/ws/k8s-terminal?sessionId=${session.id}`,
+      session: pub,
+      challenge: pub.challenge,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/:id/k8s/reset', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getK8sSession(req.params.id, res);
+    if (!session) return;
+    await k8sLifecycle.resetK8sSession(session.id);
+    res.json({
+      sessionId: session.id,
+      k8sNamespace: session.k8sNamespace || session.workspacePrefix,
+      reset: true,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/:id/k8s/grade', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getK8sSession(req.params.id, res);
+    if (!session) return;
+    const ns = String(session.k8sNamespace || session.workspacePrefix);
+    const challengeId = String(session.challengeId || '');
+    const result = await k8sGrade.gradeK8sSession(ns, challengeId);
+    const submission = await k8sGrade.recordK8sSubmission(session, result);
+    res.json({
+      sessionId: session.id,
+      challengeId,
+      k8sNamespace: ns,
+      submissionId: submission.id,
+      submission,
+      ...result,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/:id/k8s/submissions', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getK8sSession(req.params.id, res);
+    if (!session) return;
+    const submissions = await k8sGrade.listK8sSubmissionsForSession(session.id);
+    res.json({ sessionId: session.id, submissions });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/:id/k8s/exec', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const session = getK8sSession(req.params.id, res);
+    if (!session) return;
+    const ns = String(session.k8sNamespace || session.workspacePrefix);
+    const body = (req.body as Record<string, unknown>) || {};
+    let args: string[] = [];
+    if (Array.isArray(body.args)) {
+      args = body.args.map((a) => String(a));
+    } else if (typeof body.command === 'string') {
+      const raw = body.command.trim();
+      const stripped = raw.replace(/^kubectl\s+/i, '');
+      args = stripped ? stripped.split(/\s+/) : [];
+    }
+    const result = await k8sCluster.learnerKubectl(ns, args, {
+      challengeId: session.challengeId,
+    });
+    res.status(result.code === 0 ? 200 : 400).json({
+      sessionId: session.id,
+      k8sNamespace: ns,
+      code: result.code,
+      stdout: result.stdout,
+      stderr: result.stderr,
     });
   } catch (e) {
     next(e);
@@ -701,6 +850,8 @@ router.post('/:id/end', async (req: ExpressRequest, res: ExpressResponse, next: 
       session = await sparkLifecycle.endSparkSession(sessionId);
     } else if (before.runtime === 'board') {
       session = await boardLifecycle.endBoardSession(sessionId);
+    } else if (before.runtime === 'kubernetes') {
+      session = await k8sLifecycle.endK8sSession(sessionId);
     } else {
       session = await lifecycle.end(sessionId);
       await sessionStore.persistRow(session);

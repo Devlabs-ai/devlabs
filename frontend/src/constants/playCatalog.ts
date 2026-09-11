@@ -6,6 +6,7 @@ import { whiteboardSectionForTags, whiteboardSectionPath } from './whiteboard';
 export type PlayDomainId =
   | 'data-engineer'
   | 'software-engineer'
+  | 'devops-engineer'
   | 'platforms-engineer'
   | 'distributed-systems-engineer';
 
@@ -46,21 +47,8 @@ export const PLAY_DOMAINS: PlayDomain[] = [
           'l1-store-payment-profile',
           'l1-store-customer-segments',
           'l1-enrich-auth-mcc',
-          'l1-normalize-product-codes',
-          'l1-business-date-features',
-          'l1-aggregate-product-totals',
-          'l1-top-products-by-revenue',
-          'l1-left-join-product-names',
-          'l1-inner-join-matched-sales',
-          'l1-deduplicate-transactions',
-          'l1-merge-two-store-drops',
-          'l1-same-job-in-spark-sql',
-          'l1-daily-product-sales-summary',
-          'l2-partitioned-daily-sales-write',
-          'l2-latest-product-revenue-rollup',
-          'l3-multi-tenant-activity-report',
-          'l3-broadcast-catalog-enrichment',
           'l3-interchange-fee-settlement',
+          'l3-click-attribution-stream-join',
         ],
       },
       {
@@ -84,10 +72,59 @@ export const PLAY_DOMAINS: PlayDomain[] = [
     panels: [],
   },
   {
+    id: 'devops-engineer',
+    label: 'DevOps Engineer',
+    blurb: 'Ship and operate apps — CI/CD, containers, and Kubernetes application delivery (CKAD).',
+    panels: [
+      {
+        id: 'kubernetes',
+        label: 'Kubernetes',
+        blurb: 'CKAD-style labs: deploy, configure, and troubleshoot application workloads on a shared cluster.',
+        // Beginner-first order: create → expose → speed → debug → config →
+        // multi → probes → rollouts → net → storage → RBAC/schedule → capstones.
+        challengeIds: [
+          'l1-namespace-and-pod',
+          'l1-deployment-basics',
+          'l1-clusterip-service',
+          'l1-imperative-kubectl',
+          'l1-replicaset-scale',
+          'l1-debug-crashloop-pod',
+          'l1-command-and-args',
+          'l1-configmap-inject',
+          'l1-secret-inject',
+          'l1-security-context-resources',
+          'l1-labels-and-selectors',
+          'l1-sidecar-shared-volume',
+          'l1-init-container-gate',
+          'l1-readiness-liveness-probes',
+          'l1-rolling-update-rollback',
+          'l1-job-and-cronjob',
+          'l1-troubleshoot-from-signals',
+          'l1-network-policy-lockdown',
+          'l1-ingress-host-path',
+          'l1-pvc-mount',
+          'l1-storageclass-dynamic',
+          'l1-statefulset-identity',
+          'l1-service-account-rbac',
+          'l1-schedule-affinity',
+          'l2-canary-cutover',
+          'l2-app-slice-platform',
+        ],
+      },
+    ],
+  },
+  {
     id: 'platforms-engineer',
     label: 'Platforms Engineer',
-    blurb: 'Kubernetes, CI/CD, and shared platform primitives.',
-    panels: [],
+    blurb: 'Cluster operations and shared platform primitives — CKA-oriented Kubernetes ahead.',
+    panels: [
+      {
+        id: 'kubernetes',
+        label: 'Kubernetes',
+        blurb: 'CKA-style labs: cluster install, control plane, networking, and node operations.',
+        challengeIds: [],
+      },
+    ],
   },
   {
     id: 'distributed-systems-engineer',
@@ -173,6 +210,13 @@ export function catalogPathForChallenge(
   if (challengeId === SPARK_PLAYGROUND_CHALLENGE_ID) return '/play/spark-playground';
   if ((sandboxType || '') === 'board') {
     return whiteboardSectionPath(whiteboardSectionForTags(tags).id);
+  }
+  for (const domain of PLAY_DOMAINS) {
+    for (const panel of domain.panels) {
+      if (panel.challengeIds.includes(challengeId || '')) {
+        return playCatalogPath(domain.id, panel.id);
+      }
+    }
   }
   return '/play';
 }

@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { NavLink, useNavigate, useParams } from 'react-router-dom';
+import { Link, NavLink, useNavigate, useParams } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
 import SandboxWorkspace from '../components/SandboxWorkspace';
 import SparkPlatformWorkspace, {
   isSparkPlatformChallenge,
 } from '../components/SparkPlatformWorkspace';
 import BoardWorkspace, { isBoardChallenge } from '../components/BoardWorkspace';
+import K8sLabWorkspace, { isKubernetesChallenge } from '../components/K8sLabWorkspace';
 import {
   PLAY_DOMAINS,
   getPlayDomain,
@@ -14,10 +15,20 @@ import {
   listPlayCatalogEntries,
   looksLikePlaySessionId,
   playCatalogPath,
+  type PlayDomain,
   type PlayDomainId,
+  type PlayPanel,
 } from '../constants/playCatalog';
 import { WHITEBOARD_PATH } from '../constants/whiteboard';
 import type { ChallengePublic } from '../types/domain';
+
+function panelLabCount(panel: PlayPanel): number {
+  return panel.challengeIds.length;
+}
+
+function domainLabCount(domain: PlayDomain): number {
+  return domain.panels.reduce((n, p) => n + panelLabCount(p), 0);
+}
 
 type DifficultyFilter = 'all' | 'l0' | 'l1' | 'l2' | 'l3' | 'l4';
 
@@ -63,6 +74,8 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
   const domainId = isPlayDomainId(params.domainId) ? (params.domainId as PlayDomainId) : null;
   const domain = getPlayDomain(domainId);
   const panel = getPlayPanel(domain, params.panelId || null);
+  const isTracksHub = !domainId;
+  const isDomainHub = Boolean(domainId && domain && !panel);
 
   useEffect(() => {
     if (params.domainId && !domainId) {
@@ -93,8 +106,10 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
   }, [byId]);
 
   const activeTopicId = panel?.id || null;
+  const showLabList = Boolean(domainId && panel);
 
   const filteredRows = useMemo(() => {
+    if (!showLabList) return [];
     const q = search.trim().toLowerCase();
     return catalogRows
       .filter((row) => {
@@ -115,9 +130,14 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
           .toLowerCase();
         return hay.includes(q);
       });
-  }, [catalogRows, domainId, activeTopicId, difficulty, search]);
+  }, [catalogRows, domainId, activeTopicId, difficulty, search, showLabList]);
 
-  const totalLabs = catalogRows.length;
+  const availableInPanel = useMemo(() => {
+    if (!showLabList || !domainId || !activeTopicId) return 0;
+    return catalogRows.filter(
+      (row) => row.domainId === domainId && row.panelId === activeTopicId,
+    ).length;
+  }, [catalogRows, domainId, activeTopicId, showLabList]);
 
   return (
     <div className="app-page play-problems-page play-problems-page--fixed">
@@ -149,19 +169,9 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
           <div className="play-sidebar-card play-sidebar-explore">
             <div className="play-sidebar-section-label">Tracks</div>
             <nav className="play-sidebar-nav">
-              <NavLink
-                to="/play"
-                end
-                className={({ isActive }) =>
-                  `play-sidebar-link${isActive && !domainId ? ' active' : ''}`
-                }
-              >
-                <span>All labs</span>
-                <span className="play-sidebar-count">{totalLabs}</span>
-              </NavLink>
               {PLAY_DOMAINS.map((d) => {
-                const count = d.panels.reduce((n, p) => n + p.challengeIds.length, 0);
-                const empty = d.panels.length === 0;
+                const count = domainLabCount(d);
+                const empty = d.panels.length === 0 || count === 0;
                 if (empty) {
                   return (
                     <div key={d.id} className="play-sidebar-link play-sidebar-link--muted" title="Coming soon">
@@ -211,94 +221,218 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
         </aside>
 
         <main className="play-problems-main">
-          <section className="play-problems-toolbar">
-            <label className="play-search">
-              <span className="sr-only">Search labs</span>
-              <input
-                type="search"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search labs…"
-              />
-            </label>
-            <select
-              className="play-filter-select"
-              value={difficulty}
-              onChange={(e) => setDifficulty(e.target.value as DifficultyFilter)}
-              aria-label="Difficulty"
-            >
-              <option value="all">Difficulty</option>
-              <option value="l0">L0</option>
-              <option value="l1">L1</option>
-              <option value="l2">L2</option>
-              <option value="l3">L3</option>
-              <option value="l4">L4</option>
-            </select>
-          </section>
-
-          <section className="play-problems-table-wrap" aria-label="Labs">
-            <div className="play-problems-table-head">
-              <span>Status</span>
-              <span>ID</span>
-              <span>Lab</span>
-              <span>Topics</span>
-              <span>Difficulty</span>
-              <span>Submitted</span>
-            </div>
-            {filteredRows.length === 0 ? (
-              <div className="play-problems-empty">
-                {catalogRows.length === 0
-                  ? 'No labs loaded from the catalog yet.'
-                  : 'No labs match these filters.'}
-              </div>
-            ) : (
-              <ul className="play-problems-table">
-                {filteredRows.map(({ challenge, panelLabel, domainLabel }) => {
-                  const playable = Boolean(challenge.finalized);
-                  const solved = Boolean(challenge.solved);
-                  return (
-                    <li key={challenge.id}>
-                      <button
-                        type="button"
-                        className={`play-problem-row${playable ? '' : ' disabled'}${solved ? ' is-solved' : ''}`}
-                        disabled={!playable}
-                        onClick={() => {
-                          if (playable) void onSelectChallenge(challenge);
-                        }}
+          {isTracksHub && (
+            <section className="play-hub" aria-label="Tracks">
+              <header className="play-hub-header">
+                <p className="play-problems-kicker">Tracks</p>
+                <h2 className="play-hub-title">Pick a track</h2>
+                <p className="play-hub-lead">
+                  Browse labs by role track — open a category, then a technology shelf.
+                </p>
+              </header>
+              <div className="play-paper-section-grid" aria-label="Track categories">
+                {PLAY_DOMAINS.map((d) => {
+                  const count = domainLabCount(d);
+                  const empty = d.panels.length === 0 || count === 0;
+                  if (empty) {
+                    return (
+                      <div
+                        key={d.id}
+                        className="play-paper-section-card play-paper-tile--soon"
+                        title="Coming soon"
                       >
-                        <span
-                          className={`play-problem-status${solved ? ' is-solved' : ''}`}
-                          aria-label={solved ? 'Solved' : 'Unsolved'}
-                        >
-                          {solved ? '✓' : '—'}
-                        </span>
-                        <span
-                          className="play-problem-id"
-                          title={challenge.id}
-                        >
-                          {catalogIdLabel(challenge)}
-                        </span>
-                        <span className="play-problem-title">{challenge.title}</span>
-                        <span className="play-problem-topics">
-                          <span className="play-topic-pill">Spark</span>
-                          <span className="sr-only">{domainLabel} {panelLabel}</span>
-                        </span>
-                        <span className={`pill ${difficultyClass(challenge.difficulty)}`}>
-                          {challenge.difficulty || 'L1'}
-                        </span>
-                        <span
-                          className="play-problem-submitters"
-                          title={`${challenge.submitters || 0} users submitted`}
-                        >
-                          {challenge.submitters || 0}
-                        </span>
-                      </button>
-                    </li>
+                        <span className="play-paper-section-kicker">Soon</span>
+                        <strong className="play-paper-section-title">{d.label}</strong>
+                        <p className="play-paper-section-blurb">{d.blurb}</p>
+                      </div>
+                    );
+                  }
+                  const topics = d.panels
+                    .filter((p) => p.challengeIds.length > 0)
+                    .map((p) => p.label)
+                    .join(' · ');
+                  return (
+                    <Link
+                      key={d.id}
+                      to={playCatalogPath(d.id)}
+                      className="play-paper-section-card"
+                    >
+                      <span className="play-paper-section-kicker">
+                        {count} lab{count === 1 ? '' : 's'}
+                        {topics ? ` · ${topics}` : ''}
+                      </span>
+                      <strong className="play-paper-section-title">{d.label}</strong>
+                      <p className="play-paper-section-blurb">{d.blurb}</p>
+                      <span className="play-paper-section-cta">
+                        Browse track
+                        <span aria-hidden>→</span>
+                      </span>
+                    </Link>
                   );
                 })}
-              </ul>
-            )}
-          </section>
+              </div>
+            </section>
+          )}
+
+          {isDomainHub && domain && (
+            <section className="play-hub" aria-label={`${domain.label} shelves`}>
+              <header className="play-hub-header">
+                <p className="play-problems-kicker">
+                  <Link to="/play" className="play-papers-crumb">
+                    Tracks
+                  </Link>
+                  <span aria-hidden> / </span>
+                  {domain.label}
+                </p>
+                <h2 className="play-hub-title">{domain.label}</h2>
+                <p className="play-hub-lead">{domain.blurb}</p>
+              </header>
+              <div className="play-paper-section-grid" aria-label={`${domain.label} categories`}>
+                {domain.panels.map((p) => {
+                  const count = panelLabCount(p);
+                  if (count === 0) {
+                    return (
+                      <div
+                        key={p.id}
+                        className="play-paper-section-card play-paper-tile--soon"
+                        title="Coming soon"
+                      >
+                        <span className="play-paper-section-kicker">Soon</span>
+                        <strong className="play-paper-section-title">{p.label}</strong>
+                        <p className="play-paper-section-blurb">{p.blurb}</p>
+                      </div>
+                    );
+                  }
+                  return (
+                    <Link
+                      key={p.id}
+                      to={playCatalogPath(domain.id, p.id)}
+                      className="play-paper-section-card"
+                    >
+                      <span className="play-paper-section-kicker">
+                        {count} lab{count === 1 ? '' : 's'}
+                      </span>
+                      <strong className="play-paper-section-title">{p.label}</strong>
+                      <p className="play-paper-section-blurb">{p.blurb}</p>
+                      <span className="play-paper-section-cta">
+                        Open labs
+                        <span aria-hidden>→</span>
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {showLabList && domain && panel && (
+            <>
+              <header className="play-hub-header play-hub-header--compact">
+                <p className="play-problems-kicker">
+                  <Link to="/play" className="play-papers-crumb">
+                    Tracks
+                  </Link>
+                  <span aria-hidden> / </span>
+                  <Link to={playCatalogPath(domain.id)} className="play-papers-crumb">
+                    {domain.label}
+                  </Link>
+                  <span aria-hidden> / </span>
+                  {panel.label}
+                </p>
+                <h2 className="play-hub-title">{panel.label}</h2>
+                <p className="play-hub-lead">{panel.blurb}</p>
+              </header>
+
+              <section className="play-problems-toolbar">
+                <label className="play-search">
+                  <span className="sr-only">Search labs</span>
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search labs…"
+                  />
+                </label>
+                <select
+                  className="play-filter-select"
+                  value={difficulty}
+                  onChange={(e) => setDifficulty(e.target.value as DifficultyFilter)}
+                  aria-label="Difficulty"
+                >
+                  <option value="all">Difficulty</option>
+                  <option value="l0">L0</option>
+                  <option value="l1">L1</option>
+                  <option value="l2">L2</option>
+                  <option value="l3">L3</option>
+                  <option value="l4">L4</option>
+                </select>
+              </section>
+
+              <section className="play-problems-table-wrap" aria-label={`${panel.label} labs`}>
+                <div className="play-problems-table-head">
+                  <span>Status</span>
+                  <span>ID</span>
+                  <span>Lab</span>
+                  <span>Topics</span>
+                  <span>Difficulty</span>
+                  <span>Submitted</span>
+                </div>
+                {filteredRows.length === 0 ? (
+                  <div className="play-problems-empty">
+                    {availableInPanel === 0
+                      ? 'No labs loaded for this shelf yet.'
+                      : 'No labs match these filters.'}
+                  </div>
+                ) : (
+                  <ul className="play-problems-table">
+                    {filteredRows.map(({ challenge, panelLabel, domainLabel }) => {
+                      const playable = Boolean(challenge.finalized);
+                      const solved = Boolean(challenge.solved);
+                      return (
+                        <li key={challenge.id}>
+                          <button
+                            type="button"
+                            className={`play-problem-row${playable ? '' : ' disabled'}${solved ? ' is-solved' : ''}`}
+                            disabled={!playable}
+                            onClick={() => {
+                              if (playable) void onSelectChallenge(challenge);
+                            }}
+                          >
+                            <span
+                              className={`play-problem-status${solved ? ' is-solved' : ''}`}
+                              aria-label={solved ? 'Solved' : 'Unsolved'}
+                            >
+                              {solved ? '✓' : '—'}
+                            </span>
+                            <span
+                              className="play-problem-id"
+                              title={challenge.id}
+                            >
+                              {catalogIdLabel(challenge)}
+                            </span>
+                            <span className="play-problem-title">{challenge.title}</span>
+                            <span className="play-problem-topics">
+                              <span className="play-topic-pill">{panelLabel}</span>
+                              <span className="sr-only">{domainLabel} {panelLabel}</span>
+                            </span>
+                            <span className={`pill ${difficultyClass(challenge.difficulty)}`}>
+                              {challenge.difficulty || 'L1'}
+                            </span>
+                            <span
+                              className="play-problem-submitters"
+                              title={`${challenge.submitters || 0} users submitted`}
+                            >
+                              {challenge.submitters || 0}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
+            </>
+          )}
         </main>
       </div>
     </div>
@@ -329,6 +463,7 @@ export default function PlayPage(): JSX.Element | null {
   if (restoringSession || playState === 'loading') {
     const spark = isSparkPlatformChallenge(activeChallenge);
     const board = isBoardChallenge(activeChallenge);
+    const k8s = isKubernetesChallenge(activeChallenge);
     return (
       <div className="app-page app-page-centered">
         <div className="loading-card app-surface-card">
@@ -339,6 +474,13 @@ export default function PlayPage(): JSX.Element | null {
                 Opening board for <strong>{activeChallenge?.title}</strong>…
                 <div style={{ color: 'var(--text-dim)', fontSize: 14, marginTop: 6 }}>
                   No cluster — fill the empty blocks from Unused.
+                </div>
+              </>
+            ) : k8s ? (
+              <>
+                Opening Kubernetes lab for <strong>{activeChallenge?.title}</strong>…
+                <div style={{ color: 'var(--text-dim)', fontSize: 14, marginTop: 6 }}>
+                  Preparing your namespace on the shared cluster.
                 </div>
               </>
             ) : spark ? (
@@ -383,6 +525,15 @@ export default function PlayPage(): JSX.Element | null {
     if (isBoardChallenge(activeChallenge) || activeSession.runtime === 'board') {
       return (
         <BoardWorkspace
+          challenge={activeChallenge}
+          session={activeSession}
+          onClose={onBackToLibrary}
+        />
+      );
+    }
+    if (isKubernetesChallenge(activeChallenge) || activeSession.runtime === 'kubernetes') {
+      return (
+        <K8sLabWorkspace
           challenge={activeChallenge}
           session={activeSession}
           onClose={onBackToLibrary}

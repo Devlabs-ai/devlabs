@@ -194,3 +194,106 @@ export async function fetchSparkSubmissions(sessionId: string): Promise<SparkJob
   });
   return (data.submissions || []) as SparkJobRecord[];
 }
+
+export interface K8sSessionStartResult {
+  sessionId: string;
+  status: string;
+  runtime: string;
+  k8sNamespace?: string | null;
+  created?: boolean;
+  provisioned?: boolean;
+  terminalWsUrl?: string | null;
+  session?: Record<string, unknown>;
+  challenge?: Record<string, unknown>;
+}
+
+function rewriteWsUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}${u.pathname}${u.search}`;
+  } catch (_e) {
+    return url;
+  }
+}
+
+export async function startK8sSession(challengeId: string): Promise<K8sSessionStartResult> {
+  const { data } = await axios.post(
+    '/api/session/k8s/start',
+    { challengeId },
+    { headers: getAuthHeader() },
+  );
+  const payload = data as K8sSessionStartResult;
+  return {
+    ...payload,
+    terminalWsUrl: rewriteWsUrl(payload.terminalWsUrl),
+  };
+}
+
+export async function execK8sCommand(
+  sessionId: string,
+  command: string,
+): Promise<{ code: number; stdout: string; stderr: string; k8sNamespace?: string }> {
+  const { data } = await axios.post(
+    `/api/session/${sessionId}/k8s/exec`,
+    { command },
+    { headers: getAuthHeader() },
+  );
+  return data as { code: number; stdout: string; stderr: string; k8sNamespace?: string };
+}
+
+export async function gradeK8sSession(
+  sessionId: string,
+): Promise<{
+  passed: boolean;
+  message: string;
+  stdout: string;
+  stderr: string;
+  submissionId?: string;
+  submission?: K8sSubmissionRecord;
+}> {
+  const { data } = await axios.post(
+    `/api/session/${sessionId}/k8s/grade`,
+    {},
+    { headers: getAuthHeader() },
+  );
+  return data as {
+    passed: boolean;
+    message: string;
+    stdout: string;
+    stderr: string;
+    submissionId?: string;
+    submission?: K8sSubmissionRecord;
+  };
+}
+
+export interface K8sSubmissionRecord {
+  id: string;
+  sessionId: string;
+  challengeId: string | null;
+  name: string;
+  status: string;
+  gradeStatus: string | null;
+  passed: boolean;
+  message: string;
+  stdout: string;
+  stderr: string;
+  submittedAt: number | null;
+  gradedAt: number | null;
+}
+
+export async function fetchK8sSubmissions(sessionId: string): Promise<K8sSubmissionRecord[]> {
+  const { data } = await axios.get(`/api/session/${sessionId}/k8s/submissions`, {
+    headers: getAuthHeader(),
+  });
+  return ((data as { submissions?: K8sSubmissionRecord[] }).submissions || []);
+}
+
+export async function resetK8sSession(sessionId: string): Promise<void> {
+  await axios.post(
+    `/api/session/${sessionId}/k8s/reset`,
+    {},
+    { headers: getAuthHeader() },
+  );
+}

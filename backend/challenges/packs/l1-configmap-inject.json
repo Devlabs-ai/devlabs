@@ -1,0 +1,25 @@
+{
+  "id": "l1-configmap-inject",
+  "number": 37,
+  "finalized": false,
+  "title": "Settings in Both Pockets",
+  "description": "Guestbook\u2019s theme and feature flags should not be baked into the image.\n\nCreate a ConfigMap and wire it in **two** ways: environment variables **and** a mounted file. Ops will check that the running app can see both forms \u2014 one pocket is not enough.\n\n**Meant for:** ConfigMaps (env + volume).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "ConfigMaps",
+    "brief": "Create a ConfigMap and consume it as both environment variables and a mounted file \u2014 the app must see both."
+  },
+  "platformSpec": {}
+}

@@ -11,6 +11,7 @@ const {
   loadChallengeMeta,
   writeChallengeMeta,
   writeSolutionFiles,
+  loadSolutionAsset,
   applyMoatPolicy,
 } = require('../challenges/minioChallengeAssets');
 const { listSolvedChallengeIds, countSubmittersByChallenge } = require('../challenges/userProgress');
@@ -65,7 +66,7 @@ router.get('/:id', requireInterviewer, async (req: ExpressRequest, res: ExpressR
   }
 });
 
-const CONTENT_TABS = new Set(['description', 'data', 'spec', 'knobs', 'solution', 'moat']);
+const CONTENT_TABS = new Set(['description', 'data', 'spec', 'cluster', 'knobs', 'solution', 'moat']);
 
 async function syncCatalogRow(meta: {
   id: string;
@@ -108,7 +109,7 @@ router.put(
       if (!base) return res.status(404).json({ error: 'challenge not found' });
       const tab = String((req.body as Record<string, unknown>)?.tab || '');
       if (!CONTENT_TABS.has(tab)) {
-        return res.status(400).json({ error: 'tab must be description, data, spec, knobs, solution, or moat' });
+        return res.status(400).json({ error: 'tab must be description, data, spec, cluster, knobs, solution, or moat' });
       }
 
       const body = (req.body as Record<string, unknown>) || {};
@@ -180,6 +181,16 @@ router.put(
           if ('scoring' in patch) spec.scoring = patch.scoring;
           meta.problemStatement = ps;
           meta.platformSpec = spec;
+        } else if (tab === 'cluster') {
+          const cluster = body.cluster;
+          if (!cluster || typeof cluster !== 'object' || Array.isArray(cluster)) {
+            return res.status(400).json({ error: 'cluster object required' });
+          }
+          const patch = cluster as Record<string, unknown>;
+          if ('limits' in patch) spec.limits = patch.limits;
+          if ('sparkConf' in patch) spec.sparkConf = patch.sparkConf;
+          if ('scoring' in patch) spec.scoring = patch.scoring;
+          meta.platformSpec = spec;
         } else if (tab === 'knobs') {
           if (!Array.isArray(body.knobs)) {
             return res.status(400).json({ error: 'knobs array required' });
@@ -209,6 +220,30 @@ router.put(
   },
 );
 
+// GET /api/challenges/:id/solution/assets/:filename — PNG/screenshots from MinIO
+router.get(
+  '/:id/solution/assets/:filename',
+  async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+    try {
+      const c = loader.getPublicChallenge(req.params.id);
+      if (!c) return res.status(404).json({ error: 'challenge not found' });
+
+      const filename = String(req.params.filename || '');
+      if (!filename || filename.includes('/') || filename.includes('..')) {
+        return res.status(400).json({ error: 'invalid asset filename' });
+      }
+
+      const asset = await loadSolutionAsset(req.params.id, `assets/${filename}`);
+      if (!asset) return res.status(404).json({ error: 'asset not found' });
+
+      res.set('Cache-Control', 'public, max-age=3600');
+      res.type(asset.contentType).send(asset.body);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 // GET /api/challenges/:id/solution — reference files from MinIO challenges/<id>/solution/
 router.get('/:id/solution', async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
   try {
@@ -218,12 +253,16 @@ router.get('/:id/solution', async (req: ExpressRequest, res: ExpressResponse, ne
     const files = await loadSolutionFiles(req.params.id);
     if (!files) {
       return res.status(404).json({
-        error: `No solution/ in MinIO for ${req.params.id}. Re-publish the challenge.`,
+        error: `No solution/ for ${req.params.id}. Publish MinIO solution/ or add challenges/k8s/${req.params.id}/solution/.`,
       });
     }
 
-    const entrypoint =
+    const sparkEntrypoint =
       ((c.sparkPlatform as { starterFileName?: string } | null)?.starterFileName)
+      || null;
+    const entrypoint =
+      sparkEntrypoint
+      || (files['README.md'] ? 'README.md' : Object.keys(files).sort()[0])
       || 'src/main.py';
 
     res.json({

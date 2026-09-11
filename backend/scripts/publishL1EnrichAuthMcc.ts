@@ -14,7 +14,7 @@ const { writeChallengeMeta } = require('../challenges/minioChallengeAssets');
 
 const BUCKET = process.env.MINIO_BUCKET || 'devlabs-data';
 const PLATFORM_API =
-  process.env.SPARK_PLATFORM_API_URL || 'http://192.168.1.9:30088';
+  process.env.SPARK_PLATFORM_API_URL || 'http://192.168.1.2:30088';
 const PREFIX = 'challenges/l1-enrich-auth-mcc';
 const PACK_FILE = path.join(__dirname, '../challenges/packs/l1-enrich-auth-mcc.json');
 const GEN_FILE = path.join(__dirname, 'genL1EnrichAuthMcc.py');

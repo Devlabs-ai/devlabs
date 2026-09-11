@@ -31,7 +31,7 @@ DUMP_PATH = os.environ.get("DUMP_PATH", OUTPUT_PATH)
 
 # ── Facts ────────────────────────────────────────────────────────────────────
 TXNS_50M_SKEW_KEY75 = "${P.TXNS_50M_SKEW_KEY75}"
-TXNS_100M_SKEW_KEY75 = "${P.TXNS_100M_SKEW_KEY75}"
+TXNS_150M_SKEW_KEY75 = "${P.TXNS_150M_SKEW_KEY75}"
 
 # ── Dims / opcode tables ─────────────────────────────────────────────────────
 DIM_COUNTRY = "${P.DIM_COUNTRY}"

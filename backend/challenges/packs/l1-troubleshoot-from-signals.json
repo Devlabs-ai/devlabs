@@ -1,0 +1,25 @@
+{
+  "id": "l1-troubleshoot-from-signals",
+  "number": 46,
+  "finalized": false,
+  "title": "Read the Room",
+  "description": "Several things are broken at once: a bad probe, an OOM, a missing mount \u2014 classic opening-night chaos.\n\nYou get cluster signals only. No spoilers in the brief beyond the required Ready end state. Read events, logs, and describes; fix what the room is telling you.\n\n**Meant for:** describe / logs / exec / events.\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "l1",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "Troubleshoot from signals",
+    "brief": "Multi-fault Guestbook stack \u2014 use describe/logs/events/exec only to restore the required Ready state."
+  },
+  "platformSpec": {}
+}

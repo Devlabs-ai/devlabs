@@ -10,7 +10,7 @@ const { getObjectStore, normalizeKey } = require('../workspace/objectStore');
 
 const BUCKET = process.env.MINIO_BUCKET || 'devlabs-data';
 const PLATFORM_API =
-  process.env.SPARK_PLATFORM_API_URL || 'http://192.168.1.9:30088';
+  process.env.SPARK_PLATFORM_API_URL || 'http://192.168.1.2:30088';
 const PREFIX = 'challenges/l1-filter-valid-sales-rows';
 const MAIN = `s3a://${BUCKET}/${PREFIX}/solution/src/main.py`;
 

@@ -4387,6 +4387,51 @@ a.project-stage-open:hover {
   gap: 16px;
 }
 
+.play-hub {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.play-hub-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.play-hub-header--compact {
+  gap: 4px;
+}
+
+.play-hub-title {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #fff;
+}
+
+.play-hub-header--compact .play-hub-title {
+  font-size: 22px;
+}
+
+.play-hub-lead {
+  margin: 0;
+  max-width: 56ch;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.play-hub .play-paper-section-grid {
+  margin-top: 4px;
+}
+
 .play-featured-card {
   display: flex;
   align-items: center;
@@ -15752,4 +15797,249 @@ kbd {
   .board-top {
     flex-direction: column;
   }
+}
+
+/* ── Kubernetes lab workspace ───────────────────────────────────────────── */
+.k8s-lab-workspace .k8s-lab-term-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  padding: 0;
+}
+
+.k8s-lab-term-pane-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  /* Keep layout size even when Scratch pad is on top — display:none zeros FitAddon cols. */
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.k8s-lab-term-pane-layer.is-active {
+  visibility: visible;
+  pointer-events: auto;
+  z-index: 1;
+}
+
+.k8s-lab-term-pane--results-open .k8s-lab-term-pane-layer,
+.k8s-lab-term-pane--results-open .k8s-lab-scratch {
+  bottom: var(--k8s-results-h, 280px);
+}
+
+.k8s-lab-eval-drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.k8s-lab-term-pane-layer .terminal-host {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.k8s-lab-main-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 10px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.k8s-lab-main-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.k8s-lab-main-tab.active {
+  color: var(--brand-bright);
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.k8s-lab-ns-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.k8s-lab-ns-chip code {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.k8s-lab-grade-chip {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.k8s-lab-grade-chip.is-pass {
+  color: #3ecf8e;
+  border-color: rgba(62, 207, 142, 0.35);
+  background: rgba(62, 207, 142, 0.1);
+}
+
+.k8s-lab-grade-chip.is-fail {
+  color: #fb7185;
+  border-color: rgba(251, 113, 133, 0.35);
+  background: rgba(251, 113, 133, 0.1);
+}
+
+.k8s-lab-scratch {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #000;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.k8s-lab-scratch.is-active {
+  visibility: visible;
+  pointer-events: auto;
+  z-index: 20;
+}
+
+.k8s-lab-scratch-hint {
+  margin: 0;
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.k8s-lab-scratch-hint code {
+  font-size: 11px;
+  color: var(--brand-bright);
+}
+
+.k8s-lab-scratch-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  width: 100%;
+}
+
+.k8s-lab-scratch-editor > section {
+  position: absolute !important;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.k8s-lab-term-pane--has-results-bar .k8s-lab-scratch.is-active {
+  bottom: 36px;
+}
+
+.k8s-lab-main-tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.k8s-lab-eval-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.k8s-lab-eval-banner strong {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
+.k8s-lab-eval-banner span {
+  flex: 1;
+  min-width: 160px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.k8s-lab-eval-banner em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.k8s-lab-eval-banner.is-pass {
+  background: rgba(62, 207, 142, 0.08);
+}
+
+.k8s-lab-eval-banner.is-pass strong {
+  color: #3ecf8e;
+}
+
+.k8s-lab-eval-banner.is-fail {
+  background: rgba(251, 113, 133, 0.08);
+}
+
+.k8s-lab-eval-banner.is-fail strong {
+  color: #fb7185;
+}
+
+.k8s-lab-eval-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.k8s-lab-eval-body h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.k8s-lab-eval-body pre {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.k8s-lab-eval-body pre.k8s-lab-eval-stderr {
+  color: #fecdd3;
+  border-color: rgba(251, 113, 133, 0.25);
 }

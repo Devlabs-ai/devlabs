@@ -12,6 +12,8 @@
  * Postgres is used only to know the challenge exists (thin catalog).
  */
 
+const fs = require('fs');
+const path = require('path');
 const { getObjectStore, normalizeKey } = require('../workspace/objectStore');
 
 export type ChallengeMeta = {
@@ -70,12 +72,14 @@ async function loadPrefixFiles(
   const keys: string[] = await store.listKeys(prefix);
   if (!keys.length) return null;
 
+  const binaryExt = /\.(png|jpe?g|gif|webp|svg|ico|pdf|zip|parquet)$/i;
   const files: Record<string, string> = {};
   for (const key of keys) {
     if (key.endsWith('/')) continue;
     const rel = key.slice(prefix.length);
     if (!rel || rel.includes('..')) continue;
     if (rel.includes('__pycache__') || rel.endsWith('.pyc')) continue;
+    if (binaryExt.test(rel)) continue;
     if (opts?.skipRel?.(rel)) continue;
     const buf = await store.getObject(key);
     if (!buf) continue;
@@ -88,9 +92,37 @@ async function loadStarterFiles(challengeId: string): Promise<Record<string, str
   return loadPrefixFiles(challengeId, 'starter');
 }
 
+/** Pack-based K8s labs: backend/challenges/k8s/<id>/solution/** */
+function loadLocalK8sSolutionFiles(challengeId: string): Record<string, string> | null {
+  if (!challengeId || challengeId.includes('..') || challengeId.includes('/') || challengeId.includes('\\')) {
+    return null;
+  }
+  const root = path.join(__dirname, 'k8s', challengeId, 'solution');
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) return null;
+
+  const binaryExt = /\.(png|jpe?g|gif|webp|svg|ico|pdf|zip|parquet)$/i;
+  const files: Record<string, string> = {};
+
+  const walk = (dir: string, prefix: string) => {
+    for (const name of fs.readdirSync(dir)) {
+      const abs = path.join(dir, name);
+      const rel = prefix ? `${prefix}/${name}` : name;
+      const st = fs.statSync(abs);
+      if (st.isDirectory()) {
+        walk(abs, rel);
+        continue;
+      }
+      if (binaryExt.test(name) || name.endsWith('.pyc') || name.includes('__pycache__')) continue;
+      files[rel.replace(/\\/g, '/')] = fs.readFileSync(abs, 'utf8');
+    }
+  };
+  walk(root, '');
+  return Object.keys(files).length ? files : null;
+}
+
 /** Student-facing reference solution (Spark entry + docs). Skips package dunders / oracle helper. */
 async function loadSolutionFiles(challengeId: string): Promise<Record<string, string> | null> {
-  return loadPrefixFiles(challengeId, 'solution', {
+  const fromMinio = await loadPrefixFiles(challengeId, 'solution', {
     skipRel: (rel) => {
       const base = rel.split('/').pop() || rel;
       if (base === '__init__.py') return true;
@@ -99,6 +131,8 @@ async function loadSolutionFiles(challengeId: string): Promise<Record<string, st
       return false;
     },
   });
+  if (fromMinio) return fromMinio;
+  return loadLocalK8sSolutionFiles(challengeId);
 }
 
 function catalogWantsMinio(base: Record<string, unknown>): boolean {
@@ -155,6 +189,7 @@ async function hydrateChallengeFromMinio(
 ): Promise<Record<string, unknown> | null> {
   if (!base || typeof base.id !== 'string') return base;
   if ((base.sandboxType as string | undefined) === 'board') return base;
+  if ((base.sandboxType as string | undefined) === 'kubernetes') return base;
 
   const meta = await loadChallengeMeta(base.id);
   const wantsMinio = catalogWantsMinio(base)
@@ -227,6 +262,31 @@ async function writeSolutionFiles(
   return written;
 }
 
+const SOLUTION_ASSET_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+};
+
+async function loadSolutionAsset(
+  challengeId: string,
+  assetPath: string,
+): Promise<{ body: Buffer; contentType: string } | null> {
+  const rel = safeRelPath(assetPath);
+  if (!rel || !rel.startsWith('assets/')) return null;
+  const ext = rel.slice(rel.lastIndexOf('.')).toLowerCase();
+  const contentType = SOLUTION_ASSET_TYPES[ext];
+  if (!contentType) return null;
+  const store = getObjectStore();
+  const key = `${challengePrefix(challengeId)}/solution/${rel}`;
+  const body = await store.getObject(key);
+  if (!body) return null;
+  return { body, contentType };
+}
+
 function stripMoat(challenge: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
   if (!challenge || typeof challenge !== 'object') return challenge ?? null;
   const ps = challenge.problemStatement;
@@ -257,6 +317,7 @@ module.exports = {
   challengeFromMinioMeta,
   writeChallengeMeta,
   writeSolutionFiles,
+  loadSolutionAsset,
   stripMoat,
   applyMoatPolicy,
 };

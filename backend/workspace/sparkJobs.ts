@@ -23,7 +23,7 @@ const BUCKET = process.env.MINIO_BUCKET || process.env.S3_BUCKET || 'devlabs-dat
 const KEEP_RUN_ARTIFACTS = 1;
 const KEEP_SUBMIT_ARTIFACTS = 5;
 const PLATFORM_API =
-  process.env.SPARK_PLATFORM_API_URL || 'http://192.168.1.9:30088';
+  process.env.SPARK_PLATFORM_API_URL || 'http://192.168.1.2:30088';
 const HISTORY_UI_FALLBACK =
   (process.env.SPARK_HISTORY_UI_URL || '').replace(/\/$/, '') || null;
 
@@ -242,6 +242,8 @@ type LabPlatformSpec = {
   catalogInputPath?: string;
   runEventsInputPath?: string;
   runCatalogInputPath?: string;
+  runEvalPath?: string;
+  evalSolutionPath?: string;
   dimPath?: string;
   productsPath?: string;
 };
@@ -811,6 +813,7 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
     outputFormat === 'parquet' || outputFormat === 'csv'
       ? s3aKey(`${root}/results/${jobId}/`)
       : s3aKey(`${root}/results/${jobId}/solution.json`);
+  const checkpointPath = s3aKey(`${root}/jobs/${jobId}/checkpoint/`);
   // Stable scratch dump for playground experiments (reuse across Runs).
   const playgroundDumpPath =
     session.challengeId === 'spark-playground'
@@ -890,6 +893,15 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
     }
     productsPath = String(labSpec.productsPath || productsPath).trim();
     dimPath = String(labSpec.dimPath || dimPath).trim();
+    if (!testcasesPrefix) {
+      if (mode === 'run') {
+        evalSolutionPath = String(
+          labSpec.runEvalPath || labSpec.evalSolutionPath || evalSolutionPath,
+        ).trim();
+      } else {
+        evalSolutionPath = String(labSpec.evalSolutionPath || evalSolutionPath).trim();
+      }
+    }
   }
 
   if (eventsInputPath && catalogInputPath) {
@@ -918,6 +930,7 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
     businessDate,
     inputPath,
     outputPath,
+    checkpointPath,
     outputFormat,
     evalSolutionPath: evalSolutionPath || null,
     testcasesPrefix: testcasesPrefix || null,
@@ -1015,6 +1028,7 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
       BUSINESS_DATE: businessDate,
       ...(inputPath ? { INPUT_PATH: inputPath } : {}),
       OUTPUT_PATH: outputPath,
+      CHECKPOINT_PATH: checkpointPath,
       ...(playgroundDumpPath ? { DUMP_PATH: playgroundDumpPath } : {}),
       ...(productsPath && String(productsPath).trim()
         ? { PRODUCTS_PATH: String(productsPath).trim() }
@@ -1073,6 +1087,7 @@ async function startSparkJob(opts: StartSparkJobOpts): Promise<Record<string, un
             ? 'Using provided INPUT_PATH'
             : 'No INPUT_PATH — job must use paths from code',
         ...(playgroundDumpPath ? [`DUMP_PATH=${playgroundDumpPath}`] : []),
+        `CHECKPOINT_PATH=${checkpointPath}`,
         `Submitting ${k8sName} to Spark Platform…`,
         mode === 'submit'
           ? 'Submit mode — will row-diff against each testcase expected/ when Spark succeeds'

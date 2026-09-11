@@ -1,0 +1,25 @@
+{
+  "id": "l1-replicaset-scale",
+  "number": 34,
+  "finalized": false,
+  "title": "Three Copies, Same Face",
+  "description": "Before Deployments owned the world, ReplicaSets kept copies honest.\n\nOps wants a ReplicaSet with a fixed count and selectors that actually own the pods. Then they ask you to **scale once** \u2014 same template, different count. Rewrite-the-spec-from-scratch is the wrong move.\n\nLeave the replicas Running and selected.\n\n**Meant for:** ReplicaSets.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "ReplicaSets",
+    "brief": "Stand up a ReplicaSet with matching selectors, then scale it once without rewriting the pod template."
+  },
+  "platformSpec": {}
+}

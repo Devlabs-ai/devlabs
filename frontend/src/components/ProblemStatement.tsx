@@ -73,8 +73,20 @@ function escapeRegExp(value: string): string {
 
 function getPs(challenge: ChallengePublic | ChallengeFull): ProblemStatementData {
   const full = challenge as ChallengeFull;
-  return (typeof full.problemStatement === 'object' && full.problemStatement !== null
-    ? full.problemStatement
+  const raw = full.problemStatement;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as ProblemStatementData;
+      }
+    } catch {
+      return {};
+    }
+    return {};
+  }
+  return (typeof raw === 'object' && raw !== null
+    ? raw
     : {}) as ProblemStatementData;
 }
 

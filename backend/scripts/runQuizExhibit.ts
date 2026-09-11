@@ -11,10 +11,10 @@ const { getObjectStore, normalizeKey } = require('../workspace/objectStore');
 
 const BUCKET = process.env.MINIO_BUCKET || process.env.S3_BUCKET || 'devlabs-data';
 const PLATFORM_API =
-  process.env.SPARK_PLATFORM_API_URL || 'http://192.168.1.9:30088';
+  process.env.SPARK_PLATFORM_API_URL || 'http://192.168.1.2:30088';
 /** Prefer env, else canonical Mac Mini LAN IP (platform /api/config can be stale). */
 const HISTORY_UI_BASE =
-  (process.env.SPARK_HISTORY_UI_URL || 'http://192.168.1.9:30080').replace(/\/$/, '');
+  (process.env.SPARK_HISTORY_UI_URL || 'http://192.168.1.2:30080').replace(/\/$/, '');
 
 type QuizRunSpec = {
   testcasesPrefix?: string;

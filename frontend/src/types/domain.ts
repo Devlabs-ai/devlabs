@@ -16,8 +16,15 @@ export interface ValidationSpec {
   [key: string]: unknown;
 }
 
-/** Play runtime. compose = per-session Docker sandbox; spark-platform = shared batch cluster. */
-export type SandboxType = 'compose' | 'spark-platform' | 'board';
+/** Play runtime. compose = Docker sandbox; spark-platform = shared batch; kubernetes = per-user Namespace labs. */
+export type SandboxType = 'compose' | 'spark-platform' | 'board' | 'kubernetes';
+
+export interface K8sPlatformSpec {
+  quota?: { pods?: string; cpu?: string; memory?: string };
+  setup?: { script?: string };
+  grade?: { script?: string; timeoutSeconds?: number };
+  [key: string]: unknown;
+}
 
 export interface SparkPlatformLimits {
   /** Driver cores requested for each Run/Submit job. */
@@ -79,6 +86,12 @@ export interface SparkPlatformSpec {
   runEventsInputPath?: string;
   /** Run smoke catalog path. Falls back to catalogInputPath. */
   runCatalogInputPath?: string;
+  /** Job I/O label for INPUT_A_PATH. Defaults to "Events". */
+  inputALabel?: string;
+  /** Job I/O label for INPUT_B_PATH. Defaults to "Catalog". */
+  inputBLabel?: string;
+  /** Structured Streaming lab — platform injects CHECKPOINT_PATH. */
+  streaming?: boolean;
   /** Per-challenge grader script (s3a). Receives --candidate and --reference dirs. */
   gradeScript?: string;
   /** When true, stage testcases/<id>/input/ + input_b/ as INPUT_A_PATH / INPUT_B_PATH. */
@@ -146,6 +159,7 @@ export interface ChallengePublic {
   contentSource?: 'minio' | string;
   problemStatement?: Record<string, unknown> | string | null;
   sparkPlatform?: SparkPlatformSpec | null;
+  k8sPlatform?: K8sPlatformSpec | null;
   boardSpec?: PublicBoardSpec | null;
 }
 
@@ -224,6 +238,8 @@ export interface ChallengeFull extends ChallengePublic {
   validationSpec: ValidationSpec | null;
   /** Present when sandboxType === 'spark-platform'. */
   sparkPlatform?: SparkPlatformSpec | null;
+  /** Present when sandboxType === 'kubernetes'. */
+  k8sPlatform?: K8sPlatformSpec | null;
   boardSpec?: PublicBoardSpec | null;
 }
 
@@ -323,8 +339,10 @@ export interface ActiveSession {
   portMap: Record<string, string | number> | null;
   services: string[];
   terminalService: string | null;
-  /** Set for spark-platform sessions (no compose). */
+  /** Set for spark-platform / kubernetes sessions (no compose). */
   runtime?: SandboxType | string | null;
+  /** Learner Namespace when runtime === kubernetes. */
+  k8sNamespace?: string | null;
 }
 
 export interface EndSessionResult {

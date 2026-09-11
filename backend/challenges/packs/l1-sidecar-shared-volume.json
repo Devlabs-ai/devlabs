@@ -1,0 +1,25 @@
+{
+  "id": "l1-sidecar-shared-volume",
+  "number": 41,
+  "finalized": false,
+  "title": "Two Processes, One Disk",
+  "description": "Frontend alone is not enough. Ops wants a sidecar in the same Pod \u2014 log shipper or proxy \u2014 sharing an `emptyDir` so both sides can read/write the same files.\n\nKeep **both** containers Ready. A lonely main container fails the pattern.\n\n**Meant for:** Multi-container / sidecar pattern.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "Sidecar pattern",
+    "brief": "Run Guestbook with a sidecar sharing an emptyDir (log shipper or proxy) \u2014 both containers Ready."
+  },
+  "platformSpec": {}
+}

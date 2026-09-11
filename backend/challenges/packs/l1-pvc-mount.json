@@ -1,0 +1,25 @@
+{
+  "id": "l1-pvc-mount",
+  "number": 49,
+  "finalized": false,
+  "title": "Keep What You Wrote",
+  "description": "Kiosk messages vanished every time the Pod restarted. Guests noticed.\n\nClaim storage with a PVC (or bind as the brief allows) and mount it at the required path. After a recreate, the data you wrote should still be there.\n\n**Meant for:** PV / PVC mounts.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "PVC mounts",
+    "brief": "Claim storage with a PVC and mount it into Guestbook at the required path \u2014 data must survive a recreate."
+  },
+  "platformSpec": {}
+}

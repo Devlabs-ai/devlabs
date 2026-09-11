@@ -32,6 +32,7 @@ import {
   type SparkKnobValues,
 } from '../constants/sparkKnobs';
 import BriefAdminEditor, { isEditableBriefTab } from './BriefAdminEditor';
+import ClusterSettingsPanel from './ClusterSettingsPanel';
 import { useAppState } from '../context/AppStateContext';
 import { isAdminUser, getCurrentUser } from '../services/authApi';
 import { IconPen, IconPlay, IconStop, IconSubmit } from './ChromeIcons';
@@ -57,7 +58,7 @@ import type {
 } from '../types/domain';
 
 const BRIEF_MIN = 280;
-const BRIEF_RATIO = 0.38;
+const BRIEF_RATIO = 0.43;
 const BRIEF_MAX_RATIO = 0.7;
 const JOB_POLL_MS = 4000;
 const JOB_POLL_MAX_MS = 15 * 60 * 1000;
@@ -482,6 +483,7 @@ export default function SparkPlatformWorkspace({
 
   const knobDefs = platform?.knobs?.length ? platform.knobs : EMPTY_KNOB_DEFS;
   const hasKnobs = knobDefs.length > 0;
+  const hasClusterTab = Boolean(platform?.scoring?.executionTime);
   const knobDefaults = useMemo(() => defaultsFromKnobDefs(knobDefs), [knobDefs]);
   const [knobDraft, setKnobDraft] = useState<SparkKnobValues>(knobDefaults);
   const [knobSaved, setKnobSaved] = useState<SparkKnobValues>(knobDefaults);
@@ -1072,6 +1074,7 @@ export default function SparkPlatformWorkspace({
         ['description', 'Description'],
         ['data', 'Data'],
         ['spec', 'Spec'],
+        ...(hasClusterTab ? [['cluster', 'Cluster'] as [ProblemStatementTab, string]] : []),
         ...(hasKnobs ? [['knobs', 'Knobs'] as [ProblemStatementTab, string]] : []),
         ['solution', 'Solution'],
         ...(isAdmin ? [['moat', 'Moat'] as [ProblemStatementTab, string]] : []),
@@ -1098,7 +1101,7 @@ export default function SparkPlatformWorkspace({
                   type="button"
                   role="tab"
                   aria-selected={briefTab === id}
-                  className={`spark-brief-tab${briefTab === id ? ' active' : ''}${id === 'moat' ? ' spark-brief-tab--setter' : ''}`}
+                  className={`spark-brief-tab${briefTab === id ? ' active' : ''}${id === 'moat' || id === 'cluster' ? ' spark-brief-tab--setter' : ''}`}
                   onClick={() => {
                     setBriefTab(id);
                     setAdminWantEdit(false);
@@ -1446,6 +1449,13 @@ export default function SparkPlatformWorkspace({
                     </div>
                   </div>
                 )
+              ) : briefTab === 'cluster' && hasClusterTab && challenge && platform ? (
+                <ClusterSettingsPanel
+                  challengeId={challenge.id}
+                  platform={platform}
+                  isAdmin={isAdmin}
+                  onSaved={(next) => setAuthored(next)}
+                />
               ) : briefTab === 'knobs' && hasKnobs ? (
                 <div className="play-playground-trail-pane">
                   <p className="play-playground-trail-help">
@@ -1653,7 +1663,7 @@ export default function SparkPlatformWorkspace({
                                 <>
                                   {platform.eventsInputPath && (
                                     <li style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                                      Events: <code>INPUT_A_PATH</code>
+                                      {platform.inputALabel || 'Events'}: <code>INPUT_A_PATH</code>
                                       {platform.runEventsInputPath
                                         ? ' — Run uses a small sample; Submit uses the full drop'
                                         : ''}
@@ -1661,10 +1671,18 @@ export default function SparkPlatformWorkspace({
                                   )}
                                   {platform.catalogInputPath && (
                                     <li style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                                      Catalog: <code>INPUT_B_PATH</code>
+                                      {platform.inputBLabel || 'Catalog'}: <code>INPUT_B_PATH</code>
                                       {platform.runCatalogInputPath
-                                        ? ' — Run uses a current snapshot; Submit uses the versioned catalog'
+                                        ? (platform.streaming
+                                          ? ' — Run uses a short on-time window; Submit includes late files'
+                                          : ' — Run uses a current snapshot; Submit uses the versioned catalog')
                                         : ''}
+                                    </li>
+                                  )}
+                                  {platform.streaming && (
+                                    <li style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                                      Streaming checkpoint: <code>CHECKPOINT_PATH</code>
+                                      {' '}— per-job prefix for <code>writeStream</code>
                                     </li>
                                   )}
                                 </>
@@ -1711,7 +1729,15 @@ export default function SparkPlatformWorkspace({
                             </ul>
                           )}
                         </section>
-                        {platform.limits && (
+                        {hasClusterTab && (
+                          <section className="statement-section">
+                            <h4>Cluster</h4>
+                            <p className="dim" style={{ fontSize: 12, margin: '4px 0 0' }}>
+                              Fixed executor size and Spark config are on the <strong>Cluster</strong> tab.
+                            </p>
+                          </section>
+                        )}
+                        {!hasClusterTab && platform.limits && (
                           <section className="statement-section">
                             <h4>Job resources</h4>
                             <p className="dim" style={{ fontSize: 12, margin: '4px 0 8px' }}>
@@ -1767,7 +1793,7 @@ export default function SparkPlatformWorkspace({
                             </div>
                           </section>
                         )}
-                        {platform.sparkConf && Object.keys(platform.sparkConf).length > 0 && (
+                        {!hasClusterTab && platform.sparkConf && Object.keys(platform.sparkConf).length > 0 && (
                           <section className="statement-section">
                             <h4>Job Config</h4>
                             <p className="dim" style={{ fontSize: 12, margin: '4px 0 8px' }}>

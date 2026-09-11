@@ -4,7 +4,7 @@ const pool = require('../db/pool');
 
 const WATCHER_KEY = 'spark_job_watcher_enabled';
 const PLATFORM_API =
-  process.env.SPARK_PLATFORM_API_URL || 'http://192.168.1.9:30088';
+  process.env.SPARK_PLATFORM_API_URL || 'http://192.168.1.2:30088';
 
 function parseEnabled(raw: unknown, fallback = true): boolean {
   if (raw == null) return fallback;
