@@ -1,119 +1,159 @@
-import React, { useEffect, useState } from 'react';
-import AppPageHeader from '../components/AppPageHeader';
+import React, { useEffect, useMemo, useState } from 'react';
+import { PLAY_DOMAINS } from '../constants/playCatalog';
 import { useAppState } from '../context/AppStateContext';
-import { fetchInvites } from '../services/authApi';
-import type { InviteRecord } from '../types/domain';
-
-function inviteUrl(token: string): string {
-  return `${window.location.origin}/?candidate=${token}`;
-}
+import { isAdminUser } from '../services/authApi';
+import { fetchAdminSettings, saveAdminSettings } from '../services/adminApi';
 
 export default function ProfilePage(): JSX.Element {
-  const { currentUser } = useAppState();
-  const [invites, setInvites] = useState<InviteRecord[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [copied, setCopied] = useState<string | null>(null);
+  const { currentUser, challenges } = useAppState();
+  const isAdmin = Boolean(currentUser?.admin) || isAdminUser(currentUser);
+
+  const [watcherEnabled, setWatcherEnabled] = useState(true);
+  const [watcherLoading, setWatcherLoading] = useState(false);
+  const [watcherSaving, setWatcherSaving] = useState(false);
+  const [watcherError, setWatcherError] = useState<string | null>(null);
+  const [clusterSynced, setClusterSynced] = useState(true);
+
+  const finalizedCount = useMemo(
+    () => challenges.filter((c) => c.finalized).length,
+    [challenges],
+  );
+  const solvedCount = useMemo(
+    () => challenges.filter((c) => c.solved && c.finalized).length,
+    [challenges],
+  );
+  const trackCount = useMemo(
+    () => PLAY_DOMAINS.filter((d) => d.panels.some((p) => p.challengeIds.length)).length,
+    [],
+  );
 
   useEffect(() => {
+    if (!isAdmin) return;
     let cancelled = false;
-    (async (): Promise<void> => {
-      setLoading(true);
-      setError(null);
-      try {
-        const list = await fetchInvites() as InviteRecord[];
-        if (!cancelled) setInvites(list);
-      } catch (e: unknown) {
-        const err = e as { response?: { data?: { error?: string } }; message?: string };
-        if (!cancelled) setError(err?.response?.data?.error || err.message || 'Unknown error');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+    setWatcherLoading(true);
+    setWatcherError(null);
+    fetchAdminSettings()
+      .then((s) => {
+        if (cancelled) return;
+        setWatcherEnabled(s.sparkJobWatcherEnabled);
+        setClusterSynced(s.clusterSynced);
+      })
+      .catch((e: { response?: { data?: { error?: string } }; message?: string }) => {
+        if (cancelled) return;
+        setWatcherError(e.response?.data?.error || e.message || 'Could not load admin settings');
+      })
+      .finally(() => {
+        if (!cancelled) setWatcherLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
 
-  const handleCopy = async (token: string): Promise<void> => {
+  async function onToggleWatcher(): Promise<void> {
+    const next = !watcherEnabled;
+    setWatcherSaving(true);
+    setWatcherError(null);
     try {
-      await navigator.clipboard.writeText(inviteUrl(token));
-      setCopied(token);
-      setTimeout(() => setCopied(null), 1500);
-    } catch (_e) {
-      setError('Clipboard copy failed');
+      const s = await saveAdminSettings(next);
+      setWatcherEnabled(s.sparkJobWatcherEnabled);
+      setClusterSynced(s.clusterSynced);
+      if (!s.clusterSynced) {
+        setWatcherError('Saved, but the Spark cluster did not take the change. Try again.');
+      }
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      setWatcherError(err.response?.data?.error || err.message || 'Could not save');
+    } finally {
+      setWatcherSaving(false);
     }
-  };
+  }
 
   return (
     <div className="app-page profile-page">
-      <AppPageHeader
-        eyebrow="Account"
-        title="Profile"
-        lead={currentUser?.email ? `Signed in as ${currentUser.email}` : 'Your account and interview invites.'}
-      />
+      <div className="profile-shell">
+        <header className="profile-hero">
+          <p className="profile-eyebrow">Account</p>
+          <h1 className="profile-title">Profile</h1>
+          <p className="profile-lead">
+            {currentUser?.email ? `Signed in as ${currentUser.email}` : 'Your account.'}
+          </p>
+        </header>
 
-      <section className="profile-evals-section">
-        <h2 className="profile-section-title">Evals</h2>
-        <p className="profile-section-lead">
-          Candidate links you generated from My Challenges.
-        </p>
+        <div className="profile-stack">
+          <section className="profile-panel" aria-labelledby="profile-account-heading">
+            <h2 id="profile-account-heading" className="profile-panel-title">Account</h2>
+            <dl className="profile-account-dl">
+              <div>
+                <dt>Email</dt>
+                <dd>{currentUser?.email || '—'}</dd>
+              </div>
+              {currentUser?.name ? (
+                <div>
+                  <dt>Name</dt>
+                  <dd>{currentUser.name}</dd>
+                </div>
+              ) : null}
+            </dl>
+          </section>
 
-        {error && <div className="alert app-page-alert">{error}</div>}
+          <section className="profile-panel" aria-labelledby="profile-progress-heading">
+            <h2 id="profile-progress-heading" className="profile-panel-title">Your progress</h2>
+            <div className="profile-progress-metrics">
+              <div className="profile-progress-hero">
+                <strong>{solvedCount}</strong>
+                <span>/{Math.max(finalizedCount, 1)}</span>
+                <em>solved</em>
+              </div>
+              <div className="profile-progress-grid">
+                <div>
+                  <span>Available</span>
+                  <strong>{finalizedCount}</strong>
+                </div>
+                <div>
+                  <span>Tracks</span>
+                  <strong>{trackCount}</strong>
+                </div>
+              </div>
+            </div>
+          </section>
 
-        {loading ? (
-          <div className="profile-evals-loading">Loading evals…</div>
-        ) : (
-          <table className="invites-table profile-evals-table">
-            <thead>
-              <tr>
-                <th>Challenge</th>
-                <th>Conducted by</th>
-                <th>Candidate</th>
-                <th>Status</th>
-                <th style={{ textAlign: 'right' }}>Link</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invites.map((inv) => (
-                <tr key={inv.token}>
-                  <td>{inv.challengeTitle || inv.challengeId || '—'}</td>
-                  <td>{inv.conductedByName || currentUser?.name || '—'}</td>
-                  <td>
-                    <div className="profile-candidate-cell">
-                      <span>{inv.name}</span>
-                      {inv.candidateEmail && (
-                        <span className="profile-candidate-email">{inv.candidateEmail}</span>
-                      )}
-                    </div>
-                  </td>
-                  <td>
-                    {inv.used
-                      ? <span className="badge">used</span>
-                      : inv.expired
-                        ? <span className="badge">expired</span>
-                        : <span className="badge brand"><span className="dot" /> ready</span>}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    {!inv.used && !inv.expired ? (
-                      <span className="copy-link" onClick={() => handleCopy(inv.token)}>
-                        {copied === inv.token ? 'copied ✓' : 'copy link'}
-                      </span>
-                    ) : (
-                      <span className="profile-link-disabled">—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {invites.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="profile-evals-empty">
-                    No evals yet. Share a challenge from My Challenges to create a candidate link.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        )}
-      </section>
+          {isAdmin ? (
+            <section className="profile-panel" aria-labelledby="profile-admin-heading">
+              <h2 id="profile-admin-heading" className="profile-panel-title">Admin settings</h2>
+              <div className="profile-setting-row">
+                <div className="profile-setting-copy">
+                  <h3>Spark job watcher</h3>
+                  <p>
+                    When on, the cluster kills jobs that exceed the lab hard time limit.
+                    Turn off while testing long runs.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="profile-switch"
+                  role="switch"
+                  aria-checked={watcherEnabled}
+                  aria-label="Spark job watcher"
+                  disabled={watcherLoading || watcherSaving}
+                  onClick={() => void onToggleWatcher()}
+                >
+                  <span>{watcherEnabled ? 'On' : 'Off'}</span>
+                </button>
+              </div>
+              {watcherLoading ? (
+                <p className="profile-setting-status">Loading…</p>
+              ) : null}
+              {!watcherLoading && !clusterSynced && !watcherError ? (
+                <p className="profile-setting-status">Cluster did not confirm the last change.</p>
+              ) : null}
+              {watcherError ? (
+                <p className="profile-setting-status profile-setting-status--error">{watcherError}</p>
+              ) : null}
+            </section>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }

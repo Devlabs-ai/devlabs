@@ -5,7 +5,6 @@ import { getAuthHeader } from './authApi';
 interface RawSessionPayload {
   terminalWsUrl?: string | null;
   metricsWsUrl?: string | null;
-  agentObserverWsUrl?: string | null;
   [key: string]: unknown;
 }
 
@@ -58,14 +57,12 @@ function normalize(payload: RawSessionPayload): RawSessionPayload {
     ...payload,
     terminalWsUrl: rewriteWs(payload.terminalWsUrl),
     metricsWsUrl: rewriteWs(payload.metricsWsUrl),
-    agentObserverWsUrl: rewriteWs(payload.agentObserverWsUrl),
   };
 }
 
-export async function startSession(challengeId: string, candidateToken: string | null = null): Promise<SessionStartResult> {
-  const headers = candidateToken ? {} : getAuthHeader();
+export async function startSession(challengeId: string): Promise<SessionStartResult> {
+  const headers = getAuthHeader();
   const body: Record<string, string> = { challengeId };
-  if (candidateToken) body.candidateToken = candidateToken;
   const { data } = await axios.post('/api/session/start', body, { headers });
   return normalize(data as RawSessionPayload) as SessionStartResult;
 }
@@ -79,6 +76,8 @@ export async function restoreSession(id: string): Promise<RestoredSession | null
   const session = await getSession(id);
   if (!session) return null;
   const base = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+  const runtime = String(session.runtime || '');
+  const terminalPath = runtime === 'kubernetes' ? '/ws/k8s-terminal' : '/ws/terminal';
   return {
     sessionId: session.id,
     status: session.status,
@@ -87,7 +86,7 @@ export async function restoreSession(id: string): Promise<RestoredSession | null
     portMap: session.portMap || null,
     startTime: session.startTime,
     challenge: session.challenge || null,
-    terminalWsUrl: `${base}/ws/terminal?sessionId=${id}`,
+    terminalWsUrl: `${base}${terminalPath}?sessionId=${id}`,
     metricsWsUrl: `${base}/ws/metrics?sessionId=${id}`,
     session,
   };
@@ -95,5 +94,58 @@ export async function restoreSession(id: string): Promise<RestoredSession | null
 
 export async function endSession(id: string): Promise<unknown> {
   const { data } = await axios.post(`/api/session/${id}/end`);
+  return data;
+}
+
+export async function startBoardSession(challengeId: string): Promise<SessionStartResult> {
+  const { data } = await axios.post(
+    '/api/session/board/start',
+    { challengeId },
+    { headers: getAuthHeader() },
+  );
+  return data as SessionStartResult;
+}
+
+export async function fetchBoardState(sessionId: string): Promise<{
+  sessionId: string;
+  boardState: import('../types/domain').BoardState | null;
+  updatedAt: number | null;
+}> {
+  const { data } = await axios.get(`/api/session/${sessionId}/board`, {
+    headers: getAuthHeader(),
+  });
+  return data;
+}
+
+export async function saveBoardGraph(
+  sessionId: string,
+  graph: {
+    fills: Record<string, string | null>;
+    reset?: boolean;
+  },
+): Promise<import('../types/domain').BoardState> {
+  const { data } = await axios.put(
+    `/api/session/${sessionId}/board`,
+    graph,
+    { headers: getAuthHeader() },
+  );
+  return (data as { boardState: import('../types/domain').BoardState }).boardState;
+}
+
+export async function submitBoard(
+  sessionId: string,
+  graph: {
+    fills: Record<string, string | null>;
+  },
+): Promise<{
+  passed: boolean;
+  grade: import('../types/domain').BoardGradeResult;
+  boardState: import('../types/domain').BoardState;
+}> {
+  const { data } = await axios.post(
+    `/api/session/${sessionId}/board/submit`,
+    graph,
+    { headers: getAuthHeader() },
+  );
   return data;
 }

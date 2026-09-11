@@ -1,0 +1,311 @@
+{
+  "id": "l1-enrich-auth-mcc",
+  "number": 9,
+  "finalized": true,
+  "title": "The Codes That Had No Name",
+  "contentSource": "minio",
+  "description": "> **Who is asking**\n>\n> **Registry** is Helix Payments' merchant-category publishing desk. They own the MCC directory — the short list of codes the network is willing to print on a dashboard. Registry is not a column on the file.\n\nHelix still drops one overnight Parquet of card authorizations. Fifteen columns. The grain is one auth. This morning Registry opened the overnight dashboard and every approved row still showed a raw MCC: `5411`, `5812`, `4121`. Grocery looked like a number. Eating places looked like a number.\n\nThe dashboard only prints **approved** auths: `response_code` is `00`. Declines are overnight noise. They are not on the board.\n\nRegistry keeps a small published directory (`mcc`, `mcc_description`, `category`). Most approved auths match it. A few landed with codes Registry has not published yet — a new brand, a test MCC, a code that missed the weekly cut. Those auths still approved. They stay on the board. They just have no name.\n\nPut the directory’s names on the approved auths. Keep every approved auth. When the code is unpublished, `mcc_description` and `category` are null.\n\nRead auths from `INPUT_PATH`. Read the MCC directory from `DIM_PATH`. Write Parquet to `OUTPUT_PATH`.\n\nUse Spark DataFrame APIs. Do not `collect()` the auths and loop in Python.\n\n## Rules\n\nThese all have to be true of the file you write. They are not a recipe.\n\n- **Approved.** Keep the row only when `response_code` is `00`. Declines are not written.\n- **Every approved auth.** Unpublished codes stay on the file.\n- **Key.** Match on `mcc`. That is the only key.\n- **Names.** When the code is in the directory, bring `mcc_description` and `category`. When it is not, both are null. Do not invent a label. Do not drop the approved auth.\n- **Auth columns.** Keep all fifteen input columns unchanged. Do not rename them. Do not replace `mcc` with a description.\n- **Columns.** Write the fifteen auth columns plus `mcc_description` and `category`.\n- **One row per auth.** Directory keys are unique. You should not explode `txn_id`.\n\n> **What you write**\n>\n> One row per approved overnight auth, with a name when Registry published the code and nulls when they did not. Run and Submit are different nights — do not hard-code the example values.\n\n## Example\n\nToy auths (shown columns only) and a two-row directory. On **this toy** two approved auths match, one approved auth does not, and one decline is overnight noise. Your overnight file has its own mix.\n\n**Auths**\n\n| txn_id | mcc | response_code | amount |\n| --- | --- | --- | --- |\n| t1 | 5411 | 00 | 12.00 |\n| t2 | 5812 | 00 | 9.50 |\n| t3 | 9999 | 00 | 4.00 |\n| t4 | 5411 | 05 | 3.00 |\n\n**Directory**\n\n| mcc | mcc_description | category |\n| --- | --- | --- |\n| 5411 | Grocery Stores | retail |\n| 5812 | Eating Places | restaurant |\n\n**Written file** (shown columns only)\n\n| txn_id | mcc | response_code | amount | mcc_description | category |\n| --- | --- | --- | --- | --- | --- |\n| t1 | 5411 | 00 | 12.00 | Grocery Stores | retail |\n| t2 | 5812 | 00 | 9.50 | Eating Places | restaurant |\n| t3 | 9999 | 00 | 4.00 | *null* | *null* |\n\n- t1 and t2 are approved and match the published directory, so they get a name.\n- t3 is approved and unpublished. It stays. The two directory columns are null.\n- t4 is a decline. It is not on the board.\n\nCommon mistakes:\n- Writing declines onto the dashboard.\n- Dropping approved auths that have no name.\n- Inventing a label for an unpublished code.\n- Matching on `merchant_id` or `acquirer_bin` instead of `mcc`.\n- Writing only the two directory columns and dropping the auth.\n",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "filter",
+    "joins",
+    "dataframe",
+    "parquet",
+    "helix",
+    "card-rails"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "hints": [],
+    "data": {
+      "overview": "Helix overnight authorization fact (15 Card Rails columns) plus the published MCC directory (3 columns). The written file is approved auths only (`response_code` = `00`): all 15 auth columns unchanged, plus `mcc_description` and `category`. Most approved rows match a published code; unpublished MCCs stay on the file with those two columns null.",
+      "testcases": {
+        "run": [
+          {
+            "name": "01-auth-mcc",
+            "rows": 17634,
+            "detail": "20,000 overnight auths (approved and declined); ~10% unpublished MCCs (9999 / 0000 / 8888); written file is approved only"
+          }
+        ],
+        "submit": [
+          {
+            "name": "02-auth-mcc",
+            "rows": 88153,
+            "detail": "100,000 overnight auths; ~10% unpublished MCCs (7777 / 6666 / 5555 / 4444) — not the Run codes; same published directory; written file is approved only"
+          }
+        ]
+      },
+      "datasets": [
+        {
+          "name": "Overnight auths",
+          "env": "INPUT_PATH",
+          "kind": "fact",
+          "schema": [
+            {
+              "column": "txn_id",
+              "type": "STRING"
+            },
+            {
+              "column": "txn_ts",
+              "type": "TIMESTAMP"
+            },
+            {
+              "column": "card_number",
+              "type": "STRING"
+            },
+            {
+              "column": "amount",
+              "type": "DECIMAL(14,2)"
+            },
+            {
+              "column": "currency_code",
+              "type": "STRING"
+            },
+            {
+              "column": "country_code",
+              "type": "STRING"
+            },
+            {
+              "column": "mcc",
+              "type": "STRING"
+            },
+            {
+              "column": "merchant_id",
+              "type": "STRING"
+            },
+            {
+              "column": "acquirer_bin",
+              "type": "STRING"
+            },
+            {
+              "column": "response_code",
+              "type": "STRING"
+            },
+            {
+              "column": "entry_mode",
+              "type": "STRING"
+            },
+            {
+              "column": "channel",
+              "type": "STRING"
+            },
+            {
+              "column": "merchant_country",
+              "type": "STRING"
+            },
+            {
+              "column": "auth_code",
+              "type": "STRING"
+            },
+            {
+              "column": "settled",
+              "type": "BOOLEAN"
+            }
+          ]
+        },
+        {
+          "name": "Published MCC directory",
+          "env": "DIM_PATH",
+          "kind": "dim",
+          "schema": [
+            {
+              "column": "mcc",
+              "type": "STRING"
+            },
+            {
+              "column": "mcc_description",
+              "type": "STRING"
+            },
+            {
+              "column": "category",
+              "type": "STRING"
+            }
+          ]
+        }
+      ]
+    },
+    "inputSchema": [
+      {
+        "column": "txn_id",
+        "type": "STRING"
+      },
+      {
+        "column": "txn_ts",
+        "type": "TIMESTAMP"
+      },
+      {
+        "column": "card_number",
+        "type": "STRING"
+      },
+      {
+        "column": "amount",
+        "type": "DECIMAL(14,2)"
+      },
+      {
+        "column": "currency_code",
+        "type": "STRING"
+      },
+      {
+        "column": "country_code",
+        "type": "STRING"
+      },
+      {
+        "column": "mcc",
+        "type": "STRING"
+      },
+      {
+        "column": "merchant_id",
+        "type": "STRING"
+      },
+      {
+        "column": "acquirer_bin",
+        "type": "STRING"
+      },
+      {
+        "column": "response_code",
+        "type": "STRING"
+      },
+      {
+        "column": "entry_mode",
+        "type": "STRING"
+      },
+      {
+        "column": "channel",
+        "type": "STRING"
+      },
+      {
+        "column": "merchant_country",
+        "type": "STRING"
+      },
+      {
+        "column": "auth_code",
+        "type": "STRING"
+      },
+      {
+        "column": "settled",
+        "type": "BOOLEAN"
+      }
+    ],
+    "expectedOutput": [
+      {
+        "column": "txn_id",
+        "description": "Auth id (grade key). Pass through from the auth."
+      },
+      {
+        "column": "txn_ts",
+        "description": "Pass through from the auth"
+      },
+      {
+        "column": "card_number",
+        "description": "Pass through from the auth"
+      },
+      {
+        "column": "amount",
+        "description": "Pass through from the auth"
+      },
+      {
+        "column": "currency_code",
+        "description": "Pass through from the auth"
+      },
+      {
+        "column": "country_code",
+        "description": "Pass through from the auth"
+      },
+      {
+        "column": "mcc",
+        "description": "From the auth; unpublished codes stay"
+      },
+      {
+        "column": "merchant_id",
+        "description": "Pass through from the auth"
+      },
+      {
+        "column": "acquirer_bin",
+        "description": "Pass through from the auth"
+      },
+      {
+        "column": "response_code",
+        "description": "Pass through; written rows are 00 only"
+      },
+      {
+        "column": "entry_mode",
+        "description": "Pass through from the auth"
+      },
+      {
+        "column": "channel",
+        "description": "Pass through from the auth"
+      },
+      {
+        "column": "merchant_country",
+        "description": "Pass through from the auth"
+      },
+      {
+        "column": "auth_code",
+        "description": "Pass through from the auth"
+      },
+      {
+        "column": "settled",
+        "description": "Pass through from the auth"
+      },
+      {
+        "column": "mcc_description",
+        "description": "From the directory when published; null if unpublished"
+      },
+      {
+        "column": "category",
+        "description": "From the directory when published; null if unpublished"
+      }
+    ],
+    "moat": "Lab 9 of Play Spark — first Helix / Card Rails join, plus a filter so the lab is not join-only.\n\nSame 15-column Card Rails txn schema as playground 50m/100m-skew-key75, plus dims/mcc. Challenge-private copies: playground dirs are complete lookups, so left and inner would match.\n\nPlant ~10% unpublished MCCs on the overnight drop (including declines). Expected is filter response_code == \"00\" then how=\"left\" on mcc. Inner join drops unpublished approved auths. Skipping the filter writes declines.\n\nRun uses 9999/0000/8888 on a 20k slice of the 15-col 50m fact; Submit uses 7777/6666/5555/4444 on a 100k slice. Same published 30-row directory.\n\nGrade is keyed by txn_id — file order is not checked. Do not require orderBy.\n\nLater (not this lab): inner (Settlement books only listed MCCs), left_anti (Registry wants only unpublished codes)."
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "dimPath": "s3a://devlabs-data/challenges/l1-enrich-auth-mcc/dims/mcc/",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-enrich-auth-mcc/testcases/",
+    "runCases": [
+      "01-auth-mcc"
+    ],
+    "submitCases": [
+      "02-auth-mcc"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l1-enrich-auth-mcc/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-enrich-auth-mcc/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "txn_id"
+    ],
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g",
+      "aqe": false,
+      "shufflePartitions": 8,
+      "hardTimeoutSeconds": 180
+    },
+    "sparkConf": {
+      "spark.sql.adaptive.enabled": "false",
+      "spark.sql.shuffle.partitions": "8"
+    },
+    "gradeChecks": [
+      "Functional: candidate Parquet has one row per approved auth (response_code 00) with mcc_description and category filled from the published directory (null when unpublished)",
+      "Performance: not specified for this lab"
+    ]
+  },
+  "dataGen": {
+    "pattern": "A",
+    "dir": "challenges/l1-enrich-auth-mcc",
+    "script": "generate.py",
+    "s3Prefix": "challenges/l1-enrich-auth-mcc"
+  }
+}

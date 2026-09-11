@@ -1,0 +1,25 @@
+{
+  "id": "l1-ingress-host-path",
+  "number": 48,
+  "finalized": false,
+  "title": "Name on the Door",
+  "description": "Outside traffic needs a name on the door \u2014 host and path \u2014 not a raw ClusterIP.\n\nCreate an Ingress that routes to the right Service. Wrong rewrites or backends send kiosk users into the void; the grade notices.\n\n**Meant for:** Ingress.\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "l1",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "Ingress",
+    "brief": "Route host/path traffic through Ingress to the correct Guestbook Service \u2014 wrong rewrite or backend fails."
+  },
+  "platformSpec": {}
+}

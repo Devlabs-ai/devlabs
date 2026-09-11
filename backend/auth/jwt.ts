@@ -1,6 +1,6 @@
 'use strict';
 
-import type { AuthRole, JwtPayload } from '../types/domain';
+import type { JwtPayload } from '../types/domain';
 
 const jwt = require('jsonwebtoken');
 
@@ -10,29 +10,23 @@ function getSecret(): string {
   return process.env.JWT_SECRET || 'devlabs-dev-secret';
 }
 
-// Issue a token for a real user (OTP login)
 function signUserToken({
   userId,
   email,
-  role,
-  companyId,
 }: {
   userId: string;
   email: string;
-  role: AuthRole;
-  companyId: string | null;
 }): string {
   return jwt.sign(
-    { sub: userId, email, role, companyId },
+    { sub: userId, email },
     getSecret(),
     { expiresIn: EXPIRES_IN },
   );
 }
 
-// Legacy: kept for backward-compat with the old username/password login
-// during transition. Remove once all clients use OTP.
+/** Legacy username/password login helper. */
 function signInterviewerToken(sub = 'admin'): string {
-  return jwt.sign({ sub, role: 'interviewer' }, getSecret(), { expiresIn: EXPIRES_IN });
+  return jwt.sign({ sub }, getSecret(), { expiresIn: EXPIRES_IN });
 }
 
 function verifyToken(token: string): JwtPayload | null {

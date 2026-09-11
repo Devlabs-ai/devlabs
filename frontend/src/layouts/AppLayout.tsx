@@ -1,85 +1,139 @@
 import React from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import SessionController from '../components/SessionController';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
+import BrandMark from '../components/BrandMark';
 import { useAppState } from '../context/AppStateContext';
+import { PlayChromeProvider } from '../context/PlayChromeContext';
+import { PLAYGROUNDS_PATH, SPARK_PLAYGROUND_PATH } from '../constants/playgrounds';
+import { MAJORS_PATH } from '../constants/projects';
+import { MINORS_PATH } from '../constants/minors';
+import { WHITEBOARD_PATH } from '../constants/whiteboard';
 
-export default function AppLayout(): React.JSX.Element {
+const PAPERS_PATH = '/play/papers';
+
+/** Play routes that bring their own page chrome instead of the catalog's. */
+const PLAY_SUBROUTES = [
+  '/play/quiz/',
+  PAPERS_PATH,
+  '/play/quests',
+  PLAYGROUNDS_PATH,
+  MAJORS_PATH,
+  MINORS_PATH,
+  WHITEBOARD_PATH,
+  '/play/projects',
+  SPARK_PLAYGROUND_PATH,
+];
+
+/** Thin brand bar — session actions live in the workspace, not the header. */
+function ChallengeTopBar(): JSX.Element {
+  return (
+    <div className="topbar topbar--challenge">
+      <div className="topbar-inner topbar-inner--challenge">
+        <div className="challenge-chrome-left">
+          <Link to="/" className="brand brand--compact brand-link" title="Home">
+            <BrandMark className="brand-mark brand-mark--sm" />
+            DevLabs
+          </Link>
+        </div>
+        <div className="challenge-chrome-center" />
+        <div className="challenge-chrome-right" />
+      </div>
+    </div>
+  );
+}
+
+function AppLayoutInner(): React.JSX.Element {
   const {
     authMode,
-    currentUser,
-    candidateInvite,
     playState,
     activeSession,
-    ending,
-    onEnd,
     onLogout,
   } = useAppState();
 
   const location = useLocation();
-  const reviewSandboxOpen = /^\/review\/[^/]+\/sandbox/.test(location.pathname);
-  const isAdmin = currentUser?.role === 'admin';
-  const showNav = authMode === 'interviewer' && playState !== 'active' && !reviewSandboxOpen;
+  const challengeOpen = playState === 'active' && Boolean(activeSession);
+  const showNav = authMode === 'interviewer' && playState !== 'active';
+  const onPlaySubroute = PLAY_SUBROUTES.some((p) => location.pathname.startsWith(p));
+  const onPlayRoute =
+    location.pathname === '/play' ||
+    (location.pathname.startsWith('/play/') && !onPlaySubroute);
+  const usePlayChrome = (onPlayRoute || onPlaySubroute) && !challengeOpen;
+  // The Spark bench is reached through the index, so keep the pill lit inside it.
+  const playgroundsActive =
+    location.pathname.startsWith(PLAYGROUNDS_PATH) ||
+    location.pathname.startsWith(SPARK_PLAYGROUND_PATH);
+  const papersActive = location.pathname.startsWith(PAPERS_PATH);
 
   return (
-    <div className="app">
-      <div className="topbar">
-        <div className="topbar-inner topbar-inner--split">
-          <NavLink to="/play" className="brand brand-link">
-            <span className="logo-dot" />
-            Devlabs
-            <span className="sub">v0.1</span>
-          </NavLink>
+    <div className={`app${challengeOpen ? ' app--challenge' : ''}${usePlayChrome ? ' app--play' : ''}`}>
+      {challengeOpen ? (
+        <ChallengeTopBar />
+      ) : (
+        <header className={`topbar${usePlayChrome ? ' topbar--play' : ''}`}>
+          <div className="topbar-inner topbar-inner--play">
+            <NavLink to="/" className="brand brand-link" end title="Home">
+              <BrandMark className="brand-mark" />
+              <span className="brand-name">DevLabs</span>
+              {!usePlayChrome && <span className="sub">v0.2</span>}
+            </NavLink>
 
-          <div className="right">
-            {playState === 'active' && activeSession && (
-              <SessionController
-                session={activeSession}
-                onEnd={onEnd}
-                ending={ending}
-              />
-            )}
-
-            {showNav && (
-              <nav className="topnav">
-                <NavLink to="/play"      className={({ isActive }) => `topnav-pill${isActive ? ' active' : ''}`}>Play</NavLink>
-                <NavLink to="/authoring" className={({ isActive }) => `topnav-pill${isActive ? ' active' : ''}`}>Author</NavLink>
-                <NavLink
-                  to="/review"
-                  className={({ isActive }) => {
-                    const onReview = isActive || location.pathname.startsWith('/review/');
-                    return `topnav-pill${onReview ? ' active' : ''}`;
-                  }}
-                >
-                  Review
-                </NavLink>
-
-                <span className="topnav-sep" />
-
-                <NavLink
-                  to="/profile"
-                  className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
-                >
-                  Profile
-                </NavLink>
-                {isAdmin && (
-                  <button type="button" className="topnav-pill topnav-action">Billing</button>
-                )}
-                <button type="button" className="topnav-pill topnav-action topnav-signout" onClick={onLogout}>
-                  Sign out
-                </button>
-              </nav>
-            )}
-
-            {authMode === 'candidate' && (
-              <span className="badge brand"><span className="dot" /> {candidateInvite?.name}</span>
-            )}
+            <div className="topbar-trailing">
+              {showNav && (
+                <nav className="topnav topnav--actions" aria-label="Sections">
+                  <NavLink
+                    to={MAJORS_PATH}
+                    className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
+                  >
+                    Majors
+                  </NavLink>
+                  <NavLink
+                    to={MINORS_PATH}
+                    className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
+                  >
+                    Minors
+                  </NavLink>
+                  <NavLink
+                    to={PAPERS_PATH}
+                    className={`topnav-pill topnav-action${papersActive ? ' active' : ''}`}
+                  >
+                    Papers
+                  </NavLink>
+                  <NavLink
+                    to={PLAYGROUNDS_PATH}
+                    className={`topnav-pill topnav-action${playgroundsActive ? ' active' : ''}`}
+                  >
+                    Playgrounds
+                  </NavLink>
+                </nav>
+              )}
+              {showNav && (
+                <nav className="topnav topnav--actions" aria-label="Account">
+                  <NavLink
+                    to="/profile"
+                    className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
+                  >
+                    Profile
+                  </NavLink>
+                  <button type="button" className="topnav-pill topnav-action topnav-signout" onClick={onLogout}>
+                    Sign out
+                  </button>
+                </nav>
+              )}
+            </div>
           </div>
-        </div>
-      </div>
+        </header>
+      )}
 
-      <div className={`app-body${reviewSandboxOpen ? ' app-body--review-sandbox' : ''}`}>
+      <div className={`app-body${challengeOpen ? ' app-body--challenge' : ''}`}>
         <Outlet />
       </div>
     </div>
+  );
+}
+
+export default function AppLayout(): React.JSX.Element {
+  return (
+    <PlayChromeProvider>
+      <AppLayoutInner />
+    </PlayChromeProvider>
   );
 }

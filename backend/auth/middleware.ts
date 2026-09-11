@@ -3,7 +3,6 @@
 import type { ExpressRequest, ExpressResponse, ExpressNextFunction } from '../types/express';
 
 const { verifyToken } = require('./jwt');
-const invites = require('./invites');
 
 function bearer(req: ExpressRequest): string | null {
   const h = req.headers.authorization || '';
@@ -11,9 +10,25 @@ function bearer(req: ExpressRequest): string | null {
   return h.slice('Bearer '.length).trim();
 }
 
-// Attach req.user for any valid JWT (interviewer OR admin).
-// The token may come from either the legacy username/password login
-// (role='interviewer', no companyId) or the new OTP login.
+function adminEmails(): string[] {
+  return String(process.env.ADMIN_EMAILS || '')
+    .split(/[,;\s]+/)
+    .map((s) => s.toLowerCase())
+    .filter(Boolean);
+}
+
+function isAdminUser(user: { sub?: string; userId?: string; email?: string } | null | undefined): boolean {
+  if (!user) return false;
+  const id = String(user.sub || user.userId || '');
+  if (id === 'admin') return true;
+  const emails = adminEmails();
+  // No allowlist configured → every signed-in user can author (private lab).
+  if (!emails.length) return true;
+  const email = String(user.email || '').toLowerCase();
+  return Boolean(email && emails.includes(email));
+}
+
+/** Any valid signed-in user JWT. */
 function requireInterviewer(req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction): void {
   const token = bearer(req);
   if (!token) { res.status(401).json({ error: 'missing bearer token' }); return; }
@@ -21,58 +36,33 @@ function requireInterviewer(req: ExpressRequest, res: ExpressResponse, next: Exp
   const payload = verifyToken(token);
   if (!payload) { res.status(401).json({ error: 'invalid or expired token' }); return; }
 
-  // Both 'interviewer' and 'admin' can reach interviewer-gated endpoints
-  if (payload.role !== 'interviewer' && payload.role !== 'admin') {
-    res.status(403).json({ error: 'insufficient permissions' }); return;
-  }
-
   req.user = payload;
   next();
 }
 
-// Only company admins (or legacy admin login) may reach admin-gated endpoints.
+/** Admin authoring (sub=admin or ADMIN_EMAILS). */
 function requireAdmin(req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction): void {
-  const token = bearer(req);
-  if (!token) { res.status(401).json({ error: 'missing bearer token' }); return; }
-
-  const payload = verifyToken(token);
-  if (!payload) { res.status(401).json({ error: 'invalid or expired token' }); return; }
-
-  if (payload.role !== 'admin') {
-    res.status(403).json({ error: 'admin role required' }); return;
-  }
-
-  req.user = payload;
-  next();
+  requireInterviewer(req, res, () => {
+    if (res.headersSent) return;
+    if (!isAdminUser(req.user)) {
+      res.status(403).json({ error: 'admin only' });
+      return;
+    }
+    next();
+  });
 }
 
-// Allows interviewers/admins (via JWT) OR candidates (via invite token).
-async function requireSessionAccess(req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction): Promise<void> {
+function requireSessionAccess(req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction): void {
   const token = bearer(req);
   if (token) {
     const payload = verifyToken(token);
-    if (payload && (payload.role === 'interviewer' || payload.role === 'admin')) {
+    if (payload) {
       req.user = payload;
       next();
       return;
     }
   }
-
-  const candidateToken = (req.body as Record<string, unknown>)?.candidateToken;
-  if (candidateToken) {
-    try {
-      const invite = await invites.resolveInvite(candidateToken);
-      if (invite && !invite.expired) {
-        req.candidate = invite;
-        next();
-        return;
-      }
-    } catch (e: unknown) {
-      console.warn('[auth] candidate invite lookup failed', (e as Error).message);
-    }
-  }
-
   res.status(401).json({ error: 'unauthenticated' });
 }
 
-module.exports = { requireInterviewer, requireAdmin, requireSessionAccess };
+module.exports = { requireInterviewer, requireAdmin, requireSessionAccess, isAdminUser };

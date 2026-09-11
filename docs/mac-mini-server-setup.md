@@ -76,21 +76,21 @@ Log in once as `devlabs` to create `/Users/devlabs`.
 
 | Setting | Example |
 | ------- | ------- |
-| LAN IP | `192.168.1.3` (DHCP reservation on router preferred) |
+| LAN IP | `192.168.1.2` (DHCP reservation on router preferred) |
 | Hostname | `devlabs-mini.local` (mDNS) |
 | SSH | System Settings → Sharing → Remote Login → ON |
 
 From MacBook:
 
 ```bash
-ssh devlabs@192.168.1.3
+ssh devlabs@192.168.1.2
 ```
 
 Optional `~/.ssh/config` on MacBook:
 
 ```sshconfig
 Host devlabs-mini
-  HostName 192.168.1.3
+  HostName 192.168.1.2
   User devlabs
   IdentityFile ~/.ssh/id_ed25519
 ```
@@ -208,7 +208,7 @@ LaunchAgent via `launchctl bootstrap gui/$UID` failed over pure SSH (`Bootstrap 
 **Manual start after every reboot (current workaround):**
 
 ```bash
-ssh devlabs@192.168.1.3
+ssh devlabs@192.168.1.2
 colima start --cpu 4 --memory 8 --kubernetes
 colima status
 kubectl get nodes
@@ -269,12 +269,12 @@ Add (adjust path from `which colima`):
 
 ## Remote kubectl from MacBook — **not yet achieved**
 
-**Status:** Documented below as the **target setup**. Cluster works locally on the Mac Mini (`ssh devlabs@192.168.1.3` → `kubectl get nodes`), but remote control from the MacBook via SSH tunnel is not verified yet.
+**Status:** Documented below as the **target setup**. Cluster works locally on the Mac Mini (`ssh devlabs@192.168.1.2` → `kubectl get nodes`), but remote control from the MacBook via SSH tunnel is not verified yet.
 
 **Workaround until tunnel works:** run all `kubectl` commands over SSH on the Mac Mini:
 
 ```bash
-ssh devlabs@192.168.1.3
+ssh devlabs@192.168.1.2
 kubectl get nodes
 kubectl get pods -A
 ```
@@ -300,7 +300,7 @@ Use the port from `grep server ~/.kube/config` on the Mac Mini (example: **53067
 
 ```sshconfig
 Host devlabs-mini
-  HostName 192.168.1.3
+  HostName 192.168.1.2
   User devlabs
   IdentityFile ~/.ssh/id_ed25519
   LocalForward 53067 127.0.0.1:53067
@@ -317,7 +317,7 @@ chmod 600 ~/.ssh/config
 
 ```bash
 mkdir -p ~/.kube
-scp devlabs@192.168.1.3:~/.kube/config ~/.kube/devlabs-mini-config
+scp devlabs@192.168.1.2:~/.kube/config ~/.kube/devlabs-mini-config
 ```
 
 Edit `~/.kube/devlabs-mini-config` — set:
@@ -362,7 +362,7 @@ curl -k https://127.0.0.1:53067/version
 No MacBook tunnel required — run on the Mac Mini:
 
 ```bash
-ssh devlabs@192.168.1.3
+ssh devlabs@192.168.1.2
 kubectl get nodes
 ```
 
@@ -418,7 +418,7 @@ Platform Kubernetes deploy trees live in **separate git repos** under the `devla
 ```bash
 cd ~/Documents/devlabs-ai
 rsync -az platforms/spark-platform/ devlabs-mini:~/spark-platform/
-ssh devlabs-mini 'bash -lc "MAC_MINI_IP=192.168.1.3 ~/spark-platform/scripts/deploy.sh"'
+ssh devlabs-mini 'bash -lc "MAC_MINI_IP=192.168.1.2 ~/spark-platform/scripts/deploy.sh"'
 ```
 
 ### Compose path (matches repo today)
@@ -508,7 +508,7 @@ MacBook (dev machine)
     │ SSH (22) — working
     │ kubectl tunnel (53067) — not yet configured
     ▼
-Mac Mini M4 — devlabs@192.168.1.3
+Mac Mini M4 — devlabs@192.168.1.2
     │
     ├── macOS 26.x
     ├── Colima VM (4 CPU, 8 GB RAM) — manual start after reboot
@@ -546,7 +546,7 @@ Mac Mini M4 — devlabs@192.168.1.3
 - [ ] Complete remote kubectl verification checklist (see above)
 - [ ] Configure Colima auto-start (LaunchDaemon recommended)
 - [ ] UPS + graceful shutdown
-- [ ] DHCP reservation for `192.168.1.3`
+- [ ] DHCP reservation for `192.168.1.2`
 - [ ] Deploy platforms: Compose (`make platforms-up`) or k8s Helm
 - [ ] Create namespaces: `kafka`, `spark`, `airflow`, `postgres`
 
@@ -599,13 +599,13 @@ kubectl top nodes
 
 | URL | Purpose |
 |-----|---------|
-| http://192.168.1.3:30088 | Job portal (submit, status, logs) |
-| http://192.168.1.3:30080 | Spark History Server (completed jobs) |
+| http://192.168.1.2:30088 | Job portal (submit, status, logs) |
+| http://192.168.1.2:30080 | Spark History Server (completed jobs) |
 
 Deploy or upgrade on the Mac Mini (after `rsync` to `~/spark-platform/`):
 
 ```bash
-MAC_MINI_IP=192.168.1.3 ~/spark-platform/scripts/deploy.sh
+MAC_MINI_IP=192.168.1.2 ~/spark-platform/scripts/deploy.sh
 ```
 
 ---
@@ -614,13 +614,13 @@ MAC_MINI_IP=192.168.1.3 ~/spark-platform/scripts/deploy.sh
 
 | URL | Purpose |
 |-----|---------|
-| http://192.168.1.3:30900 | S3 API |
-| http://192.168.1.3:30901 | MinIO web console |
+| http://192.168.1.2:30900 | S3 API |
+| http://192.168.1.2:30901 | MinIO web console |
 
 Deploy or upgrade on the Mac Mini:
 
 ```bash
-MAC_MINI_IP=192.168.1.3 ~/minio-platform/scripts/deploy.sh
+MAC_MINI_IP=192.168.1.2 ~/minio-platform/scripts/deploy.sh
 ```
 
 Default buckets: `spark-logs`, `devlabs-data`. See [MinIO guide](../platforms/minio-platform/docs/minio-platform-kubernetes.md) for credentials and `mc` examples.
@@ -631,13 +631,13 @@ Default buckets: `spark-logs`, `devlabs-data`. See [MinIO guide](../platforms/mi
 
 | URL | Purpose |
 |-----|---------|
-| http://192.168.1.3:30089 | Job portal (trigger DAGs, runs, task logs) |
-| http://192.168.1.3:30081 | Native Airflow UI (`admin` / `admin`) |
+| http://192.168.1.2:30089 | Job portal (trigger DAGs, runs, task logs) |
+| http://192.168.1.2:30081 | Native Airflow UI (`admin` / `admin`) |
 
 Deploy or upgrade on the Mac Mini:
 
 ```bash
-MAC_MINI_IP=192.168.1.3 ~/airflow-platform/scripts/deploy.sh
+MAC_MINI_IP=192.168.1.2 ~/airflow-platform/scripts/deploy.sh
 ```
 
 Sample DAGs: `hello_platform`, `etl_orders_sample`. First install takes 10–15 minutes.
@@ -648,13 +648,13 @@ Sample DAGs: `hello_platform`, `etl_orders_sample`. First install takes 10–15 
 
 | URL / connection | Purpose |
 |------------------|---------|
-| `postgresql://devlabs@192.168.1.3:30432/devlabs` | LAN access (NodePort **30432**) |
+| `postgresql://devlabs@192.168.1.2:30432/devlabs` | LAN access (NodePort **30432**) |
 | `postgres.postgres.svc.cluster.local:5432` | In-cluster |
 
 Deploy or upgrade on the Mac Mini:
 
 ```bash
-MAC_MINI_IP=192.168.1.3 ~/postgres-platform/scripts/deploy.sh
+MAC_MINI_IP=192.168.1.2 ~/postgres-platform/scripts/deploy.sh
 ```
 
 Uses official **`postgres:16-alpine`** — no Bitnami. Default password: `devlabs-postgres-change-me`. See [PostgreSQL guide](../platforms/postgres-platform/docs/postgres-platform-kubernetes.md) for bootstrap databases and `psql` examples.
@@ -665,12 +665,12 @@ Uses official **`postgres:16-alpine`** — no Bitnami. Default password: `devlab
 
 | URL | Purpose |
 |-----|---------|
-| http://192.168.1.3:30090 | Unified platform status, component health, CPU/RAM allocations |
+| http://192.168.1.2:30090 | Unified platform status, component health, CPU/RAM allocations |
 
 Deploy or upgrade:
 
 ```bash
-MAC_MINI_IP=192.168.1.3 ~/devlabs-dashboard/scripts/deploy.sh
+MAC_MINI_IP=192.168.1.2 ~/devlabs-dashboard/scripts/deploy.sh
 ```
 
 Monitors Spark, Airflow, MinIO, and PostgreSQL platforms. See [dashboard README](../platforms/devlabs-dashboard/README.md).

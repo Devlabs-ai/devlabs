@@ -9,10 +9,7 @@ build/
 .DS_Store
 .vscode/
 .idea/
+*.tsbuildinfo
 
-# Ephemeral sandbox state
-sandbox/builds/*/
-sandbox/sessions/*/
-sandbox/platforms/.stack/
-!sandbox/builds/.gitkeep
-!sandbox/sessions/.gitkeep
+# Local sandbox data (problem statements, builds, sessions, solutions) — not used.
+sandbox/

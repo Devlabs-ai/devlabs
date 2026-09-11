@@ -1,0 +1,47 @@
+{
+  "id": "l1-clusterip-service",
+  "number": 32,
+  "finalized": true,
+  "title": "The Inside Line",
+  "description": "The desks are up, but nothing inside the cluster can dial them yet.\n\nYour namespace already has Deployment **`front-desk`** (Guestbook frontend pods with `app=guestbook`, `tier=frontend`). Platform wants an **inside line**: a **ClusterIP** Service named **`front-desk`** whose selector matches those pods, with **port 80 \u2192 targetPort 80**.\n\nReference: [Services](https://kubernetes.io/docs/concepts/services-networking/service/)\n\n## Service spec (required)\n\n| Field | Value |\n| --- | --- |\n| Name | `front-desk` |\n| Namespace | **yours** |\n| Type | **ClusterIP** |\n| Selector | `app=guestbook`, `tier=frontend` |\n| Port | **`80`** |\n| Target port | **`80`** |\n| Endpoints | at least one ready address |\n\nWrong labels mean a silent empty Service \u2014 and a failed grade.\n\n**Meant for:** ClusterIP Services, selectors, port / targetPort.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad",
+    "services",
+    "clusterip"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Deployment front-desk is already running \u2014 only create the Service.",
+      "kubectl expose deployment front-desk --name=front-desk --port=80 --target-port=80 --type=ClusterIP",
+      "Or apply a Service YAML with selector app=guestbook,tier=frontend.",
+      "kubectl get svc,endpoints front-desk \u2014 Endpoints should list pod IPs.",
+      "Wait until Endpoints are populated, then Submit."
+    ],
+    "overview": "ClusterIP Services",
+    "brief": "Create ClusterIP Service front-desk selecting guestbook/frontend pods on port 80 \u2192 80.",
+    "solution": "Deployment `front-desk` is already in your namespace. Create a **ClusterIP** Service with the same name, selector `app=guestbook` + `tier=frontend`, and **port 80 / targetPort 80**.\n\nDocs: [Services](https://kubernetes.io/docs/concepts/services-networking/service/)\n\n### Imperative\n\n```bash\nkubectl expose deployment front-desk --name=front-desk --port=80 --target-port=80 --type=ClusterIP\nkubectl get svc,endpoints front-desk\n```\n\n### Declarative\n\n```yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: front-desk\n  labels:\n    app: guestbook\n    tier: frontend\nspec:\n  type: ClusterIP\n  selector:\n    app: guestbook\n    tier: frontend\n  ports:\n    - port: 80\n      targetPort: 80\n```\n\n```bash\nkubectl apply -f front-desk-svc.yaml\nkubectl get svc,endpoints front-desk\n```\n\nConfirm Endpoints list pod IPs, then **Submit**.\n"
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1",
+      "memory": "1Gi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

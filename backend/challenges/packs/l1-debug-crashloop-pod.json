@@ -1,0 +1,25 @@
+{
+  "id": "l1-debug-crashloop-pod",
+  "number": 35,
+  "finalized": false,
+  "title": "The Desk That Won\u2019t Stay Up",
+  "description": "Something is wrong with the kiosk Pod. It starts, dies, starts, dies \u2014 CrashLoopBackOff forever.\n\nThe fault is already in-cluster (bad command, missing path, or a lying image tag). Use describe, logs, and edits \u2014 not guesswork from outside. When you leave, one Pod should be **Ready**.\n\n**Meant for:** Pod debugging (describe / logs / edit).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "Pod debugging",
+    "brief": "A CrashLoopBackOff Guestbook pod is already in-cluster \u2014 find the fault and leave one Ready pod."
+  },
+  "platformSpec": {}
+}

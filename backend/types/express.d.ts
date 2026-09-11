@@ -1,4 +1,4 @@
-import type { JwtPayload, InviteRecord } from './domain';
+import type { JwtPayload } from './domain';
 
 export {};
 
@@ -6,7 +6,6 @@ declare global {
   namespace Express {
     interface Request {
       user?: JwtPayload;
-      candidate?: InviteRecord;
     }
   }
 }

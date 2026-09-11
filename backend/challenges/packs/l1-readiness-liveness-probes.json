@@ -1,0 +1,25 @@
+{
+  "id": "l1-readiness-liveness-probes",
+  "number": 43,
+  "finalized": false,
+  "title": "Alive vs Ready",
+  "description": "The Service kept sending kiosk traffic to pods that were still warming up \u2014 and never restarted ones that wedged.\n\nWire readiness and liveness probes (HTTP / TCP / exec as the brief says). Ready means \u201ctake traffic.\u201d Alive means \u201crestart me if I freeze.\u201d Broken probe paths fail.\n\n**Meant for:** Readiness + liveness probes.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "Probes",
+    "brief": "Wire readiness and liveness probes so traffic only hits ready pods and stuck processes get restarted."
+  },
+  "platformSpec": {}
+}

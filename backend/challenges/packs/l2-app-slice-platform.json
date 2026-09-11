@@ -1,0 +1,25 @@
+{
+  "id": "l2-app-slice-platform",
+  "number": 55,
+  "finalized": false,
+  "title": "One App, Full Floor",
+  "description": "This is opening night for one lobby\u2019s full Guestbook slice \u2014 not a single object in isolation.\n\nShip the stack end-to-end: Deployment, ConfigMap/Secret, probes, Service, NetworkPolicy, and PVC as the brief requires. Grade checks the **whole floor**, not one lucky Pod.\n\n**Meant for:** End-to-end CKAD synthesis.\n",
+  "difficulty": "L2",
+  "tags": [
+    "kubernetes",
+    "l2",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "End-to-end platform slice",
+    "brief": "Ship Guestbook end-to-end: Deployment, config/secret, probes, Service, NetworkPolicy, PVC \u2014 grade checks the whole slice."
+  },
+  "platformSpec": {}
+}

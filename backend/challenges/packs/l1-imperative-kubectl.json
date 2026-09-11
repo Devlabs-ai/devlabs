@@ -1,0 +1,47 @@
+{
+  "id": "l1-imperative-kubectl",
+  "number": 33,
+  "finalized": true,
+  "title": "Ninety Seconds to Green",
+  "description": "Pager just went off. Marketing wants a scratch Guestbook stack **now**, and the YAML repo is offline.\n\nYou have the cluster, your namespace, and kubectl. Reach the end state below using **imperative** commands (`create`, `expose`, `label`, `scale`, \u2026). Prefer flags over pasting a full manifest.\n\nReference: [Imperative commands](https://kubernetes.io/docs/reference/kubectl/quick-reference/#creating-objects)\n\n## End state (required)\n\n| Resource | Spec |\n| --- | --- |\n| Deployment | name **`pop-up`**, **2** replicas, image contains **`nginx`**, **2/2** ready |\n| Deployment labels | `app=guestbook`, `tier=popup` (on the Deployment object) |\n| Service | name **`pop-up`**, type **ClusterIP** |\n| Service ports | **port 80 \u2192 targetPort 80** |\n| Endpoints | Service has at least one ready address |\n\n**Meant for:** Imperative kubectl speed.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad",
+    "imperative",
+    "kubectl"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "kubectl create deployment pop-up --image=nginx:1.25 --replicas=2",
+      "kubectl label deployment pop-up app=guestbook tier=popup --overwrite",
+      "kubectl expose deployment pop-up --name=pop-up --port=80 --target-port=80 --type=ClusterIP",
+      "kubectl get deploy,svc,endpoints pop-up \u2014 wait for 2/2 and Endpoints.",
+      "Stay in your lab namespace (already the kubectl default)."
+    ],
+    "overview": "Imperative kubectl",
+    "brief": "Imperatively create Deployment + ClusterIP Service pop-up (2 replicas, nginx, labels, port 80).",
+    "solution": "Imperative-only path (no full YAML file):\n\nDocs: [Imperative commands](https://kubernetes.io/docs/reference/kubectl/quick-reference/#creating-objects)\n\n```bash\nkubectl create deployment pop-up --image=nginx:1.25 --replicas=2\nkubectl label deployment pop-up app=guestbook tier=popup --overwrite\nkubectl expose deployment pop-up --name=pop-up --port=80 --target-port=80 --type=ClusterIP\nkubectl rollout status deployment/pop-up\nkubectl get deploy,svc,endpoints pop-up\n```\n\nWait until the Deployment is **2/2** and the Service lists Endpoints, then **Submit**.\n"
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1",
+      "memory": "1Gi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

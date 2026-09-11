@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="DevLabs">
+  <path
+    d="M25.5 19.5v9.2L12.8 48.2c-.6 1-.2 2.3.9 2.8.3.1.6.2.9.2H29"
+    stroke="#10b981"
+    stroke-width="5.75"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M38.5 19.5v9.2L51.2 48.2c.6 1 .2 2.3-.9 2.8-.3.1-.6.2-.9.2H35"
+    stroke="#10b981"
+    stroke-width="5.75"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <circle cx="32" cy="12" r="5.5" fill="#38bdf8" />
+</svg>

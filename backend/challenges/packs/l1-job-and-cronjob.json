@@ -1,0 +1,25 @@
+{
+  "id": "l1-job-and-cronjob",
+  "number": 45,
+  "finalized": false,
+  "title": "Once, Then Every Night",
+  "description": "Lobby reports need a one-shot cleanup **tonight**, and a quieter job every night after.\n\nCreate a finite **Job** that reaches Completed, plus a **CronJob** with the schedule and concurrency policy the brief names. A forever-running Pod is not a Job.\n\n**Meant for:** Jobs + CronJobs.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "Jobs + CronJobs",
+    "brief": "Create a finite Job that Completes, plus a CronJob with the required schedule and concurrency policy."
+  },
+  "platformSpec": {}
+}

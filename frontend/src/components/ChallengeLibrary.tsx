@@ -7,14 +7,16 @@ interface ChallengeLibraryProps {
   onSelect?: (challenge: ChallengePublic) => void;
   showCardMenu?: boolean;
   onShareChallenge?: (challenge: ChallengePublic) => void;
-  archiveMode?: boolean;
 }
 
 function difficultyClass(d: string | undefined): string {
-  const s = (d || '').toLowerCase();
-  if (s.includes('easy')) return 'easy';
-  if (s.includes('hard')) return 'hard';
-  return 'medium';
+  const s = (d || '').trim().toLowerCase();
+  if (s === 'l0' || s.includes('easy')) return 'l0';
+  if (s === 'l1' || s.includes('medium')) return 'l1';
+  if (s === 'l2') return 'l2';
+  if (s === 'l3' || s.includes('hard')) return 'l3';
+  if (s === 'l4') return 'l4';
+  return 'l1';
 }
 
 export default function ChallengeLibrary({
@@ -22,7 +24,6 @@ export default function ChallengeLibrary({
   onSelect,
   showCardMenu = false,
   onShareChallenge,
-  archiveMode = false,
 }: ChallengeLibraryProps): JSX.Element {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -45,15 +46,14 @@ export default function ChallengeLibrary({
   return (
     <div className="card-grid">
       {challenges.map((c) => {
-        const playable = c.finalized && !c.archived;
-        const canShare = showCardMenu && playable && onShareChallenge && !archiveMode;
+        const playable = !!c.finalized;
+        const canShare = showCardMenu && playable && onShareChallenge;
         const menuOpen = openMenuId === c.id;
 
         return (
           <div
             key={c.id}
             className={`card challenge-card ${playable ? '' : 'coming-soon'}`}
-            data-bucket={c.bucket || '__unbucketed__'}
             onClick={() => playable && onSelect && onSelect(c)}
             role={playable ? 'button' : undefined}
             tabIndex={playable ? 0 : undefined}
@@ -68,6 +68,12 @@ export default function ChallengeLibrary({
             <div className="challenge-card-top challenge-card-top-row">
               <div className="challenge-card-top-meta">
                 <span className={`pill ${difficultyClass(c.difficulty)}`}>{c.difficulty}</span>
+                {(c.sandboxType || '') === 'spark-platform' && (
+                  <span className="pill spark-runtime-pill">Spark</span>
+                )}
+                {c.number != null && (
+                  <span className="pill spark-track-pill">#{c.number}</span>
+                )}
                 {c.category && <span className="challenge-card-category">{c.category}</span>}
               </div>
               {canShare && (
@@ -115,8 +121,7 @@ export default function ChallengeLibrary({
                 {(c.tags || []).slice(0, 4).map((t) => (
                   <span key={t} className="tag">{t}</span>
                 ))}
-                {c.archived && <span className="tag">Archived</span>}
-                {!c.archived && !playable && <span className="tag">Coming soon</span>}
+                {!playable && <span className="tag">Coming soon</span>}
               </div>
               {playable && (
                 <span className="challenge-card-cta" aria-hidden>

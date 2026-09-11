@@ -10,7 +10,6 @@ const composeManager = require('./composeManager');
 const portAllocator = require('./portAllocator');
 const sessionStore = require('../db/sessionStore');
 const loader = require('../challenges/loader');
-const invites = require('../auth/invites');
 const { SESSIONS_ROOT } = require('./paths');
 
 function copyDirSync(src: string, dest: string): void {
@@ -39,10 +38,9 @@ function rmDirSync(p: string): void {
 
 interface StartOpts {
   challengeId?: string | null;
-  candidateToken?: string | null;
 }
 
-async function start({ challengeId, candidateToken }: StartOpts = {}): Promise<{ session: GameSession; challenge: unknown }> {
+async function start({ challengeId }: StartOpts = {}): Promise<{ session: GameSession; challenge: unknown }> {
   if (!challengeId) {
     const e = new Error('challengeId is required');
     e.status = 400;
@@ -56,29 +54,12 @@ async function start({ challengeId, candidateToken }: StartOpts = {}): Promise<{
     throw e;
   }
 
-  if (challenge.archived) {
-    const e = new Error(`challenge "${challengeId}" is archived and cannot be played`);
-    e.status = 403;
-    throw e;
-  }
-
   if (!challenge.verifiedDir || !fs.existsSync(challenge.verifiedDir)) {
     const e = new Error(
       `challenge "${challengeId}" has no verifiedDir; legacy sandbox path is not enabled in this MVP`,
     );
     e.status = 400;
     throw e;
-  }
-
-  let candidateName: string | null = null;
-  if (candidateToken) {
-    const invite = await invites.resolveInvite(candidateToken);
-    if (!invite || invite.expired) {
-      const e = new Error(invite?.expired ? 'invite link has expired' : 'invalid candidate token');
-      e.status = invite?.expired ? 410 : 401;
-      throw e;
-    }
-    candidateName = invite.name;
   }
 
   const sessionId = uuidv4();
@@ -93,7 +74,7 @@ async function start({ challengeId, candidateToken }: StartOpts = {}): Promise<{
   const session: GameSession & Record<string, unknown> = sessionStore.makeSession({
     id: sessionId,
     challengeId,
-    candidateName,
+    candidateName: null,
     status: 'active',
   });
   session.buildDir = sessionDir;
@@ -123,98 +104,8 @@ async function start({ challengeId, candidateToken }: StartOpts = {}): Promise<{
     throw newErr;
   }
 
-  if (candidateToken) {
-    try {
-      await invites.markUsed(candidateToken);
-    } catch (e: unknown) {
-      console.warn(`[lifecycle] failed to mark invite used: ${(e as Error).message}`);
-    }
-  }
-
   await sessionStore.persistRuntime(session);
 
-  return { session, challenge };
-}
-
-function challengeFromBuilt(built: Record<string, unknown> | null | undefined, reviewSessionId: string): Record<string, unknown> {
-  const b = built || {};
-  const meta = (b.meta as Record<string, unknown>) || {};
-  return {
-    id: `preview:${reviewSessionId}`,
-    title: b.title || meta.name || 'Preview',
-    description: b.description || '',
-    difficulty: b.difficulty || meta.difficulty || null,
-    category: b.category || meta.category || null,
-    tags: b.tags || meta.tags || [],
-    problemStatement: b.problemStatement || null,
-    validationSpec: b.validationSpec || null,
-  };
-}
-
-interface StartPreviewOpts {
-  buildDir: string;
-  builtChallenge?: Record<string, unknown> | null;
-  reviewSessionId: string;
-}
-
-/** Spin a candidate-style sandbox from pending build artefacts (review gate). */
-async function startPreview({ buildDir, builtChallenge, reviewSessionId }: StartPreviewOpts): Promise<{ session: GameSession; challenge: Record<string, unknown> }> {
-  if (!buildDir || !fs.existsSync(buildDir)) {
-    const e = new Error('build directory not found');
-    (e as any).status = 404;
-    throw e;
-  }
-  const composePath = path.join(buildDir, 'docker-compose.yml');
-  if (!fs.existsSync(composePath)) {
-    const e = new Error('docker-compose.yml missing in build directory');
-    (e as any).status = 400;
-    throw e;
-  }
-
-  const sessionId = uuidv4();
-  const { content: composeYaml } = composeManager.readComposeFile(buildDir);
-  const portMap = await composeManager.resolvePortMap(buildDir, composeYaml, sessionId);
-  const services = composeManager.extractServiceNames(composeYaml);
-  const spec = (builtChallenge?.validationSpec as Record<string, unknown>) || {};
-
-  const session: GameSession & Record<string, unknown> = sessionStore.makeSession({
-    id: sessionId,
-    challengeId: `preview:${reviewSessionId}`,
-    candidateName: 'Author preview',
-    status: 'active',
-  });
-  session.buildDir = path.resolve(buildDir);
-  session.portMap = portMap;
-  session.services = services;
-  session.metricsService = (spec.metricsService as string | null) || null;
-  session.terminalService = (spec.terminalService as string | null) || (services[0] || null);
-  session.isReviewPreview = true;
-  session.reviewSessionId = reviewSessionId;
-  sessionStore.set(sessionId, session);
-
-  await sessionStore.persistRow(session);
-
-  try {
-    await composeManager.down(buildDir).catch(() => {});
-    await composeManager.up(buildDir, portMap);
-    await composeManager.waitForServices(buildDir, portMap, 90_000);
-  } catch (e: unknown) {
-    const err = e as Error;
-    console.error(`[lifecycle] preview startup failed for ${sessionId}: ${err.message}`);
-    await composeManager.down(buildDir).catch(() => {});
-    await portAllocator.release(sessionId);
-    session.status = 'ended';
-    session.endTime = Date.now();
-    sessionStore.set(sessionId, session);
-    await sessionStore.persistRow(session);
-    const newErr = new Error(`failed to start preview sandbox: ${err.message}`);
-    (newErr as any).status = 500;
-    throw newErr;
-  }
-
-  await sessionStore.persistRuntime(session);
-
-  const challenge = challengeFromBuilt(builtChallenge, reviewSessionId);
   return { session, challenge };
 }
 
@@ -236,9 +127,7 @@ async function end(sessionId: string): Promise<GameSession> {
     } catch (e: unknown) {
       console.warn(`[lifecycle] compose down failed: ${(e as Error).message}`);
     }
-    if (!session.isReviewPreview) {
-      rmDirSync(session.buildDir as string);
-    }
+    rmDirSync(session.buildDir as string);
   }
 
   try {
@@ -256,4 +145,4 @@ async function end(sessionId: string): Promise<GameSession> {
   return session;
 }
 
-module.exports = { start, startPreview, end, challengeFromBuilt };
+module.exports = { start, end };

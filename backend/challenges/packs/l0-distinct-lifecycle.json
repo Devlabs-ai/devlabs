@@ -1,0 +1,178 @@
+{
+  "id": "l0-distinct-lifecycle",
+  "number": 21,
+  "finalized": true,
+  "title": "What distinct() actually does",
+  "description": "You called distinct(). Spark has not read a row. Rebuild the plan from that call through the shuffle.",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "distinct",
+    "catalyst",
+    "shuffle",
+    "board"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "board",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "overview": "Finance wanted unique rows. Someone wrote `df.distinct()` and then hit `.count()`.\n\nUntil that action, Spark had not read a single partition. `distinct()` is lazy — Catalyst only recorded an Aggregate whose grouping keys are every column.\n\nThe physical plan is not one global unique pass. It is two HashAggregates with a shuffle between them: map-side local unique, a shuffle on all columns, then reduce-side global unique.\n\nThe outline of that plan is already on the board. Fill each empty block from Unused. Widgets that do not belong are traps. Spill is real, but optional.",
+    "yourTask": "Fill each empty block with the operator that belongs there. The wires are already drawn.",
+    "yourTaskSteps": [
+      "Read every widget. They all look equally plausible.",
+      "Drop an operator onto each empty block — or select a widget, then click a block.",
+      "The dashed block is optional. Leave it empty, or place spill there.",
+      "Submit. Wrong operators and traps fail. The outline of the plan is given; the labels are not."
+    ],
+    "hints": [
+      "distinct() is lazy. An action is what asks for a physical plan.",
+      "The physical plan is two HashAggregates with a shuffle between them.",
+      "The same row can live in many partitions, so local unique is not global unique."
+    ],
+    "moat": "Setter notes — not shown to learners.\n\nBoard lab. sandboxType=board. No cluster. Gold is a DAG (parent → child), not fixed lanes.\n\nRequired chain:\nlazy-agg → action-fires → physical-two-agg → map-scan → bytes-to-bytes-map → shuffle-all-cols → reduce-global\n\nOptional splice: spill-merge on bytes-to-bytes-map → shuffle-all-cols.\n\nSeven traps must stay unused. Grade lives in backend/workspace/boardGrade.ts."
+  },
+  "platformSpec": {
+    "pieces": [
+      {
+        "id": "lazy-agg",
+        "title": "Lazy Aggregate — all columns are keys",
+        "blurb": "df.distinct() is a transform. Catalyst records an Aggregate whose grouping keys are every column. No data is read yet.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "action-fires",
+        "title": "An action builds the physical plan",
+        "blurb": ".count(), .show(), or .write() is what asks Catalyst for a physical plan. distinct() itself does not.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "lazy-agg",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "physical-two-agg",
+        "title": "HashAggregate → Shuffle → HashAggregate",
+        "blurb": "The physical plan is two aggregations with a shuffle between them — not one global unique pass.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "action-fires",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "map-scan",
+        "title": "Map task scans its partition",
+        "blurb": "Each executor task reads only the rows in its assigned partition, row by row.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "physical-two-agg",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "bytes-to-bytes-map",
+        "title": "BytesToBytesMap (local unique)",
+        "blurb": "Spark hashes the whole row into a Tungsten BytesToBytesMap. Same hash and same bytes → drop immediately.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "map-scan",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "spill-merge",
+        "title": "Spill + external merge-sort",
+        "blurb": "If the map fills, rows are sorted by hash, spilled, and merge-sorted so local duplicates still die. Correctness does not require this card.",
+        "kind": "mechanism",
+        "gold": "optional",
+        "parent": "bytes-to-bytes-map",
+        "child": "shuffle-all-cols",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "shuffle-all-cols",
+        "title": "Shuffle: hash-partition on all columns",
+        "blurb": "Surviving local-unique rows are hashed on the entire row so identical rows from different maps land on the same reducer.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "bytes-to-bytes-map",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "reduce-global",
+        "title": "Reduce-side map (global unique)",
+        "blurb": "Each reducer merges incoming rows into a final hash map and emits rows that are unique across the cluster.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "shuffle-all-cols",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "eager-call",
+        "title": "distinct() executes at the call",
+        "blurb": "Calling df.distinct() scans the dataset immediately and returns unique rows before any action.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "distinct() is lazy. An action is required."
+      },
+      {
+        "id": "driver-global-set",
+        "title": "Driver builds one global hash set",
+        "blurb": "Executors send every row to the driver, which uniques them in one HashSet and broadcasts the result.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Uniques are computed on executors, not collected to the driver."
+      },
+      {
+        "id": "broadcast-uniques",
+        "title": "Broadcast the unique rows",
+        "blurb": "After local dedup, the unique set is broadcast to every executor so each task can filter against it.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "distinct() shuffles on the row, it does not broadcast the set."
+      },
+      {
+        "id": "sort-then-uniq",
+        "title": "Global sort, then drop adjacent dups",
+        "blurb": "Spark range-partitions, sorts each partition, and drops equal neighbors — like sort | uniq.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Default distinct is hash-aggregate, not sort-based."
+      },
+      {
+        "id": "shuffle-first-col",
+        "title": "Shuffle on the first column only",
+        "blurb": "The shuffle key is the leftmost column. Other columns are compared only after rows arrive.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Grouping and shuffle keys are every column, not a subset."
+      },
+      {
+        "id": "map-only",
+        "title": "Local unique is enough — no shuffle",
+        "blurb": "If each partition drops its own duplicates, the dataset is already globally unique.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "The same row can live in many partitions. Shuffle is required."
+      },
+      {
+        "id": "filter-pushdown",
+        "title": "Distinct is a pushed-down filter",
+        "blurb": "Catalyst rewrites distinct() as a Filter on the scan so duplicates never leave the file source.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Filter ≠ Distinct. This is an Aggregate, not a predicate."
+      }
+    ]
+  }
+}

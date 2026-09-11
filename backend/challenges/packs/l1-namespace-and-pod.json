@@ -1,0 +1,46 @@
+{
+  "id": "l1-namespace-and-pod",
+  "number": 30,
+  "finalized": true,
+  "title": "Open the Front Desk",
+  "description": "Northline is launching **Guestbook** on the lobby kiosks. Your namespace on the shared cluster is already set up \u2014 work only there (not in `default`).\n\nBefore Services or Deployments, the floor needs one frontend Pod: **`front-desk`**.\n\nReference: [Pods](https://kubernetes.io/docs/concepts/workloads/pods/)\n\n## Pod spec (required)\n\n| Field | Value |\n| --- | --- |\n| Name | `front-desk` |\n| Namespace | **yours** (not `default`) |\n| Labels | `app=guestbook`, `tier=frontend` |\n| Container name | `front-desk` (or any single container) |\n| Image | `nginx:1.25` (any tag is fine if the name contains `nginx`) |\n| Container port | **`80`** (declare it \u2014 nginx\u2019s default HTTP port) |\n| Phase | **Running** |\n\nPort **80** is required in the Pod spec (`containerPort: 80` / `kubectl run --port=80`). Do not leave ports unspecified and assume the grade will infer them.\n\n**Meant for:** Namespaces, creating a Pod, labels, containerPort.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad",
+    "pods",
+    "namespaces"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS \u2014 kubectl already defaults there.",
+      "kubectl run front-desk --image=nginx:1.25 --port=80 -l app=guestbook,tier=frontend",
+      "Or apply a Pod YAML with containers[].ports[].containerPort: 80",
+      "Wait until front-desk is Running, then Submit."
+    ],
+    "overview": "Namespaces + first Pod",
+    "brief": "Create pod front-desk in your namespace: labels app=guestbook + tier=frontend, image nginx, containerPort 80, Running.",
+    "solution": "Stay in your lab namespace (already the kubectl default). Create Pod `front-desk` with the Guestbook frontend labels, an nginx image, and **containerPort 80** declared.\n\nDocs: [Pods](https://kubernetes.io/docs/concepts/workloads/pods/)\n\n### Imperative\n\n```bash\nkubectl run front-desk --image=nginx:1.25 --port=80 -l app=guestbook,tier=frontend\nkubectl get pod front-desk\n```\n\nWait until `STATUS` is `Running`, then **Submit**.\n\n### Declarative\n\n```yaml\napiVersion: v1\nkind: Pod\nmetadata:\n  name: front-desk\n  labels:\n    app: guestbook\n    tier: frontend\nspec:\n  containers:\n    - name: front-desk\n      image: nginx:1.25\n      ports:\n        - containerPort: 80\n```\n\n```bash\nkubectl apply -f front-desk.yaml\nkubectl get pod front-desk -w\n```\n\nDo not create the Pod in `default`.\n"
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1",
+      "memory": "1Gi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  }
+}

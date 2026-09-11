@@ -1,0 +1,25 @@
+{
+  "id": "l1-init-container-gate",
+  "number": 42,
+  "finalized": false,
+  "title": "Wait for the Gate",
+  "description": "Guestbook used to race its dependency and crash on a cold start.\n\nAdd an **init container** that prepares a volume or waits until the dependency is ready. The app container must not start until init succeeds \u2014 that gate is the whole point.\n\n**Meant for:** Init containers.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "Init containers",
+    "brief": "Add an init container that prepares a volume or waits on a dependency before Guestbook\u2019s app container starts."
+  },
+  "platformSpec": {}
+}

@@ -1,0 +1,25 @@
+{
+  "id": "l2-canary-cutover",
+  "number": 54,
+  "finalized": false,
+  "title": "Five Percent First",
+  "description": "A full cutover scared everyone last time. Tonight you ship **five percent first**.\n\nSplit traffic between stable and canary Deployments (Services / Ingress weights or selectors as the brief says), prove the canary is healthy, then cut over cleanly. Leaving both forever is not a cutover.\n\n**Meant for:** Canary / blue-green cutover.\n",
+  "difficulty": "L2",
+  "tags": [
+    "kubernetes",
+    "l2",
+    "ckad"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [],
+    "overview": "Canary cutover",
+    "brief": "Split traffic between stable and canary Guestbook Deployments, then cut over cleanly."
+  },
+  "platformSpec": {}
+}

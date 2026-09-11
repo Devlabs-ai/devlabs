@@ -1,0 +1,47 @@
+{
+  "id": "l1-deployment-basics",
+  "number": 31,
+  "finalized": true,
+  "title": "More Desks Than Hands",
+  "description": "One Pod kept the lights on for a demo. Opening weekend will not.\n\nOps wants Guestbook\u2019s frontend managed as a **Deployment** named **`front-desk`**: three replicas, the labels selectors expect, and a stable nginx image with **containerPort 80**. When you finish, every replica should be **Available** \u2014 not CrashLooping, not Pending forever.\n\nReference: [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)\n\n## Deployment spec (required)\n\n| Field | Value |\n| --- | --- |\n| Name | `front-desk` |\n| Namespace | **yours** (not `default`) |\n| Replicas | **`3`** |\n| Selector labels | `app=guestbook`, `tier=frontend` |\n| Pod template labels | same as selector |\n| Container image | `nginx:1.25` (any tag is fine if the name contains `nginx`) |\n| Container port | **`80`** |\n| Ready | **`3` ready / available replicas** |\n\nStay in your lab namespace. Prefer a Deployment over a bare Pod \u2014 grade looks for `deploy/front-desk`.\n\n**Meant for:** Deployments, replicas, selectors, pod templates.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "l0",
+    "ckad",
+    "deployments",
+    "replicas"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is already the kubectl default \u2014 stay there.",
+      "kubectl create deployment front-desk --image=nginx:1.25 --replicas=3",
+      "Then label the Deployment / pod template: app=guestbook tier=frontend (selector must match).",
+      "Or apply a Deployment YAML with selector + template labels and containerPort 80.",
+      "Wait until READY is 3/3, then Submit."
+    ],
+    "overview": "Deployments",
+    "brief": "Create Deployment front-desk with 3 replicas, guestbook/frontend labels, nginx + port 80, all Available.",
+    "solution": "Create Deployment `front-desk` with **3** replicas. Selector and pod template must share `app=guestbook` and `tier=frontend`. Image must be nginx; declare **containerPort 80**.\n\nDocs: [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)\n\n### Imperative (then patch labels / port)\n\n```bash\nkubectl create deployment front-desk --image=nginx:1.25 --replicas=3\n# Prefer applying the YAML below so selector, labels, and port 80 are correct in one shot.\n```\n\n### Declarative\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: front-desk\n  labels:\n    app: guestbook\n    tier: frontend\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: guestbook\n      tier: frontend\n  template:\n    metadata:\n      labels:\n        app: guestbook\n        tier: frontend\n    spec:\n      containers:\n        - name: front-desk\n          image: nginx:1.25\n          ports:\n            - containerPort: 80\n```\n\n```bash\nkubectl apply -f front-desk-deploy.yaml\nkubectl rollout status deployment/front-desk\nkubectl get deploy front-desk\n```\n\nWait until `READY` is `3/3`, then **Submit**.\n"
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1",
+      "memory": "1Gi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}
