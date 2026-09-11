@@ -20,7 +20,15 @@ import {
   type PlayPanel,
 } from '../constants/playCatalog';
 import { WHITEBOARD_PATH } from '../constants/whiteboard';
+import { SPARK_PRIMER_PATH } from '../constants/sparkPrimer';
+import { K8S_PRIMER_PATH } from '../constants/k8sPrimer';
 import type { ChallengePublic } from '../types/domain';
+
+function panelPrimerPath(panelId: string): string | null {
+  if (panelId === 'spark') return SPARK_PRIMER_PATH;
+  if (panelId === 'kubernetes') return K8S_PRIMER_PATH;
+  return null;
+}
 
 function panelLabCount(panel: PlayPanel): number {
   return panel.challengeIds.length;
@@ -107,6 +115,7 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
 
   const activeTopicId = panel?.id || null;
   const showLabList = Boolean(domainId && panel);
+  const primerPath = panel ? panelPrimerPath(panel.id) : null;
 
   const filteredRows = useMemo(() => {
     if (!showLabList) return [];
@@ -339,7 +348,15 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                   <span aria-hidden> / </span>
                   {panel.label}
                 </p>
-                <h2 className="play-hub-title">{panel.label}</h2>
+                <div className="play-hub-title-row">
+                  <h2 className="play-hub-title">{panel.label}</h2>
+                  {primerPath && (
+                    <Link to={primerPath} className="play-primer-link">
+                      Read the primer
+                      <span aria-hidden> →</span>
+                    </Link>
+                  )}
+                </div>
                 <p className="play-hub-lead">{panel.blurb}</p>
               </header>
 

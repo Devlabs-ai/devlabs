@@ -4416,6 +4416,39 @@ a.project-stage-open:hover {
   color: #fff;
 }
 
+.play-hub-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.play-hub-title-row .play-hub-title {
+  min-width: 0;
+}
+
+.play-primer-link {
+  flex-shrink: 0;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.12);
+  color: #fde68a;
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.play-primer-link:hover {
+  background: rgba(251, 191, 36, 0.2);
+  border-color: rgba(251, 191, 36, 0.5);
+}
+
 .play-hub-header--compact .play-hub-title {
   font-size: 22px;
 }
@@ -4430,6 +4463,279 @@ a.project-stage-open:hover {
 
 .play-hub .play-paper-section-grid {
   margin-top: 4px;
+}
+
+/* Spark plain-notes primer */
+.spark-primer-page {
+  --primer-ink: #1c1917;
+  --primer-muted: #57534e;
+  --primer-rule: rgba(28, 25, 23, 0.12);
+  --primer-paper: #f7f3eb;
+  --primer-accent: #0f766e;
+  --primer-sans: "Satoshi", var(--display), system-ui, sans-serif;
+  --primer-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  min-height: calc(100vh - 64px);
+  padding: 28px 18px 64px;
+  background:
+    radial-gradient(ellipse 60% 40% at 10% 0%, rgba(16, 185, 129, 0.12), transparent 55%),
+    radial-gradient(ellipse 45% 35% at 90% 10%, rgba(56, 189, 248, 0.08), transparent 50%),
+    #050505;
+}
+
+.spark-primer-notebook {
+  position: relative;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 44px 48px 56px;
+  border-radius: 14px;
+  background: var(--primer-paper);
+  color: var(--primer-ink);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 22px 56px rgba(0, 0, 0, 0.42);
+}
+
+.spark-primer-header {
+  margin: 0 0 22px;
+}
+
+.spark-primer-crumb {
+  margin: 0 0 16px;
+  font-family: var(--primer-sans);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--primer-muted);
+}
+
+.spark-primer-crumb a {
+  color: var(--primer-accent);
+  text-decoration: none;
+}
+
+.spark-primer-crumb a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.spark-primer-eyebrow {
+  margin: 0 0 8px;
+  font-family: var(--primer-sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primer-accent);
+  line-height: 1;
+}
+
+.spark-primer-title {
+  margin: 0 0 12px;
+  font-family: var(--primer-sans);
+  font-size: clamp(2rem, 4vw, 2.6rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: var(--primer-ink);
+}
+
+.spark-primer-lede {
+  margin: 0;
+  max-width: 54ch;
+  font-family: var(--primer-serif);
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--primer-muted);
+}
+
+.spark-primer-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 0 0 28px;
+  padding: 0 0 18px;
+  border-bottom: 1px solid var(--primer-rule);
+}
+
+.spark-primer-toc a {
+  font-family: var(--primer-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primer-accent);
+  text-decoration: none;
+  padding: 4px 0;
+}
+
+.spark-primer-toc a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.spark-primer-section {
+  margin: 0 0 36px;
+  scroll-margin-top: 24px;
+}
+
+.spark-primer-section-eyebrow {
+  margin: 0 0 6px;
+  font-family: var(--primer-sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--primer-accent);
+}
+
+.spark-primer-section-title {
+  margin: 0 0 12px;
+  font-family: var(--primer-sans);
+  font-size: clamp(1.35rem, 2.5vw, 1.7rem);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--primer-ink);
+}
+
+.spark-primer-copy {
+  margin: 0 0 12px;
+  max-width: 58ch;
+  font-family: var(--primer-serif);
+  font-size: 16.5px;
+  line-height: 1.65;
+  color: var(--primer-ink);
+}
+
+.spark-primer-example {
+  margin: 14px 0 4px;
+  padding: 14px 16px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--primer-rule);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.spark-primer-example-title {
+  margin: 0 0 8px;
+  font-family: var(--primer-sans);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--primer-accent);
+}
+
+.spark-primer-example .spark-primer-copy {
+  font-size: 15.5px;
+}
+
+.spark-primer-example-list {
+  margin: 4px 0 6px;
+  padding: 0 0 0 1.15em;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.spark-primer-example-list li {
+  font-family: var(--primer-serif);
+  font-size: 15.5px;
+  line-height: 1.5;
+  color: var(--primer-ink);
+}
+
+.spark-primer-figure {
+  margin: 18px 0 0;
+  padding: 10px;
+  border: 1px solid var(--primer-rule);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.spark-primer-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.spark-primer-figure figcaption {
+  margin-top: 8px;
+  font-family: var(--primer-sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--primer-muted);
+  text-align: center;
+}
+
+.spark-primer-next {
+  margin-bottom: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--primer-rule);
+}
+
+.spark-primer-links {
+  margin: 8px 0 18px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spark-primer-links a {
+  font-family: var(--primer-serif);
+  font-size: 16px;
+  color: var(--primer-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.spark-primer-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.spark-primer-cta {
+  display: inline-flex;
+  align-items: center;
+  padding: 11px 16px;
+  border-radius: 999px;
+  border: 1.5px solid var(--primer-ink);
+  background: var(--primer-ink);
+  color: var(--primer-paper);
+  font-family: var(--primer-sans);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.spark-primer-cta:hover {
+  background: #292524;
+}
+
+.spark-primer-cta--ghost {
+  background: transparent;
+  color: var(--primer-ink);
+}
+
+.spark-primer-cta--ghost:hover {
+  background: rgba(28, 25, 23, 0.06);
+}
+
+@media (max-width: 720px) {
+  .play-hub-title-row {
+    flex-wrap: wrap;
+  }
+
+  .spark-primer-page {
+    padding: 16px 10px 48px;
+  }
+
+  .spark-primer-notebook {
+    padding: 28px 20px 40px;
+  }
 }
 
 .play-featured-card {

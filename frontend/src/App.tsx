@@ -19,6 +19,8 @@ import ProjectModulePage from './pages/ProjectModulePage';
 import MinorsPage from './pages/MinorsPage';
 import SparkPlaygroundPage from './pages/SparkPlaygroundPage';
 import SparkPlaygroundOpenPage from './pages/SparkPlaygroundOpenPage';
+import SparkPrimerPage from './pages/SparkPrimerPage';
+import K8sPrimerPage from './pages/K8sPrimerPage';
 import ProfilePage from './pages/ProfilePage';
 import DbExplorerPage from './pages/DbExplorerPage';
 import AppLayout from './layouts/AppLayout';
@@ -655,6 +657,8 @@ export default function App(): React.JSX.Element {
           <Route path="play/minors/:minorId" element={<MinorsPage />} />
           <Route path="play/spark-playground/open" element={<SparkPlaygroundOpenPage />} />
           <Route path="play/spark-playground" element={<SparkPlaygroundPage />} />
+          <Route path="play/data-engineer/spark/intro" element={<SparkPrimerPage />} />
+          <Route path="play/devops-engineer/kubernetes/intro" element={<K8sPrimerPage />} />
           <Route path="play/:domainId" element={<PlayPage />} />
           <Route path="play/:domainId/:panelId" element={<PlayPage />} />
           <Route path="profile" element={<ProfilePage />} />
