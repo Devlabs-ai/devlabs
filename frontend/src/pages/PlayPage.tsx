@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, NavLink, useNavigate, useParams } from 'react-router-dom';
+import { Link, NavLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
 import SandboxWorkspace from '../components/SandboxWorkspace';
 import SparkPlatformWorkspace, {
@@ -7,6 +7,11 @@ import SparkPlatformWorkspace, {
 } from '../components/SparkPlatformWorkspace';
 import BoardWorkspace, { isBoardChallenge } from '../components/BoardWorkspace';
 import K8sLabWorkspace, { isKubernetesChallenge } from '../components/K8sLabWorkspace';
+import {
+  StatusBookIcon,
+  StatusCheckIcon,
+  StatusPlayIcon,
+} from '../components/TrackStatusIcons';
 import {
   PLAY_DOMAINS,
   getPlayDomain,
@@ -19,9 +24,15 @@ import {
   type PlayDomainId,
   type PlayPanel,
 } from '../constants/playCatalog';
-import { WHITEBOARD_PATH } from '../constants/whiteboard';
+// import { WHITEBOARD_PATH } from '../constants/whiteboard';
 import { SPARK_PRIMER_PATH } from '../constants/sparkPrimer';
 import { K8S_PRIMER_PATH } from '../constants/k8sPrimer';
+import {
+  getK8sReading,
+  k8sReadingPath,
+  listK8sTrackItems,
+  type K8sTrackItem,
+} from '../constants/k8sReadings';
 import type { ChallengePublic } from '../types/domain';
 
 function panelPrimerPath(panelId: string): string | null {
@@ -39,6 +50,7 @@ function domainLabCount(domain: PlayDomain): number {
 }
 
 type DifficultyFilter = 'all' | 'l0' | 'l1' | 'l2' | 'l3' | 'l4';
+type KindFilter = 'all' | 'blog' | 'lab';
 
 interface LibraryViewProps {
   challenges: ChallengePublic[];
@@ -76,14 +88,17 @@ function catalogIdLabel(challenge: ChallengePublic): string {
 function LibraryView({ challenges, challengesError, startError, onSelectChallenge }: LibraryViewProps): JSX.Element {
   const navigate = useNavigate();
   const params = useParams<{ domainId?: string; panelId?: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const [difficulty, setDifficulty] = useState<DifficultyFilter>('all');
+  const [kindFilter, setKindFilter] = useState<KindFilter>('all');
 
   const domainId = isPlayDomainId(params.domainId) ? (params.domainId as PlayDomainId) : null;
   const domain = getPlayDomain(domainId);
   const panel = getPlayPanel(domain, params.panelId || null);
   const isTracksHub = !domainId;
   const isDomainHub = Boolean(domainId && domain && !panel);
+  const isK8sPanel = panel?.id === 'kubernetes' && domainId === 'devops-engineer';
 
   useEffect(() => {
     if (params.domainId && !domainId) {
@@ -102,6 +117,19 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
     return map;
   }, [challenges]);
 
+  // Deep-link from readings: /kubernetes?start=<challengeId>
+  useEffect(() => {
+    if (!isK8sPanel) return;
+    const startId = searchParams.get('start');
+    if (!startId) return;
+    const challenge = byId.get(startId);
+    if (!challenge || !challenge.finalized) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('start');
+    setSearchParams(next, { replace: true });
+    void onSelectChallenge(challenge);
+  }, [isK8sPanel, searchParams, setSearchParams, byId, onSelectChallenge]);
+
   const catalogRows = useMemo(() => {
     return listPlayCatalogEntries()
       .map((entry) => {
@@ -117,36 +145,134 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
   const showLabList = Boolean(domainId && panel);
   const primerPath = panel ? panelPrimerPath(panel.id) : null;
 
-  const filteredRows = useMemo(() => {
+  type TrackRow =
+    | {
+        kind: 'reading';
+        key: string;
+        trackId: string;
+        title: string;
+        href: string;
+      }
+    | {
+        kind: 'challenge';
+        key: string;
+        challenge: ChallengePublic;
+        trackId: string;
+      };
+
+  const filteredRows = useMemo((): TrackRow[] => {
     if (!showLabList) return [];
     const q = search.trim().toLowerCase();
-    return catalogRows
-      .filter((row) => {
-        if (domainId && row.domainId !== domainId) return false;
-        if (activeTopicId && row.panelId !== activeTopicId) return false;
-        if (!matchesDifficulty(row.challenge, difficulty)) return false;
-        if (!q) return true;
+
+    if (isK8sPanel) {
+      const items = listK8sTrackItems();
+      let labOrdinal = 0;
+      const rows: TrackRow[] = [];
+      for (const item of items) {
+        if (item.type === 'reading') {
+          if (kindFilter === 'lab') continue;
+          const reading = getK8sReading(item.readingId);
+          if (!reading) continue;
+          if (q) {
+            const hay = [reading.trackId, reading.title, reading.lede, 'blog', 'reading']
+              .join(' ')
+              .toLowerCase();
+            if (!hay.includes(q)) continue;
+          }
+          rows.push({
+            kind: 'reading',
+            key: item.id,
+            trackId: reading.trackId,
+            title: reading.title,
+            href: k8sReadingPath(reading.slug),
+          });
+          continue;
+        }
+        labOrdinal += 1;
+        const trackId = `L${labOrdinal}`;
+        if (kindFilter === 'blog') continue;
+        const challenge = byId.get(item.challengeId);
+        if (!challenge || isBoardChallenge(challenge)) continue;
+        if (!matchesDifficulty(challenge, difficulty)) continue;
+        if (q) {
+          const hay = [
+            trackId,
+            challenge.title,
+            challenge.description,
+            challenge.difficulty,
+            'lab',
+            ...(challenge.tags || []),
+          ]
+            .join(' ')
+            .toLowerCase();
+          if (!hay.includes(q)) continue;
+        }
+        rows.push({
+          kind: 'challenge',
+          key: item.id,
+          challenge,
+          trackId,
+        });
+      }
+      return rows;
+    }
+
+    if (kindFilter === 'blog') return [];
+
+    let labOrdinal = 0;
+    const rows: TrackRow[] = [];
+    for (const row of catalogRows) {
+      if (domainId && row.domainId !== domainId) continue;
+      if (activeTopicId && row.panelId !== activeTopicId) continue;
+      labOrdinal += 1;
+      const trackId = `L${labOrdinal}`;
+      if (!matchesDifficulty(row.challenge, difficulty)) continue;
+      if (q) {
         const hay = [
-          catalogIdLabel(row.challenge),
+          trackId,
           row.challenge.title,
           row.challenge.description,
           row.challenge.difficulty,
+          'lab',
           row.panelLabel,
-          row.domainLabel,
           ...(row.challenge.tags || []),
         ]
           .join(' ')
           .toLowerCase();
-        return hay.includes(q);
+        if (!hay.includes(q)) continue;
+      }
+      rows.push({
+        kind: 'challenge',
+        key: row.challenge.id,
+        challenge: row.challenge,
+        trackId,
       });
-  }, [catalogRows, domainId, activeTopicId, difficulty, search, showLabList]);
+    }
+    return rows;
+  }, [
+    catalogRows,
+    domainId,
+    activeTopicId,
+    difficulty,
+    kindFilter,
+    search,
+    showLabList,
+    isK8sPanel,
+    byId,
+  ]);
 
   const availableInPanel = useMemo(() => {
     if (!showLabList || !domainId || !activeTopicId) return 0;
+    if (isK8sPanel) {
+      return listK8sTrackItems().filter((item: K8sTrackItem) => {
+        if (item.type === 'reading') return true;
+        return byId.has(item.challengeId);
+      }).length;
+    }
     return catalogRows.filter(
       (row) => row.domainId === domainId && row.panelId === activeTopicId,
     ).length;
-  }, [catalogRows, domainId, activeTopicId, showLabList]);
+  }, [catalogRows, domainId, activeTopicId, showLabList, isK8sPanel, byId]);
 
   return (
     <div className="app-page play-problems-page play-problems-page--fixed">
@@ -157,6 +283,7 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
 
       <div className="play-problems-layout">
         <aside className="play-problems-sidebar" aria-label="Tracks">
+          {/*
           <NavLink to="/play/quests" className="play-sidebar-card play-sidebar-papers play-sidebar-quests">
             <strong>Side Quests</strong>
             <p>Quirkier quizzes — no code, just Spark brain snacks. Browse by topic.</p>
@@ -174,6 +301,7 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
               <span aria-hidden>→</span>
             </span>
           </NavLink>
+          */}
 
           <div className="play-sidebar-card play-sidebar-explore">
             <div className="play-sidebar-section-label">Tracks</div>
@@ -286,13 +414,6 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
           {isDomainHub && domain && (
             <section className="play-hub" aria-label={`${domain.label} shelves`}>
               <header className="play-hub-header">
-                <p className="play-problems-kicker">
-                  <Link to="/play" className="play-papers-crumb">
-                    Tracks
-                  </Link>
-                  <span aria-hidden> / </span>
-                  {domain.label}
-                </p>
                 <h2 className="play-hub-title">{domain.label}</h2>
                 <p className="play-hub-lead">{domain.blurb}</p>
               </header>
@@ -337,17 +458,6 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
           {showLabList && domain && panel && (
             <>
               <header className="play-hub-header play-hub-header--compact">
-                <p className="play-problems-kicker">
-                  <Link to="/play" className="play-papers-crumb">
-                    Tracks
-                  </Link>
-                  <span aria-hidden> / </span>
-                  <Link to={playCatalogPath(domain.id)} className="play-papers-crumb">
-                    {domain.label}
-                  </Link>
-                  <span aria-hidden> / </span>
-                  {panel.label}
-                </p>
                 <div className="play-hub-title-row">
                   <h2 className="play-hub-title">{panel.label}</h2>
                   {primerPath && (
@@ -362,21 +472,31 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
 
               <section className="play-problems-toolbar">
                 <label className="play-search">
-                  <span className="sr-only">Search labs</span>
+                  <span className="sr-only">Search track</span>
                   <input
                     type="search"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search labs…"
+                    placeholder="Search track…"
                   />
                 </label>
                 <select
                   className="play-filter-select"
+                  value={kindFilter}
+                  onChange={(e) => setKindFilter(e.target.value as KindFilter)}
+                  aria-label="Kind"
+                >
+                  <option value="all">Kind</option>
+                  <option value="blog">Blog</option>
+                  <option value="lab">Lab</option>
+                </select>
+                <select
+                  className="play-filter-select"
                   value={difficulty}
                   onChange={(e) => setDifficulty(e.target.value as DifficultyFilter)}
-                  aria-label="Difficulty"
+                  aria-label="Level"
                 >
-                  <option value="all">Difficulty</option>
+                  <option value="all">Level</option>
                   <option value="l0">L0</option>
                   <option value="l1">L1</option>
                   <option value="l2">L2</option>
@@ -385,31 +505,59 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                 </select>
               </section>
 
-              <section className="play-problems-table-wrap" aria-label={`${panel.label} labs`}>
+              <section className="play-problems-table-wrap" aria-label={`${panel.label} track`}>
                 <div className="play-problems-table-head">
                   <span>Status</span>
                   <span>ID</span>
-                  <span>Lab</span>
-                  <span>Topics</span>
-                  <span>Difficulty</span>
-                  <span>Submitted</span>
+                  <span>Title</span>
+                  <span>Kind</span>
+                  <span>Level</span>
                 </div>
                 {filteredRows.length === 0 ? (
                   <div className="play-problems-empty">
                     {availableInPanel === 0
-                      ? 'No labs loaded for this shelf yet.'
-                      : 'No labs match these filters.'}
+                      ? 'No items loaded for this shelf yet.'
+                      : 'No items match these filters.'}
                   </div>
                 ) : (
                   <ul className="play-problems-table">
-                    {filteredRows.map(({ challenge, panelLabel, domainLabel }) => {
+                    {filteredRows.map((row) => {
+                      if (row.kind === 'reading') {
+                        return (
+                          <li key={row.key}>
+                            <button
+                              type="button"
+                              className="play-problem-row play-problem-row--reading"
+                              onClick={() => navigate(row.href)}
+                            >
+                              <span className="play-problem-status" aria-label="Open blog">
+                                <StatusBookIcon className="play-problem-status-icon" />
+                              </span>
+                              <span className="play-problem-id" title={row.trackId}>
+                                {row.trackId}
+                              </span>
+                              <span className="play-problem-title">{row.title}</span>
+                              <span className="play-problem-topics">
+                                <span className="play-topic-pill play-topic-pill--reading">
+                                  Blog
+                                </span>
+                              </span>
+                              <span className="play-problem-level-empty" aria-label="No level">
+                                —
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      }
+
+                      const { challenge, trackId } = row;
                       const playable = Boolean(challenge.finalized);
                       const solved = Boolean(challenge.solved);
                       return (
-                        <li key={challenge.id}>
+                        <li key={row.key}>
                           <button
                             type="button"
-                            className={`play-problem-row${playable ? '' : ' disabled'}${solved ? ' is-solved' : ''}`}
+                            className={`play-problem-row play-problem-row--lab${playable ? '' : ' disabled'}${solved ? ' is-solved' : ''}`}
                             disabled={!playable}
                             onClick={() => {
                               if (playable) void onSelectChallenge(challenge);
@@ -417,29 +565,23 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                           >
                             <span
                               className={`play-problem-status${solved ? ' is-solved' : ''}`}
-                              aria-label={solved ? 'Solved' : 'Unsolved'}
+                              aria-label={solved ? 'Completed' : 'Open lab'}
                             >
-                              {solved ? '✓' : '—'}
+                              {solved ? (
+                                <StatusCheckIcon className="play-problem-status-icon" />
+                              ) : (
+                                <StatusPlayIcon className="play-problem-status-icon" />
+                              )}
                             </span>
-                            <span
-                              className="play-problem-id"
-                              title={challenge.id}
-                            >
-                              {catalogIdLabel(challenge)}
+                            <span className="play-problem-id" title={challenge.id}>
+                              {trackId}
                             </span>
                             <span className="play-problem-title">{challenge.title}</span>
                             <span className="play-problem-topics">
-                              <span className="play-topic-pill">{panelLabel}</span>
-                              <span className="sr-only">{domainLabel} {panelLabel}</span>
+                              <span className="play-topic-pill play-topic-pill--lab">Lab</span>
                             </span>
                             <span className={`pill ${difficultyClass(challenge.difficulty)}`}>
                               {challenge.difficulty || 'L1'}
-                            </span>
-                            <span
-                              className="play-problem-submitters"
-                              title={`${challenge.submitters || 0} users submitted`}
-                            >
-                              {challenge.submitters || 0}
                             </span>
                           </button>
                         </li>
@@ -469,6 +611,7 @@ export default function PlayPage(): JSX.Element | null {
     onBackToLibrary,
     onEnd,
     ending,
+    closingLabTitle,
   } = useAppState();
   const params = useParams<{ domainId?: string; panelId?: string }>();
   const restoringSession =
@@ -529,12 +672,28 @@ export default function PlayPage(): JSX.Element | null {
 
   if (playState === 'library') {
     return (
-      <LibraryView
-        challenges={challenges}
-        challengesError={challengesError}
-        startError={startError}
-        onSelectChallenge={onSelectChallenge}
-      />
+      <>
+        {ending && (
+          <div className="lab-closing-overlay" role="status" aria-live="polite">
+            <div className="lab-closing-toast">
+              <span className="spinner" />
+              <span>
+                Closing lab
+                {closingLabTitle ? <> · <strong>{closingLabTitle}</strong></> : null}
+                …
+              </span>
+            </div>
+          </div>
+        )}
+        <div className={`play-library-shell${ending ? ' lab-closing-catalog' : ''}`}>
+          <LibraryView
+            challenges={challenges}
+            challengesError={challengesError}
+            startError={startError}
+            onSelectChallenge={onSelectChallenge}
+          />
+        </div>
+      </>
     );
   }
 
@@ -553,7 +712,7 @@ export default function PlayPage(): JSX.Element | null {
         <K8sLabWorkspace
           challenge={activeChallenge}
           session={activeSession}
-          onClose={onBackToLibrary}
+          onClose={onEnd}
         />
       );
     }

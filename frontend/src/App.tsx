@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Navigate,
   Route,
@@ -21,6 +21,7 @@ import SparkPlaygroundPage from './pages/SparkPlaygroundPage';
 import SparkPlaygroundOpenPage from './pages/SparkPlaygroundOpenPage';
 import SparkPrimerPage from './pages/SparkPrimerPage';
 import K8sPrimerPage from './pages/K8sPrimerPage';
+import K8sReadingPage from './pages/K8sReadingPage';
 import ProfilePage from './pages/ProfilePage';
 import DbExplorerPage from './pages/DbExplorerPage';
 import AppLayout from './layouts/AppLayout';
@@ -72,6 +73,7 @@ export default function App(): React.JSX.Element {
   const [activeChallenge, setActiveChallenge] = useState<ChallengePublic | ChallengeFull | null>(null);
   const [endResult, setEndResult] = useState<EndSessionResult | null>(null);
   const [ending, setEnding] = useState<boolean>(false);
+  const [closingLabTitle, setClosingLabTitle] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('problem');
 
@@ -96,6 +98,41 @@ export default function App(): React.JSX.Element {
     }
   };
 
+  /** Leaving the UI used to drop client state only — end on the server so K8s can park/wipe. */
+  const endActiveSessionBestEffort = useCallback((session: ActiveSession | null): Promise<void> => {
+    if (!session?.id || session.id.startsWith('pending-k8s-')) return Promise.resolve();
+    return endSession(session.id).then(
+      () => undefined,
+      (err: unknown) => {
+        console.warn('[session] end on leave failed', err);
+      },
+    );
+  }, []);
+
+  /**
+   * Fire-and-forget end/park, reveal catalog immediately, hold a centered loader ~2s.
+   */
+  const dismissK8sLabToCatalog = useCallback(async (
+    session: ActiveSession,
+    dest: string,
+    title: string | null,
+  ): Promise<void> => {
+    setClosingLabTitle(title);
+    setEnding(true);
+    void endActiveSessionBestEffort(session);
+    setPlayState('library');
+    setActiveSession(null);
+    setActiveChallenge(null);
+    setEndResult(null);
+    navigate(dest);
+    void refreshChallenges();
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 2000);
+    });
+    setEnding(false);
+    setClosingLabTitle(null);
+  }, [endActiveSessionBestEffort, navigate]);
+
   useEffect(() => {
     if (authMode === 'interviewer') {
       void refreshChallenges();
@@ -104,8 +141,11 @@ export default function App(): React.JSX.Element {
 
   const handleSelectChallenge = async (challenge: ChallengePublic | ChallengeFull): Promise<void> => {
     setStartError(null);
-    setPlayState('loading');
     setActiveChallenge(challenge);
+    // K8s: open Theory immediately (no full-page loader). Other runtimes keep the spinner.
+    if (!isKubernetesChallenge(challenge)) {
+      setPlayState('loading');
+    }
 
     if (isBoardChallenge(challenge)) {
       try {
@@ -201,8 +241,28 @@ export default function App(): React.JSX.Element {
     }
 
     if (isKubernetesChallenge(challenge)) {
+      const pendingId = `pending-k8s-${challenge.id}`;
+      setActiveTab('problem');
+      setActiveSession({
+        id: pendingId,
+        startTime: Date.now(),
+        recovered: false,
+        terminalWsUrl: null,
+        metricsWsUrl: null,
+        portMap: null,
+        services: [],
+        terminalService: null,
+        runtime: 'kubernetes',
+        k8sNamespace: null,
+        labReady: false,
+      });
+      setPlayState('active');
+      openingSessionRef.current = pendingId;
+
       try {
         const full = await fetchChallenge(challenge.id);
+        setActiveChallenge(full);
+
         const res = await startK8sSession(full.id);
         const hydrated =
           (res.challenge as ChallengeFull | undefined)
@@ -221,11 +281,10 @@ export default function App(): React.JSX.Element {
           k8sNamespace: res.k8sNamespace
             || (res.session as { k8sNamespace?: string } | undefined)?.k8sNamespace
             || null,
+          labReady: true,
         });
         setActiveChallenge(hydrated);
-        setActiveTab('problem');
         openingSessionRef.current = res.sessionId;
-        setPlayState('active');
         navigate(`/play/${res.sessionId}`);
       } catch (e) {
         const err = e as { response?: { data?: { error?: string } }; message?: string };
@@ -303,11 +362,23 @@ export default function App(): React.JSX.Element {
     if (!a || isPlayDomainId(a)) {
       if (playState === 'loading') return;
       if (openingSessionRef.current) return;
+      if (ending) return;
       if (playState === 'active' || playState === 'ended') {
+        const leaving = playState === 'active' ? activeSession : null;
+        if (leaving?.runtime === 'kubernetes') {
+          const dest = location.pathname.replace(/\/$/, '') || '/play';
+          void dismissK8sLabToCatalog(
+            leaving,
+            dest.startsWith('/play') ? dest : '/play',
+            activeChallenge?.title || null,
+          );
+          return;
+        }
         setPlayState('library');
         setActiveSession(null);
         setActiveChallenge(null);
         setEndResult(null);
+        if (leaving) void endActiveSessionBestEffort(leaving);
       }
       return;
     }
@@ -363,6 +434,7 @@ export default function App(): React.JSX.Element {
               || (res as { k8sNamespace?: string } | null)?.k8sNamespace
               || sess?.workspacePrefix
               || null,
+            labReady: true,
           });
           setActiveChallenge((res?.challenge as ChallengeFull | null) || null);
           setActiveTab('problem');
@@ -482,7 +554,14 @@ export default function App(): React.JSX.Element {
   }, [location.pathname, authMode, navigationType]);
 
   const handleEnd = async (): Promise<void> => {
-    if (!activeSession) return;
+    if (!activeSession || ending) return;
+    if (activeSession.id.startsWith('pending-k8s-')) {
+      setActiveSession(null);
+      setActiveChallenge(null);
+      setPlayState('library');
+      setEnding(false);
+      return;
+    }
     setEnding(true);
     try {
       if (activeSession.runtime === 'board') {
@@ -492,6 +571,11 @@ export default function App(): React.JSX.Element {
         return;
       }
       if (activeSession.runtime === 'spark-platform' || activeSession.id.startsWith('spark-')) {
+        try {
+          await endSession(activeSession.id);
+        } catch (_e) {
+          /* still close UI */
+        }
         setEndResult({
           sessionId: activeSession.id,
           elapsed: Date.now() - activeSession.startTime,
@@ -499,6 +583,16 @@ export default function App(): React.JSX.Element {
         setPlayState('ended');
         return;
       }
+      if (activeSession.runtime === 'kubernetes') {
+        const dest = catalogPathForChallenge(
+          activeChallenge?.id,
+          activeChallenge?.sandboxType,
+          activeChallenge?.tags,
+        );
+        await dismissK8sLabToCatalog(activeSession, dest, activeChallenge?.title || null);
+        return;
+      }
+      // compose: end on server, then summary card
       const res = await endSession(activeSession.id);
       setEndResult(res as EndSessionResult);
       setPlayState('ended');
@@ -553,11 +647,18 @@ export default function App(): React.JSX.Element {
 
   const handleBackToLibrary = (): void => {
     const dest = catalogPathForChallenge(activeChallenge?.id, activeChallenge?.sandboxType, activeChallenge?.tags);
+    const leaving = playState === 'active' ? activeSession : null;
+    if (leaving?.runtime === 'kubernetes') {
+      if (ending) return;
+      void dismissK8sLabToCatalog(leaving, dest, activeChallenge?.title || null);
+      return;
+    }
     setPlayState('library');
     setActiveSession(null);
     setActiveChallenge(null);
     setEndResult(null);
     navigate(dest);
+    if (leaving) void endActiveSessionBestEffort(leaving);
     void refreshChallenges();
   };
 
@@ -593,6 +694,7 @@ export default function App(): React.JSX.Element {
     activeTab,
     setActiveTab,
     ending,
+    closingLabTitle,
     onSelectChallenge: handleSelectChallenge,
     onOpenSparkPlayground: handleOpenSparkPlayground,
     onBackToLibrary: handleBackToLibrary,
@@ -610,6 +712,7 @@ export default function App(): React.JSX.Element {
     endResult,
     activeTab,
     ending,
+    closingLabTitle,
   ]);
 
   if (authMode === 'resolving') {
@@ -659,6 +762,10 @@ export default function App(): React.JSX.Element {
           <Route path="play/spark-playground" element={<SparkPlaygroundPage />} />
           <Route path="play/data-engineer/spark/intro" element={<SparkPrimerPage />} />
           <Route path="play/devops-engineer/kubernetes/intro" element={<K8sPrimerPage />} />
+          <Route
+            path="play/devops-engineer/kubernetes/read/:readingSlug"
+            element={<K8sReadingPage />}
+          />
           <Route path="play/:domainId" element={<PlayPage />} />
           <Route path="play/:domainId/:panelId" element={<PlayPage />} />
           <Route path="profile" element={<ProfilePage />} />

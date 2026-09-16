@@ -106,6 +106,14 @@ export const K8S_PRIMER_SECTIONS: K8sPrimerSection[] = [
 
 export const K8S_PRIMER_NEXT_LINKS: Array<{ label: string; href: string; external?: boolean }> = [
   {
+    label: 'Reading: Containers, runtimes, and Pods',
+    href: '/play/devops-engineer/kubernetes/read/containers-runtimes-pods',
+  },
+  {
+    label: 'Reading: Controllers, ReplicaSets, and Deployments',
+    href: '/play/devops-engineer/kubernetes/read/controllers-replicasets-deployments',
+  },
+  {
     label: 'Official Kubernetes concepts',
     href: 'https://kubernetes.io/docs/concepts/',
     external: true,
