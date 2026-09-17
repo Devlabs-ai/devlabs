@@ -1,0 +1,46 @@
+{
+  "id": "k8s-30-canary-the-notification-service",
+  "number": 230,
+  "finalized": true,
+  "title": "Canary the Notification Service",
+  "description": "**SITUATION:**\n\nA new notification template engine ships as `v1.1`. Product wants a **small slice** of traffic on the new build first — if error rates spike, roll it back without touching the stable majority. Classic pattern: keep stable replicas, add a smaller **canary** Deployment sharing the same Service selector.\n\nThis lab runs a **canary**: stable majority + smaller v1.1 Deployment sharing one Service. You are not doing a full blue-green flip yet — that is the next pattern.\n**YOUR TASK:**\n\n1. Create a **canary** Deployment with fewer replicas on image **v1.1**.\n2. Keep the stable Deployment on **v1.0**.\n3. Verify both Deployments are Ready and the Service has Endpoints from both tracks.\n\n**SPEC:**\n\n- Stable Deployment `notification-service`: keep **4** replicas, image `…:v1.0`, labels `app=notification-service`, `track=stable`\n- Canary Deployment name: `notification-service-canary`\n  - Replicas: **`1`**\n  - Image: `rithvikreddyalkanti/notification-service:v1.1`\n  - Labels: `app=notification-service`, `track=canary`\n  - Container port: **8080**\n- Service `notification-service` selector remains `app=notification-service` (includes both tracks)\n- Ready: stable **4/4**, canary **1/1**; Service Endpoints ≥ 5 addresses\n\n**CONSTRAINTS:**\n\n- Canary manifest: `notification-canary-l30.yaml`.\n- Do **not** replace all stable replicas with v1.1 in this lab.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "services"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Canary the Notification Service",
+    "brief": "Canary the Notification Service",
+    "solution": "# Solution — Canary the Notification Service\n\nKeep stable `notification-service` on v1.0 at **4** replicas (`track=stable`) and add canary Deployment `notification-service-canary` with **1** replica on v1.1 (`track=canary`). The shared Service selector `app=notification-service` covers both tracks.\n\nDocs: [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)\n\n## Solution YAML\n\nSave as `notification-canary-l30.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notification-service\nspec:\n  replicas: 4\n  selector:\n    matchLabels:\n      app: notification-service\n      track: stable\n  template:\n    metadata:\n      labels:\n        app: notification-service\n        track: stable\n    spec:\n      containers:\n        - name: notification-service\n          image: rithvikreddyalkanti/notification-service:v1.0\n          ports:\n            - containerPort: 8080\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notification-service-canary\nspec:\n  replicas: 1\n  selector:\n    matchLabels:\n      app: notification-service\n      track: canary\n  template:\n    metadata:\n      labels:\n        app: notification-service\n        track: canary\n    spec:\n      containers:\n        - name: notification-service\n          image: rithvikreddyalkanti/notification-service:v1.1\n          ports:\n            - containerPort: 8080\n```\n\n## Declarative\n\n```bash\nkubectl apply -f notification-canary-l30.yaml\nkubectl get deploy notification-service notification-service-canary\nkubectl get endpoints notification-service\nkubectl get pods -l app=notification-service -o wide\n```\n\nWait until stable is **4/4**, canary is **1/1**, and the Service has ≥ 5 endpoint addresses, then **Submit**.\n\n",
+    "idLabel": "30",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1100m",
+      "memory": "1280Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

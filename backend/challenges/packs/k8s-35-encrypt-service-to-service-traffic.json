@@ -1,0 +1,46 @@
+{
+  "id": "k8s-35-encrypt-service-to-service-traffic",
+  "number": 235,
+  "finalized": true,
+  "title": "Encrypt Service-to-Service Traffic",
+  "description": "**SITUATION:**\n\nSecurity wants payment calls encrypted **between Pods**, not only at the edge. TLS on Ingress helps browsers; it does not protect Order Processor → Payment Handler inside the cluster. A **service mesh** can add mutual TLS (each side proves who it is) without rewriting app code.\n\nThis lab turns on **mesh mTLS** so Order Processor → Payment Handler is encrypted in the cluster. Edge TLS alone is not enough; you are securing east-west traffic without rewriting app code.\n**YOUR TASK:**\n\n1. Enable mesh sidecar injection for the workloads that talk to each other (per platform instructions).\n2. Apply a mesh policy so **Order Processor → Payment Handler** requires **mutual TLS**.\n3. Verify Payment Handler still receives traffic from Order Processor (and plaintext from non-mesh clients is rejected if the platform supports that check).\n\n**SPEC:**\n\n- Workloads: `order-processor-deploy`, `payment-handler` (or their mesh-injected equivalents)\n- Peer authentication / mTLS mode: **STRICT** (or Linkerd equivalent “require mTLS”) for Payment Handler (and optionally the whole namespace)\n- Destination: Service `handler` on port **8000**\n- Success: mesh dashboards / `proxy` logs / platform check show mTLS; apps remain Ready\n\n**CONSTRAINTS:**\n\n- Manifests: `mesh-mtls-l35.yaml` (PeerAuthentication / DestinationRule / Linkerd `Server`+`ServerAuthorization` — match the installed mesh).\n- Do **not** terminate TLS only on Ingress and call that “mesh mTLS.”\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "services"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Encrypt Service-to-Service Traffic",
+    "brief": "Encrypt Service-to-Service Traffic",
+    "solution": "# Solution — Encrypt Service-to-Service Traffic\n\nStay in your lab namespace. Turn on mesh sidecar injection and require **STRICT** mTLS for Payment Handler (Order Processor → handler on port 8000).\n\nDocs: [Istio PeerAuthentication](https://istio.io/latest/docs/reference/config/security/peer_authentication/) · [DestinationRule](https://istio.io/latest/docs/reference/config/networking/destination-rule/)\n\n## Solution YAML\n\nSave as `mesh-mtls-l35.yaml` (Istio). Enable injection on the namespace first (`istio-injection=enabled` or platform equivalent).\n\n```yaml\napiVersion: security.istio.io/v1\nkind: PeerAuthentication\nmetadata:\n  name: payment-handler-strict\nspec:\n  selector:\n    matchLabels:\n      app: payment-handler\n  mtls:\n    mode: STRICT\n---\napiVersion: networking.istio.io/v1\nkind: DestinationRule\nmetadata:\n  name: payment-handler-mtls\nspec:\n  host: handler\n  trafficPolicy:\n    tls:\n      mode: ISTIO_MUTUAL\n```\n\nIf the platform uses Linkerd, use `Server` + `ServerAuthorization` requiring mTLS instead — match the installed mesh.\n\n## Declarative\n\n```bash\nkubectl label namespace \"$LEARNER_NS\" istio-injection=enabled --overwrite\nkubectl apply -f mesh-mtls-l35.yaml\nkubectl rollout restart deploy/order-processor-deploy deploy/payment-handler\nkubectl rollout status deploy/payment-handler\nkubectl get peerauthentication,destinationrule\n```\n\nWait until apps are Ready and the STRICT PeerAuthentication exists, then **Submit**. Do not call Ingress-only TLS “mesh mTLS.”\n",
+    "idLabel": "35",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1500m",
+      "memory": "1792Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

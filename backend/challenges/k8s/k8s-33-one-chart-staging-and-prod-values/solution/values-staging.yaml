@@ -1,0 +1,4 @@
+replicaCount: 1
+image:
+  repository: rithvikreddyalkanti/notification-service
+  tag: "v1.1-rc"

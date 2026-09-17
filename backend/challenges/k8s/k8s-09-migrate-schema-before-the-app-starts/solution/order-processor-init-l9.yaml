@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-processor-deploy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: order-processor
+      tier: app
+  template:
+    metadata:
+      labels:
+        app: order-processor
+        tier: app
+    spec:
+      initContainers:
+        - name: schema-migrate
+          image: postgres:16-alpine
+          env:
+            - name: PGPASSWORD
+              value: quickbyte
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              until pg_isready -h orders-db -U postgres -d orders; do
+                echo "waiting for orders-db…"
+                sleep 2
+              done
+              psql -h orders-db -U postgres -d orders -v ON_ERROR_STOP=1 -c \
+                "CREATE TABLE IF NOT EXISTS orders (
+                   order_id TEXT PRIMARY KEY,
+                   customer_id TEXT,
+                   total NUMERIC,
+                   status TEXT
+                 );"
+              psql -h orders-db -U postgres -d orders -v ON_ERROR_STOP=1 -c \
+                "CREATE TABLE IF NOT EXISTS order_items (
+                   id SERIAL PRIMARY KEY,
+                   order_id TEXT,
+                   item TEXT
+                 );"
+              echo "Migrations OK"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+      containers:
+        - name: order-processor
+          image: rithvikreddyalkanti/order-processor:v1.2
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"

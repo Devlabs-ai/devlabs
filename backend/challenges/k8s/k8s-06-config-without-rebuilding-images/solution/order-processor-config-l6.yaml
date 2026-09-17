@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-processor-config
+data:
+  MIN_ORDER_VALUE: "50"
+  MAX_ITEMS_PER_ORDER: "20"
+  LOG_LEVEL: "INFO"

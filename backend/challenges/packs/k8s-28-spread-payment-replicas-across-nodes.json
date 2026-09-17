@@ -1,0 +1,46 @@
+{
+  "id": "k8s-28-spread-payment-replicas-across-nodes",
+  "number": 228,
+  "finalized": true,
+  "title": "Spread Payment Replicas Across Nodes",
+  "description": "**SITUATION:**\n\nLast outage: all three Payment Handler copies landed on one node. That node rebooted — payments died cluster-wide. Finance wants replicas **spread out** so one machine failure cannot take every payment Pod with it.\n\nThis lab spreads Payment Handler replicas with **topology constraints / anti-affinity**. One node failure must not take every payment Pod at once.\n**YOUR TASK:**\n\n1. **Update** `payment-handler` with **pod anti-affinity** so replicas prefer different nodes.\n2. Verify **3** Pods are Ready and not all on the same node (when capacity allows).\n\n**SPEC:**\n\n- Deployment name: `payment-handler` (do not rename)\n- Replicas: **`3`**\n- `affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution`:\n  - weight: `100`\n  - topologyKey: `kubernetes.io/hostname`\n  - labelSelector: `app=payment-handler`\n- Ready: **3/3** Pods Ready\n\n**CONSTRAINTS:**\n\n- Manifest: `payment-antiaffinity-l28.yaml`.\n- Use **podAntiAffinity** (preferred), not required — avoid unschedulable Pods on tiny clusters.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "replicasets"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Spread Payment Replicas Across Nodes",
+    "brief": "Spread Payment Replicas Across Nodes",
+    "solution": "# Solution — Spread Payment Replicas Across Nodes\n\nScale `payment-handler` to **3** replicas and add preferred pod anti-affinity so replicas prefer different nodes.\n\nDocs: [Inter-pod anti-affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity)\n\n## Solution YAML\n\nSave as `payment-antiaffinity-l28.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payment-handler\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: payment-handler\n  template:\n    metadata:\n      labels:\n        app: payment-handler\n    spec:\n      affinity:\n        podAntiAffinity:\n          preferredDuringSchedulingIgnoredDuringExecution:\n            - weight: 100\n              podAffinityTerm:\n                topologyKey: kubernetes.io/hostname\n                labelSelector:\n                  matchLabels:\n                    app: payment-handler\n      containers:\n        - name: payment-handler\n          image: rithvikreddyalkanti/payment-handler:v1.0\n          ports:\n            - containerPort: 8000\n```\n\n## Declarative\n\n```bash\nkubectl apply -f payment-antiaffinity-l28.yaml\nkubectl get deploy payment-handler\nkubectl get pods -l app=payment-handler -o wide\n```\n\nWait until **3/3** Pods are Ready, then **Submit**. Prefer soft anti-affinity so tiny clusters stay schedulable.\n",
+    "idLabel": "28",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "900m",
+      "memory": "1024Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

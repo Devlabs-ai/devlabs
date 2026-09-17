@@ -507,11 +507,12 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
 
               <section className="play-problems-table-wrap" aria-label={`${panel.label} track`}>
                 <div className="play-problems-table-head">
-                  <span>Status</span>
+                  {/* Icon column (blog / play / completed) — no header label */}
+                  <span className="play-problems-col-icon" aria-hidden="true" />
                   <span>ID</span>
                   <span>Title</span>
-                  <span>Kind</span>
-                  <span>Level</span>
+                  <span className="play-problems-col-kind">Kind</span>
+                  <span className="play-problems-col-level">Level</span>
                 </div>
                 {filteredRows.length === 0 ? (
                   <div className="play-problems-empty">
@@ -542,7 +543,7 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                                   Blog
                                 </span>
                               </span>
-                              <span className="play-problem-level-empty" aria-label="No level">
+                              <span className="play-problem-level play-problem-level-empty" aria-label="No level">
                                 —
                               </span>
                             </button>
@@ -580,7 +581,9 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                             <span className="play-problem-topics">
                               <span className="play-topic-pill play-topic-pill--lab">Lab</span>
                             </span>
-                            <span className={`pill ${difficultyClass(challenge.difficulty)}`}>
+                            <span
+                              className={`play-problem-level pill ${difficultyClass(challenge.difficulty)}`}
+                            >
                               {challenge.difficulty || 'L1'}
                             </span>
                           </button>

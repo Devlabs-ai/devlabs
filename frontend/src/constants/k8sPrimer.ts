@@ -106,12 +106,48 @@ export const K8S_PRIMER_SECTIONS: K8sPrimerSection[] = [
 
 export const K8S_PRIMER_NEXT_LINKS: Array<{ label: string; href: string; external?: boolean }> = [
   {
-    label: 'Reading: Containers, runtimes, and Pods',
+    label: 'Reading: Containers, Runtimes, and Pods',
     href: '/play/devops-engineer/kubernetes/read/containers-runtimes-pods',
   },
   {
-    label: 'Reading: Controllers, ReplicaSets, and Deployments',
+    label: 'Reading: ReplicaSets and Deployments',
     href: '/play/devops-engineer/kubernetes/read/controllers-replicasets-deployments',
+  },
+  {
+    label: 'Reading: Services, DNS, and Endpoints',
+    href: '/play/devops-engineer/kubernetes/read/services',
+  },
+  {
+    label: 'Reading: ConfigMaps and Secrets',
+    href: '/play/devops-engineer/kubernetes/read/configmaps-secrets',
+  },
+  {
+    label: 'Reading: Multi-Container Pods',
+    href: '/play/devops-engineer/kubernetes/read/multi-container-pods',
+  },
+  {
+    label: 'Reading: Pod Networking and NetworkPolicies',
+    href: '/play/devops-engineer/kubernetes/read/pod-networking-and-policies',
+  },
+  {
+    label: 'Reading: Requests, Limits, and Quotas',
+    href: '/play/devops-engineer/kubernetes/read/requests-limits-quotas',
+  },
+  {
+    label: 'Reading: Probes: Startup, Readiness, and Liveness',
+    href: '/play/devops-engineer/kubernetes/read/probes-liveness-readiness-startup',
+  },
+  {
+    label: 'Reading: SecurityContext',
+    href: '/play/devops-engineer/kubernetes/read/security-context',
+  },
+  {
+    label: 'Reading: ServiceAccounts, Roles, and RoleBindings',
+    href: '/play/devops-engineer/kubernetes/read/serviceaccounts-rbac',
+  },
+  {
+    label: 'Reading: Volumes, PVs, PVCs, and StorageClasses',
+    href: '/play/devops-engineer/kubernetes/read/volumes-pvs-pvcs-storageclasses',
   },
   {
     label: 'Official Kubernetes concepts',

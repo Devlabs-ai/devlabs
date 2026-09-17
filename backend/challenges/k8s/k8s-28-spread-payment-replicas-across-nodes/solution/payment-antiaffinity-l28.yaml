@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-handler
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: payment-handler
+  template:
+    metadata:
+      labels:
+        app: payment-handler
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: payment-handler
+      containers:
+        - name: payment-handler
+          image: rithvikreddyalkanti/payment-handler:v1.0
+          ports:
+            - containerPort: 8000

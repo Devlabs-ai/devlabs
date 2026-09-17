@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-processor-deploy
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: order-processor
+      version: v1.2
+  template:
+    metadata:
+      labels:
+        app: order-processor
+        version: v1.2
+    spec:
+      containers:
+        - name: order-processor
+          image: rithvikreddyalkanti/order-processor:v1.2
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+          envFrom:
+            - configMapRef:
+                name: order-processor-config

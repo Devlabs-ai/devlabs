@@ -1,0 +1,46 @@
+{
+  "id": "k8s-38-right-size-payment-handler-resources",
+  "number": 238,
+  "finalized": true,
+  "title": "Right-Size Payment Handler Resources",
+  "description": "**SITUATION:**\n\nPayment Handler was given tiny CPU/memory guesses. Horizontal scaling adds more Pods; it does not fix **each Pod being too small**. Vertical autoscaling recommends (or applies) better requests/limits from observed usage.\n\nThis lab focuses on **right-sizing** Payment Handler requests/limits (vertical), not adding more replicas. HPA adds copies; undersized Pods stay undersized until you fix resources.\n**YOUR TASK:**\n\n1. Create a **VerticalPodAutoscaler** for Payment Handler in **recommendation** mode (safe for labs).\n2. Verify the VPA object exists and produces recommendations (or updates resources if platform uses auto mode — follow SPEC).\n\n**SPEC:**\n\n- VPA name: `payment-handler-vpa`\n- Target: Deployment `payment-handler`\n- `updateMode`: **`Off`** (recommend only — do not auto-evict in this lab unless platform says otherwise)\n- Success: `kubectl describe vpa payment-handler-vpa` (or platform UI) shows CPU/memory recommendations\n\n**CONSTRAINTS:**\n\n- Manifest: `payment-handler-vpa-l38.yaml`.\n- Do **not** run HPA CPU scaling and VPA auto-update on the same container metrics without platform guidance — this lab is VPA-only recommend mode.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "autoscaling"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Right-Size Payment Handler Resources",
+    "brief": "Right-Size Payment Handler Resources",
+    "solution": "# Solution — Right-Size Payment Handler Resources\n\nStay in your lab namespace. Create a VerticalPodAutoscaler for Payment Handler in **Off** (recommend-only) mode.\n\nDocs: [Vertical Pod Autoscaler](https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler)\n\n## Solution YAML\n\nSave as `payment-handler-vpa-l38.yaml`:\n\n```yaml\napiVersion: autoscaling.k8s.io/v1\nkind: VerticalPodAutoscaler\nmetadata:\n  name: payment-handler-vpa\nspec:\n  targetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: payment-handler\n  updatePolicy:\n    updateMode: \"Off\"\n```\n\n## Declarative\n\n```bash\nkubectl apply -f payment-handler-vpa-l38.yaml\nkubectl describe vpa payment-handler-vpa\n```\n\nConfirm `updateMode: Off` and that recommendations appear when the VPA recommender has samples, then **Submit**. Do not combine VPA auto-update with HPA on the same metrics in this lab.\n",
+    "idLabel": "38",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "800m",
+      "memory": "896Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

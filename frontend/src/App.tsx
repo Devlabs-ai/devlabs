@@ -142,7 +142,7 @@ export default function App(): React.JSX.Element {
   const handleSelectChallenge = async (challenge: ChallengePublic | ChallengeFull): Promise<void> => {
     setStartError(null);
     setActiveChallenge(challenge);
-    // K8s: open Theory immediately (no full-page loader). Other runtimes keep the spinner.
+    // K8s: open the lab UI immediately (no full-page loader). Other runtimes keep the spinner.
     if (!isKubernetesChallenge(challenge)) {
       setPlayState('loading');
     }

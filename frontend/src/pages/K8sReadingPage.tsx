@@ -3,9 +3,12 @@ import { Link, Navigate, useParams } from 'react-router-dom';
 import { K8S_LABS_PATH, K8S_PRIMER_PATH } from '../constants/k8sPrimer';
 import {
   getK8sReading,
+  K8S_BLOG_STAMP_SRC,
+  type K8sReadingCodeBlock,
   type K8sReadingSection,
   type K8sReadingTable,
 } from '../constants/k8sReadings';
+import ReadOnlyCodePane from '../components/ReadOnlyCodePane';
 
 /** Light inline **bold** and `code` for reading copy. */
 function RichText({ text }: { text: string }): JSX.Element {
@@ -22,6 +25,38 @@ function RichText({ text }: { text: string }): JSX.Element {
         return <React.Fragment key={i}>{part}</React.Fragment>;
       })}
     </>
+  );
+}
+
+function readingCodePath(language: string): string {
+  const lang = (language || 'plaintext').toLowerCase();
+  if (lang === 'yaml' || lang === 'yml') return 'snippet.yaml';
+  if (lang === 'shell' || lang === 'bash' || lang === 'sh') return 'snippet.sh';
+  if (lang === 'json') return 'snippet.json';
+  if (lang === 'text' || lang === 'plaintext') return 'snippet.txt';
+  return `snippet.${lang}`;
+}
+
+function readingCodeLanguage(language: string): string {
+  const lang = (language || 'plaintext').toLowerCase();
+  if (lang === 'yml') return 'yaml';
+  if (lang === 'text' || lang === 'plaintext') return 'plaintext';
+  if (lang === 'sh' || lang === 'bash') return 'shell';
+  return lang;
+}
+
+/** Monaco-highlighted fence — same look as lab Solution / MarkdownProse. */
+function ReadingCodeBlock({ block }: { block: K8sReadingCodeBlock }): JSX.Element {
+  const language = readingCodeLanguage(block.language);
+  return (
+    <div className="spark-primer-code-block markdown-code-block markdown-code-block--no-toolbar">
+      <ReadOnlyCodePane
+        path={readingCodePath(block.language)}
+        content={block.code.replace(/\n+$/g, '')}
+        language={language}
+        className="markdown-code-pane"
+      />
+    </div>
   );
 }
 
@@ -59,6 +94,14 @@ function ReadingSection({ section }: { section: K8sReadingSection }): JSX.Elemen
     return null;
   }
 
+  const figureClass = [
+    'spark-primer-figure',
+    section.figure?.compact ? 'spark-primer-figure--compact' : '',
+    section.figure?.flush ? 'spark-primer-figure--flush' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
     <section id={section.id} className="spark-primer-section">
       {section.title ? (
@@ -85,12 +128,10 @@ function ReadingSection({ section }: { section: K8sReadingSection }): JSX.Elemen
         </blockquote>
       ) : null}
       {section.codes?.map((block) => (
-        <pre key={block.code.slice(0, 40)} className="spark-primer-code">
-          <code>{block.code}</code>
-        </pre>
+        <ReadingCodeBlock key={block.code.slice(0, 40)} block={block} />
       ))}
       {section.figure ? (
-        <figure className="spark-primer-figure">
+        <figure className={figureClass}>
           <img src={section.figure.image} alt={section.figure.imageAlt} loading="lazy" />
           <figcaption>{section.figure.caption}</figcaption>
         </figure>
@@ -100,11 +141,7 @@ function ReadingSection({ section }: { section: K8sReadingSection }): JSX.Elemen
           <RichText text={paragraph} />
         </p>
       ))}
-      {section.code ? (
-        <pre className="spark-primer-code">
-          <code>{section.code.code}</code>
-        </pre>
-      ) : null}
+      {section.code ? <ReadingCodeBlock block={section.code} /> : null}
       {section.tableAfter ? <ReadingTable table={section.tableAfter} /> : null}
       {section.callout ? (
         <aside
@@ -135,7 +172,19 @@ export default function K8sReadingPage(): JSX.Element {
 
   return (
     <div className="app-page spark-primer-page">
-      <article className="spark-primer-notebook">
+      <article
+        className={`spark-primer-notebook${reading.showBlogStamp ? ' spark-primer-notebook--stamped' : ''}`}
+      >
+        {reading.showBlogStamp ? (
+          <img
+            className="spark-primer-blog-stamp"
+            src={K8S_BLOG_STAMP_SRC}
+            alt="The Devlabs Blog"
+            width={88}
+            height={88}
+            decoding="async"
+          />
+        ) : null}
         <header className="spark-primer-header">
           <p className="spark-primer-crumb">
             <Link to="/play">Tracks</Link>

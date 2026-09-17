@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: quickbyte-edge
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: qa.quickbyte.lab
+      http:
+        paths:
+          - path: /orders
+            pathType: Prefix
+            backend:
+              service:
+                name: order-processor-svc
+                port:
+                  number: 8000
+          - path: /notify
+            pathType: Prefix
+            backend:
+              service:
+                name: notification-service
+                port:
+                  number: 8080

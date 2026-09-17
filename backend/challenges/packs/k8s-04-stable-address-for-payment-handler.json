@@ -1,0 +1,46 @@
+{
+  "id": "k8s-04-stable-address-for-payment-handler",
+  "number": 204,
+  "finalized": true,
+  "title": "Stable Address for Payment Handler",
+  "description": "**SITUATION:**\n\nQuickByte has moved the Payment Handler into Kubernetes as a Deployment. When an order reaches Order Processor, it responds with *Order Created* and then calls Payment Handler. Payment Handler Pods get **ephemeral IPs** that change on every restart. Order Processor still has a Pod IP hard-coded:\n\n`PAYMENT_HANDLER_URL=http://10.244.2.15:8000/pay`\n\nA Pod restarts → new IP `10.244.3.42` → Order Processor still dials `10.244.2.15` → **timeout**. All payments fail. The order flow needs a **stable internal address** for Payment Handler.\n\nThis lab is only about giving Payment Handler a **stable ClusterIP name** inside the cluster. You are not exposing anything outside the cluster yet — that is the next lab.\n**YOUR TASK:**\n\n1. Create a **ClusterIP Service** that targets the Payment Handler Pods.\n2. Verify the Service has **ready Endpoints** — a Service alone is not enough. Kubernetes fills an Endpoints object with the Pod IPs that match your selector and are Ready. If the selector is wrong or Pods are not Ready, Endpoints stay empty and traffic to `handler` blackholes. After you apply the Service, run `kubectl get endpoints handler` (or `kubectl get ep handler`) and confirm at least one address is listed before you Submit.\n\n**SPEC:**\n\n- Service name: `handler`\n- Type: **ClusterIP** (internal only — no external access)\n- Selector: `app=payment-handler`\n- Port: `8000`\n- Target port: `8000`\n- Endpoints: at least one ready address\n\n**CONSTRAINTS:**\n\n- Service must be defined in `payment-handler-svc-l4.yaml`.\n- Selector labels must match the Payment Handler Pods already running in your namespace.\n- Do **not** expose the Service externally yet.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l0",
+    "services"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Stable Address for Payment Handler",
+    "brief": "Stable Address for Payment Handler",
+    "solution": "# Solution — Stable Address for Payment Handler\n\nStay in your lab namespace. Payment Handler Pods are already running with label `app=payment-handler`. Create ClusterIP Service `handler` so Order Processor can dial a stable DNS name instead of a Pod IP.\n\nDocs: [Services](https://kubernetes.io/docs/concepts/services-networking/service/)\n\n## Solution YAML\n\nSave as `payment-handler-svc-l4.yaml` (Scratch pad or a file in your lab home):\n\n```yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: handler\nspec:\n  type: ClusterIP\n  selector:\n    app: payment-handler\n  ports:\n    - port: 8000\n      targetPort: 8000\n```\n\n## Declarative\n\nApply the Service, then confirm Endpoints:\n\n```bash\nkubectl apply -f payment-handler-svc-l4.yaml\nkubectl get svc handler\nkubectl get endpoints handler\n```\n\nWait until Endpoints show at least one ready address, then **Submit**.\n\nDo not expose the Service externally (no NodePort / LoadBalancer yet). Work only in your lab namespace (not `default`).\n",
+    "idLabel": "4",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "800m",
+      "memory": "896Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

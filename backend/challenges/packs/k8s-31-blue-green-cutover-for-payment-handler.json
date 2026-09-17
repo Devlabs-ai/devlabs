@@ -1,0 +1,46 @@
+{
+  "id": "k8s-31-blue-green-cutover-for-payment-handler",
+  "number": 231,
+  "finalized": true,
+  "title": "Blue-Green Cutover for Payment Handler",
+  "description": "**SITUATION:**\n\nFinance wants a **full** cutover to Payment Handler `v1.1` with an instant rollback path: bring up a complete **green** stack beside blue, test it privately, then flip the Service to green in one change. Unlike canary, users should not see a mixed version blend after cutover.\n\nThis lab is **blue-green**: bring up a full green stack, then flip the Service selector in one cut. Unlike canary, users should not see a mixed version blend after the switch.\n**YOUR TASK:**\n\n1. Create the **green** Deployment on image **v1.1** (same replica count as blue).\n2. When green is Ready, **switch** Service `payment-handler` to select `color=green`.\n3. Leave blue running (rollback safety) but receiving no Service traffic.\n\n**SPEC:**\n\n- Green Deployment name: `payment-handler-green`\n  - Replicas: **`3`**\n  - Image: `rithvikreddyalkanti/payment-handler:v1.1`\n  - Labels: `app=payment-handler`, `color=green`\n  - Container port: **8000**\n- Service `payment-handler` selector after cutover: `app=payment-handler`, `color=green`\n- Blue Deployment remains Ready but not selected by the Service\n- Ready: green **3/3**; Service Endpoints point only at green Pods\n\n**CONSTRAINTS:**\n\n- Manifests: `payment-handler-green-l31.yaml` + updated Service in `payment-handler-svc-l31.yaml`.\n- Do **not** delete blue as part of the happy path.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "rollouts"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Blue-Green Cutover for Payment Handler",
+    "brief": "Blue-Green Cutover for Payment Handler",
+    "solution": "# Solution — Blue-Green Cutover for Payment Handler\n\nStay in your lab namespace. Bring up a full **green** Payment Handler stack on `v1.1`, then flip Service `payment-handler` to `color=green`. Leave blue running for rollback.\n\nDocs: [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) · [Services](https://kubernetes.io/docs/concepts/services-networking/service/)\n\n## Solution YAML\n\nSave as `payment-handler-green-l31.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payment-handler-green\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: payment-handler\n      color: green\n  template:\n    metadata:\n      labels:\n        app: payment-handler\n        color: green\n    spec:\n      containers:\n        - name: payment-handler\n          image: rithvikreddyalkanti/payment-handler:v1.1\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n```\n\nSave as `payment-handler-svc-l31.yaml` (cutover — selector points at green):\n\n```yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: payment-handler\nspec:\n  selector:\n    app: payment-handler\n    color: green\n  ports:\n    - port: 8000\n      targetPort: 8000\n```\n\n## Declarative\n\n```bash\nkubectl apply -f payment-handler-green-l31.yaml\nkubectl rollout status deploy/payment-handler-green\nkubectl apply -f payment-handler-svc-l31.yaml\nkubectl get endpoints payment-handler\nkubectl get pods -l app=payment-handler -L color\n```\n\nWait until green is **3/3** Ready and endpoints list only green Pods, then **Submit**. Do not delete blue.\n",
+    "idLabel": "31",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1200m",
+      "memory": "1408Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-processor-deploy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-processor
+      version: v1.1
+  template:
+    metadata:
+      labels:
+        app: order-processor
+        version: v1.1
+    spec:
+      containers:
+        - name: order-processor
+          image: rithvikreddyalkanti/order-processor:v1.1
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: archive
+              mountPath: /data/archive
+      volumes:
+        - name: archive
+          persistentVolumeClaim:
+            claimName: order-archive-pvc

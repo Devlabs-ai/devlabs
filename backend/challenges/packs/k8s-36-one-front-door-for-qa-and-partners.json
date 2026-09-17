@@ -1,0 +1,46 @@
+{
+  "id": "k8s-36-one-front-door-for-qa-and-partners",
+  "number": 236,
+  "finalized": true,
+  "title": "One Front Door for QA and Partners",
+  "description": "**SITUATION:**\n\nQA and partners should not memorize NodePorts for every app. They want **one hostname** where:\n- `/orders` goes to Order Processor  \n- `/notify` goes to Notification Service  \n\nThat edge router in Kubernetes is an **Ingress**.\n\nThis lab adds an **Ingress** as one front door (`/orders`, `/notify`) for QA and partners. Services can stay ClusterIP — Ingress is the HTTP router at the edge.\n**YOUR TASK:**\n\n1. Create an **Ingress** that routes the paths below to the right Services.\n2. Verify requests hit the correct backends (controller address / platform URL).\n\n**SPEC:**\n\n- Ingress name: `quickbyte-edge`\n- Ingress class: use platform default (e.g. `nginx` or `alb`) — set `ingressClassName` if required\n- Rules (host optional — use `qa.quickbyte.lab` if the platform provides DNS):\n  - path `/orders` (Prefix) → Service `order-processor-svc` port **8000**\n  - path `/notify` (Prefix) → Service `notification-service` port **8080**\n- Ready: Ingress has an address (or platform-documented equivalent); paths reach backends\n\n**CONSTRAINTS:**\n\n- Manifest: `quickbyte-ingress-l36.yaml`.\n- Do **not** expose each app with its own LoadBalancer Service for this lab.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "ingress"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "One Front Door for QA and Partners",
+    "brief": "One Front Door for QA and Partners",
+    "solution": "# Solution — One Front Door for QA and Partners\n\nStay in your lab namespace. Create Ingress `quickbyte-edge` so `/orders` and `/notify` route to the right ClusterIP Services.\n\nDocs: [Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/)\n\n## Solution YAML\n\nSave as `quickbyte-ingress-l36.yaml`:\n\n```yaml\napiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: quickbyte-edge\nspec:\n  ingressClassName: nginx\n  rules:\n    - host: qa.quickbyte.lab\n      http:\n        paths:\n          - path: /orders\n            pathType: Prefix\n            backend:\n              service:\n                name: order-processor-svc\n                port:\n                  number: 8000\n          - path: /notify\n            pathType: Prefix\n            backend:\n              service:\n                name: notification-service\n                port:\n                  number: 8080\n```\n\nUse the platform Ingress class if not `nginx`. Host is optional when the platform does not provide DNS.\n\n## Declarative\n\n```bash\nkubectl apply -f quickbyte-ingress-l36.yaml\nkubectl get ingress quickbyte-edge\nkubectl describe ingress quickbyte-edge\n```\n\nWait until paths are listed (and an address if the controller assigns one), then **Submit**. Do not expose each app with its own LoadBalancer Service for this lab.\n",
+    "idLabel": "36",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1000m",
+      "memory": "1152Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

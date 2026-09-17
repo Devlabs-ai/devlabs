@@ -1,0 +1,56 @@
+{
+  "id": "k8s-20-stateful-orders-database",
+  "number": 220,
+  "finalized": true,
+  "title": "Stateful Orders Database",
+  "description": "**SITUATION:**\n\nQuickByte needs a small database for order history. Unlike Order Processor (any healthy copy can take the next request), database copies are **not interchangeable**:\n\n- each copy needs a **stable name** (so ops and peers always know which is which)\n- each copy needs **its own disk** (so data does not get overwritten by a random replacement Pod)\n\nA normal Deployment gives Pods throwaway names and is a poor fit. You need the Kubernetes workload type built for this shape.\n\nThis lab introduces a **StatefulSet** for orders-db: stable Pod names and per-replica disks. Treat this differently from Order Processor Deployments — database copies are not interchangeable.\n**YOUR TASK:**\n\n1. Create a **StatefulSet** named `orders-db` running Postgres with **2** copies.\n2. Verify both copies are **Ready** and each got its **own** disk automatically.\n\n**SPEC:**\n\n- StatefulSet name: `orders-db`\n- Replicas: `2`\n- `spec.serviceName`: `orders-db` (name used for stable DNS — you wire the matching Service in the next challenge)\n- Pod labels: `app=orders-db`, `tier=data`\n- Container name: `postgres`\n- Image: `postgres:16-alpine`\n- `containerPort`: `5432`\n- Env:\n  - `POSTGRES_PASSWORD`: `quickbyte-lab`\n  - `POSTGRES_DB`: `orders`\n- Resource requests: `100m` CPU, `256Mi` memory\n- `volumeClaimTemplates`:\n  - name: `data`\n  - accessModes: `[\"ReadWriteOnce\"]`\n  - storage: `1Gi`\n  - `storageClassName`: leave cluster default unless your lab docs say otherwise\n- Mount `data` at `/var/lib/postgresql/data`\n- Ready: **2/2** replicas Ready\n\n**CONSTRAINTS:**\n\n- Manifest: `orders-db-sts-l20.yaml`.\n- Use a **StatefulSet**, not a Deployment.\n- Do **not** skip `serviceName: orders-db`.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "statefulsets"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Stateful Orders Database",
+    "brief": "Stateful Orders Database",
+    "solution": "# Solution — Stateful Orders Database\n\nCreate StatefulSet `orders-db` with 2 Postgres replicas, stable identity via `serviceName: orders-db`, and per-replica disks from `volumeClaimTemplates`.\n\nDocs: [StatefulSets](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/)\n\n## Solution YAML\n\nSave as `orders-db-sts-l20.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: orders-db\nspec:\n  serviceName: orders-db\n  replicas: 2\n  selector:\n    matchLabels:\n      app: orders-db\n      tier: data\n  template:\n    metadata:\n      labels:\n        app: orders-db\n        tier: data\n    spec:\n      containers:\n        - name: postgres\n          image: postgres:16-alpine\n          ports:\n            - containerPort: 5432\n          env:\n            - name: POSTGRES_PASSWORD\n              value: quickbyte-lab\n            - name: POSTGRES_DB\n              value: orders\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"256Mi\"\n          volumeMounts:\n            - name: data\n              mountPath: /var/lib/postgresql/data\n  volumeClaimTemplates:\n    - metadata:\n        name: data\n      spec:\n        accessModes: [\"ReadWriteOnce\"]\n        resources:\n          requests:\n            storage: 1Gi\n```\n\n## Declarative\n\n```bash\nkubectl apply -f orders-db-sts-l20.yaml\nkubectl get sts orders-db\nkubectl get pods -l app=orders-db -o wide\nkubectl get pvc -l app=orders-db\n```\n\nWait until **2/2** replicas are Ready, then **Submit**. Use a StatefulSet (not a Deployment).\n",
+    "idLabel": "20",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "700m",
+      "memory": "1024Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    },
+    "limitRange": {
+      "defaultRequest": {
+        "cpu": "25m",
+        "memory": "32Mi"
+      },
+      "default": {
+        "cpu": "100m",
+        "memory": "256Mi"
+      }
+    }
+  }
+}

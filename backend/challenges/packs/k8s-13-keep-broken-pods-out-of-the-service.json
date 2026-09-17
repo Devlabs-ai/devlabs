@@ -1,0 +1,46 @@
+{
+  "id": "k8s-13-keep-broken-pods-out-of-the-service",
+  "number": 213,
+  "finalized": true,
+  "title": "Keep Broken Pods Out of the Service",
+  "description": "**SITUATION:**\n\nAfter a deploy, Pods became Running before the Flask app finished binding port 8000. The Service briefly sent traffic to half-ready Pods → 502s for QA. Liveness restarts dead processes; **readiness** decides whether Endpoints include the Pod.\n\nThis lab adds a **readiness probe** so half-booted Pods stay out of Service Endpoints. Liveness restarts dead processes; readiness answers “safe for traffic right now?”\n**YOUR TASK:**\n\n1. **Update** the Deployment to add an HTTP **readiness probe** on `/health`.\n2. Verify Pods are Ready and `order-processor-svc` has Endpoints only for ready Pods.\n\n**SPEC:**\n\n- Deployment name: `order-processor-deploy` (do not rename)\n- Replicas: keep **`2`**\n- Readiness probe on container `order-processor`:\n  - `httpGet.path`: `/health`\n  - `httpGet.port`: `8000`\n  - `initialDelaySeconds`: `5`\n  - `periodSeconds`: `5`\n  - `failureThreshold`: `3`\n- Ready: **2/2** Pods Ready; Service has ready Endpoints\n\n**CONSTRAINTS:**\n\n- Capture the updated Deployment in `order-processor-readiness-l13.yaml` and apply it.\n- Use an **HTTP** readiness probe.\n- Do **not** remove the Service — grade expects Endpoints via readiness.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l0",
+    "pods"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Keep Broken Pods Out of the Service",
+    "brief": "Keep Broken Pods Out of the Service",
+    "solution": "# Solution — Keep Broken Pods Out of the Service\n\nStay in your lab namespace. Update Deployment `order-processor-deploy` with an HTTP **readiness** probe on `/health` so half-booted Pods stay out of Service Endpoints.\n\nDocs: [Readiness probe](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)\n\n## Solution YAML\n\nSave as `order-processor-readiness-l13.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: order-processor\n  template:\n    metadata:\n      labels:\n        app: order-processor\n    spec:\n      containers:\n        - name: order-processor\n          image: rithvikreddyalkanti/order-processor:v1.2\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n          readinessProbe:\n            httpGet:\n              path: /health\n              port: 8000\n            initialDelaySeconds: 5\n            periodSeconds: 5\n            failureThreshold: 3\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-processor-readiness-l13.yaml\nkubectl get deploy order-processor-deploy\nkubectl get pods -l app=order-processor\nkubectl get endpoints order-processor-svc\n```\n\nWait until **2** Pods are Ready and `order-processor-svc` has Endpoints, then **Submit**.\n\nDo not remove the Service. Work only in your lab namespace (not `default`).\n",
+    "idLabel": "13",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "800m",
+      "memory": "896Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "id": "k8s-12-restart-dead-order-processor-pods",
+  "number": 212,
+  "finalized": true,
+  "title": "Restart Dead Order Processor Pods",
+  "description": "**SITUATION:**\n\nOps caught Pods stuck in a **zombie** state: the process is still **Running**, but `GET /health` **hangs** (deadlocked handler). `kubectl get pods` looks fine until someone deletes the Pod by hand.\n\nThis lab uses image **`zombie-order-processor:1.0`** for that hang. Prove it:\n\n```bash\nPOD=$(kubectl get pod -l app=order-processor -o jsonpath='{.items[0].metadata.name}')\nkubectl exec -it \"$POD\" -c order-processor -- \\\n  python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\"\n```\n\nThat call should **time out**. Kubernetes will only restart the container if a **liveness probe** fails.\n\nThis lab adds a **liveness probe** so Kubernetes restarts a hung Order Processor container automatically. You are not shaping traffic yet — readiness (who receives Service traffic) is the next lesson.\n**YOUR TASK:**\n\n1. **Update** the Deployment to add an HTTP **liveness probe** on `/health` (keep image `zombie-order-processor:1.0` and leave the rest of the seeded pod template alone).\n2. Wait for the probe to kill the hung container; confirm **RESTARTS ≥ 1** and Pods stay **Ready**.\n3. Re-run the `/health` check from Situation — after a restart it should **return 200**, not time out. (Timeout is expected only on the first incarnation, before liveness has fired.)\n\n**SPEC:**\n\n- Deployment name: `order-processor-deploy` (do not rename)\n- Replicas: keep **`2`**\n- Image: keep `rithvikreddyalkanti/zombie-order-processor:1.0`\n- Liveness probe on container `order-processor`:\n  - `httpGet.path`: `/health`\n  - `httpGet.port`: `8000`\n  - `initialDelaySeconds`: `10`\n  - `periodSeconds`: `10`\n  - `failureThreshold`: `3`\n- Ready: **2/2** Pods Ready, and at least one Pod shows **RESTARTS ≥ 1**\n\n**CONSTRAINTS:**\n\n- Capture the updated Deployment in `order-processor-liveness-l12.yaml` and apply it.\n- Use an **HTTP** liveness probe (not only `tcpSocket` / `exec` for this lab).\n- Do **not** switch to `order-processor:v1.2`.\n- Do **not** remove other fields already present on the seeded pod template (only **add** the liveness probe).\n- Do **not** confuse this with readiness — traffic routing is the next challenge.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l0",
+    "pods"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Restart Dead Order Processor Pods",
+    "brief": "Restart Dead Order Processor Pods",
+    "solution": "# Solution — Restart Dead Order Processor Pods\n\nStay in your lab namespace. PRE RUN uses image **`zombie-order-processor:1.0`**: the container is Running, but `GET /health` **hangs** until Kubernetes restarts it. Add an HTTP **liveness** probe on `/health`. Leave the rest of the seeded pod template as-is (including any mounts already present — lab plumbing, not part of this lesson).\n\nDocs: [Liveness probe](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)\n\n## Optional: see the hang before you fix it\n\n```bash\nPOD=$(kubectl get pod -l app=order-processor -o jsonpath='{.items[0].metadata.name}')\nkubectl exec -it \"$POD\" -c order-processor -- \\\n  python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\"\n```\n\n## Solution YAML\n\nSave as `order-processor-liveness-l12.yaml` (full Deployment so apply replaces cleanly — keep seeded mounts):\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: order-processor\n  template:\n    metadata:\n      labels:\n        app: order-processor\n    spec:\n      volumes:\n        - name: zombie-mark\n          emptyDir: {}\n      containers:\n        - name: order-processor\n          image: rithvikreddyalkanti/zombie-order-processor:1.0\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n          volumeMounts:\n            - name: zombie-mark\n              mountPath: /var/run/zombie\n          livenessProbe:\n            httpGet:\n              path: /health\n              port: 8000\n            initialDelaySeconds: 10\n            periodSeconds: 10\n            failureThreshold: 3\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-processor-liveness-l12.yaml\nkubectl rollout status deploy/order-processor-deploy\nkubectl get pods -l app=order-processor\n```\n\nWait until Pods show **Ready** and **RESTARTS ≥ 1**, then **Submit**.\n\nAfter revive:\n\n```bash\nPOD=$(kubectl get pod -l app=order-processor -o jsonpath='{.items[0].metadata.name}')\nkubectl exec -it \"$POD\" -c order-processor -- \\\n  python -c \"import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read().decode())\"\n```\n\nKeep image `zombie-order-processor:1.0`. Work only in your lab namespace (not `default`).\n",
+    "idLabel": "12",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "800m",
+      "memory": "896Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  }
+}

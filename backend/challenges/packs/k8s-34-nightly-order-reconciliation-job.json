@@ -1,0 +1,46 @@
+{
+  "id": "k8s-34-nightly-order-reconciliation-job",
+  "number": 234,
+  "finalized": true,
+  "title": "Nightly Order Reconciliation Job",
+  "description": "**SITUATION:**\n\nFinance needs a **batch** that compares paid orders vs gateway settlements. You already used a one-shot Job for least-privilege API access earlier. Here the focus is **batch reconciliation**: run once on demand for backfills, and **every night at 01:15** on a schedule. Order Processor / Payment Handler stay as Deployments; this work is a Job family.\n\nThis lab covers **Jobs and CronJobs** for nightly order reconciliation. Deployments stay for long-running services; batch work belongs in the Job family.\n**YOUR TASK:**\n\n1. Create a one-shot **Job** that runs the reconciliation image to completion.\n2. Create a **CronJob** that schedules the same work nightly.\n3. Verify the Job completes successfully and the CronJob is created with the right schedule.\n\n**SPEC:**\n\n- Job name: `order-reconciliation-manual`\n  - Image: `rithvikreddyalkanti/order-reconciliation:v1.0`\n  - Restart policy: `OnFailure` or `Never` (Job-compatible)\n  - Completions: `1`\n  - Command (if image needs it): `[\"/reconciliation\", \"--mode=full\"]` — use image default if documented\n- CronJob name: `order-reconciliation-nightly`\n  - Schedule: `15 1 * * *` (01:15 every day, cluster timezone)\n  - Job template uses the same image as the manual Job\n  - `concurrencyPolicy`: `Forbid`\n- Manual Job status: **Complete**; CronJob exists with the schedule above\n\n**CONSTRAINTS:**\n\n- Manifests: `order-reconciliation-job-l34.yaml` and `order-reconciliation-cronjob-l34.yaml`.\n- Do **not** run this as a Deployment — use Job / CronJob.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "jobs"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Nightly Order Reconciliation Job",
+    "brief": "Nightly Order Reconciliation Job",
+    "solution": "# Solution — Nightly Order Reconciliation Job\n\nStay in your lab namespace. Create a one-shot Job for backfills and a CronJob for nightly reconciliation at 01:15.\n\nDocs: [Jobs](https://kubernetes.io/docs/concepts/workloads/controllers/job/) · [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/)\n\n## Solution YAML\n\nSave as `order-reconciliation-job-l34.yaml`:\n\n```yaml\napiVersion: batch/v1\nkind: Job\nmetadata:\n  name: order-reconciliation-manual\nspec:\n  completions: 1\n  template:\n    spec:\n      restartPolicy: OnFailure\n      containers:\n        - name: order-reconciliation\n          image: rithvikreddyalkanti/order-reconciliation:v1.0\n          command: [\"/reconciliation\", \"--mode=full\"]\n```\n\nSave as `order-reconciliation-cronjob-l34.yaml`:\n\n```yaml\napiVersion: batch/v1\nkind: CronJob\nmetadata:\n  name: order-reconciliation-nightly\nspec:\n  schedule: \"15 1 * * *\"\n  concurrencyPolicy: Forbid\n  jobTemplate:\n    spec:\n      template:\n        spec:\n          restartPolicy: OnFailure\n          containers:\n            - name: order-reconciliation\n              image: rithvikreddyalkanti/order-reconciliation:v1.0\n              command: [\"/reconciliation\", \"--mode=full\"]\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-reconciliation-job-l34.yaml\nkubectl wait --for=condition=complete job/order-reconciliation-manual --timeout=120s\nkubectl apply -f order-reconciliation-cronjob-l34.yaml\nkubectl get job order-reconciliation-manual\nkubectl get cronjob order-reconciliation-nightly\n```\n\nWait until the manual Job is **Complete** and the CronJob shows schedule `15 1 * * *`, then **Submit**. Do not run this as a Deployment.\n",
+    "idLabel": "34",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "600m",
+      "memory": "640Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

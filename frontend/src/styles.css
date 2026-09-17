@@ -4749,10 +4749,41 @@ a.project-stage-open:hover {
   padding: 44px 48px 56px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.09);
-  background:
-    linear-gradient(180deg, rgba(16, 16, 16, 0.98), rgba(6, 6, 6, 0.96));
+  /* Solid black so dark diagrams match top → bottom (no gradient mismatch). */
+  background: #000000;
   color: var(--primer-ink);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.spark-primer-blog-stamp {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 88px;
+  height: 88px;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.92;
+  z-index: 2;
+}
+
+/* Only clear the crumb row for the stamp — not the title/lede. */
+.spark-primer-notebook--stamped .spark-primer-crumb {
+  padding-right: 100px;
+}
+
+@media (max-width: 720px) {
+  .spark-primer-blog-stamp {
+    width: 64px;
+    height: 64px;
+    top: 12px;
+    right: 10px;
+  }
+
+  .spark-primer-notebook--stamped .spark-primer-crumb {
+    padding-right: 72px;
+  }
 }
 
 .spark-primer-header {
@@ -4917,6 +4948,50 @@ a.project-stage-open:hover {
   border-radius: 6px;
 }
 
+/* Full-res asset, displayed smaller (browser scales — no file re-encode). */
+.spark-primer-figure--compact {
+  max-width: 768px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 6px;
+}
+
+.spark-primer-figure--compact img {
+  border-radius: 4px;
+}
+
+/* Dark sketches: drop chrome so #101010 art matches the notebook. */
+.spark-primer-figure--flush {
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.spark-primer-figure--flush img {
+  border-radius: 10px;
+}
+
+.spark-primer-figure--flush figcaption {
+  margin-top: 10px;
+  padding: 0 4px;
+}
+
+.spark-primer-page .spark-primer-code-block.markdown-code-block {
+  margin: 14px 0 8px;
+}
+
+.spark-primer-page .markdown-code-block--no-toolbar .markdown-code-toolbar {
+  display: none;
+}
+
+.spark-primer-page .markdown-code-block .monaco-editor,
+.spark-primer-page .markdown-code-block .monaco-editor .margin,
+.spark-primer-page .markdown-code-block .monaco-editor-background {
+  background-color: #0a0a0a !important;
+}
+
 .spark-primer-figure figcaption {
   margin-top: 8px;
   font-family: var(--primer-sans);
@@ -5063,12 +5138,51 @@ a.project-stage-open:hover {
     flex-wrap: wrap;
   }
 
+  /* Readings: full viewport width — no left/right page gutters. */
+  .app-page.spark-primer-page {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
   .spark-primer-page {
-    padding: 16px 10px 48px;
+    padding: 12px 0 48px;
   }
 
   .spark-primer-notebook {
-    padding: 28px 20px 40px;
+    max-width: none;
+    width: 100%;
+    margin: 0;
+    padding: 24px 0 36px;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+
+  .spark-primer-header,
+  .spark-primer-toc,
+  .spark-primer-section {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  /* Flush diagrams still go edge-to-edge. */
+  .spark-primer-figure--flush {
+    margin-left: -18px;
+    margin-right: -18px;
+    width: calc(100% + 36px);
+    max-width: none;
+  }
+
+  .spark-primer-notebook--stamped .spark-primer-header {
+    padding-right: 0;
+  }
+
+  .spark-primer-notebook--stamped .spark-primer-crumb {
+    padding-right: 72px;
+  }
+
+  .spark-primer-blog-stamp {
+    right: 10px;
   }
 }
 
@@ -5161,7 +5275,8 @@ a.project-stage-open:hover {
   color: var(--text-muted);
   padding: 10px 12px;
   font-size: 13px;
-  min-width: 130px;
+  min-width: 96px;
+  flex: 0 0 auto;
 }
 
 .play-problems-table-wrap {
@@ -5174,7 +5289,8 @@ a.project-stage-open:hover {
 
 .play-problems-table-head {
   display: grid;
-  grid-template-columns: 48px 72px minmax(0, 1.8fr) minmax(0, 0.7fr) 90px;
+  /* Icon + ID widths must match .play-problem-row (separate grids). */
+  grid-template-columns: 36px 48px minmax(0, 1.8fr) minmax(0, 0.7fr) 90px;
   gap: 12px;
   padding: 12px 16px;
   font-size: 11px;
@@ -5183,6 +5299,11 @@ a.project-stage-open:hover {
   text-transform: uppercase;
   color: var(--text-dim);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.play-problems-col-icon {
+  display: block;
+  min-width: 0;
 }
 
 .play-problems-table {
@@ -5194,7 +5315,7 @@ a.project-stage-open:hover {
 .play-problem-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 48px 72px minmax(0, 1.8fr) minmax(0, 0.7fr) 90px;
+  grid-template-columns: 36px 48px minmax(0, 1.8fr) minmax(0, 0.7fr) 90px;
   gap: 12px;
   align-items: center;
   min-height: 0;
@@ -5234,10 +5355,11 @@ a.project-stage-open:hover {
 .play-problem-status {
   color: var(--text-dim);
   font-size: 14px;
-  padding-left: 6px;
+  padding-left: 0;
   display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
+  width: 100%;
 }
 
 .play-problem-status-icon {
@@ -5788,33 +5910,61 @@ a.project-stage-open:hover {
 
   .play-problems-layout {
     grid-template-columns: 1fr;
+    align-content: start;
+    align-items: start;
   }
 
-  /* Hub cards already list tracks — hide the desktop rail duplicate on narrow screens. */
+  /* Hub cards already list tracks — hide the desktop rail on narrow screens.
+     Leaving an empty sidebar grid row was stretching and creating a large top gap. */
+  .play-problems-sidebar {
+    display: none;
+  }
+
   .play-sidebar-explore {
     display: none;
   }
 
-  /* Once the sidebar stacks above the list, a viewport-locked shell would leave
-     the labs only a sliver of height — fall back to scrolling the whole page. */
+  /* Once the sidebar is gone, drop the viewport-locked catalog shell so content
+     starts at the top and the page scrolls normally. */
+  .play-library-shell {
+    overflow: visible;
+    flex: none;
+    min-height: 0;
+  }
+
   .app-page.play-problems-page--fixed {
-    overflow: auto;
+    overflow: visible;
+    flex: none;
+    min-height: 0;
+    padding-top: 12px;
+  }
+
+  .play-problems-page--fixed .play-problems-layout {
+    flex: none;
+    min-height: 0;
+    align-content: start;
+    align-items: start;
   }
 
   .play-problems-page--fixed .play-problems-main,
-  .play-problems-page--fixed .play-problems-table-wrap,
   .play-problems-page--fixed .play-problems-table {
     overflow: visible;
     flex: none;
     min-height: 0;
   }
 
-  .play-problems-page--fixed .play-problems-sidebar {
-    overflow: visible;
+  .play-problems-page--fixed .play-problems-table-wrap {
+    flex: none;
+    min-height: 0;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
   }
 
-  .play-problems-sidebar {
-    position: static;
+  .play-hub {
+    flex: none;
+    overflow: visible;
   }
 
   .play-featured-card {
@@ -5824,12 +5974,41 @@ a.project-stage-open:hover {
 
   .play-problems-table-head,
   .play-problem-row {
-    grid-template-columns: 32px 64px minmax(0, 1fr) 72px 64px;
+    /* Fixed icon/ID tracks so header + rows stay aligned (separate grids). */
+    grid-template-columns: 28px 40px minmax(320px, 1fr);
+    gap: 12px;
+    min-width: 500px;
   }
 
-  .play-problems-table-head span:nth-child(4),
-  .play-problem-topics {
-    display: none;
+  .play-problems-col-kind,
+  .play-problems-col-level,
+  .play-problem-topics,
+  .play-problem-level {
+    display: none !important;
+  }
+
+  .play-problem-title {
+    font-size: 13px;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+
+  .play-problems-toolbar {
+    gap: 8px;
+  }
+
+  .play-search {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .play-filter-select {
+    min-width: 0;
+    width: auto;
+    max-width: 78px;
+    padding: 10px 8px;
+    font-size: 12px;
   }
 }
 
@@ -17042,11 +17221,12 @@ kbd {
   .play-problems-table-wrap {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
   }
 
   .play-problems-table-head,
   .play-problem-row {
-    min-width: 520px;
+    min-width: 500px;
   }
 
   .spark-jobs-layout {
@@ -17074,18 +17254,58 @@ kbd {
 }
 
 @media (max-width: 640px) {
-  .play-problems-table-head,
-  .play-problem-row {
-    grid-template-columns: 28px 52px minmax(0, 1fr) 64px;
-    gap: 8px;
-    padding-left: 12px;
-    padding-right: 12px;
-    min-width: 0;
+  .play-problems-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
   }
 
-  .play-problems-table-head span:nth-child(4),
-  .play-problem-row > :nth-child(4) {
-    display: none;
+  .play-problems-table-head,
+  .play-problem-row {
+    grid-template-columns: 28px 40px minmax(300px, 1fr);
+    gap: 10px;
+    padding-left: 12px;
+    padding-right: 12px;
+    min-width: 480px;
+  }
+
+  .play-problems-table-head {
+    font-size: 10px;
+    letter-spacing: 0.04em;
+  }
+
+  .play-problems-col-kind,
+  .play-problems-col-level,
+  .play-problem-topics,
+  .play-problem-level {
+    display: none !important;
+  }
+
+  .play-problem-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+
+  .play-problem-id {
+    font-size: 11px;
+  }
+
+  .play-problems-toolbar {
+    gap: 6px;
+  }
+
+  .play-search input {
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+
+  .play-filter-select {
+    max-width: 72px;
+    padding: 10px 6px;
+    font-size: 11.5px;
   }
 
   .sandbox-workspace .panel-header {

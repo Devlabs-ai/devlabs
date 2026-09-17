@@ -1,0 +1,56 @@
+{
+  "id": "k8s-21-discover-each-database-pod-by-name",
+  "number": 221,
+  "finalized": true,
+  "title": "Discover Each Database Pod by Name",
+  "description": "**SITUATION:**\n\nFor Order Processor HTTP, a normal Service that load-balances across any healthy Pod is perfect. For the database, that is often wrong: backups, replicas, and admin tools need to talk to **one specific copy** (for example always `orders-db-0`), not a random one behind a shared VIP.\n\nYou need a special kind of Service that does **not** invent a single ClusterIP, but instead helps DNS point at **each Pod individually**.\n\nThis lab adds a **headless Service** so each database Pod is reachable by a stable DNS name. A normal load-balanced Service is the wrong tool when clients must talk to one specific replica.\n**YOUR TASK:**\n\n1. Create a **headless Service** named `orders-db` for the database Pods.\n2. Verify it has **no ClusterIP** and lists both Pods as backends.\n\n**SPEC:**\n\n- Service name: `orders-db`\n- `clusterIP`: `None` (headless)\n- Selector: `app=orders-db`\n- Port name: `postgres`\n- Port: `5432`\n- Target port: `5432`\n- Endpoints include `orders-db-0` and `orders-db-1`\n\n**CONSTRAINTS:**\n\n- Manifest: `orders-db-headless-l21.yaml`.\n- Do **not** create a normal ClusterIP Service for this lab.\n- Do not rename the StatefulSet — keep `serviceName: orders-db`.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "pods"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Discover Each Database Pod by Name",
+    "brief": "Discover Each Database Pod by Name",
+    "solution": "# Solution — Discover Each Database Pod by Name\n\nCreate a headless Service `orders-db` (`clusterIP: None`) so each StatefulSet Pod gets a stable DNS name.\n\nDocs: [Headless Services](https://kubernetes.io/docs/concepts/services-networking/service/#headless-services)\n\n## Solution YAML\n\nSave as `orders-db-headless-l21.yaml`:\n\n```yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: orders-db\nspec:\n  clusterIP: None\n  selector:\n    app: orders-db\n  ports:\n    - name: postgres\n      port: 5432\n      targetPort: 5432\n```\n\n## Declarative\n\n```bash\nkubectl apply -f orders-db-headless-l21.yaml\nkubectl get svc orders-db\nkubectl get endpoints orders-db\n```\n\nConfirm `CLUSTER-IP` is **None** and both Pods appear as backends, then **Submit**.\n",
+    "idLabel": "21",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "700m",
+      "memory": "1024Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    },
+    "limitRange": {
+      "defaultRequest": {
+        "cpu": "25m",
+        "memory": "32Mi"
+      },
+      "default": {
+        "cpu": "100m",
+        "memory": "256Mi"
+      }
+    }
+  }
+}

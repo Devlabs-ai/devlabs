@@ -2,9 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import MonacoEditor, { loader } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import ProblemStatement from './ProblemStatement';
+import BriefAdminEditor, { isEditableBriefTab } from './BriefAdminEditor';
 import TerminalPanel from './TerminalPanel';
-import { IconSubmit } from './ChromeIcons';
+import WorkspaceMobileSwitcher, { type WorkspaceMobilePane } from './WorkspaceMobileSwitcher';
+import { IconPen, IconSubmit } from './ChromeIcons';
+import { useIsNarrowUi } from '../hooks/useMediaQuery';
 import { fetchChallenge, fetchChallengeSolution } from '../services/challengeApi';
+import { isAdminUser, getCurrentUser } from '../services/authApi';
 import {
   fetchK8sSubmissions,
   gradeK8sSession,
@@ -13,6 +17,7 @@ import {
 } from '../services/workspaceApi';
 import type { ActiveSession, ChallengeFull, ChallengePublic } from '../types/domain';
 import type { ProblemStatementTab } from './ProblemStatement';
+import { useAppState } from '../context/AppStateContext';
 
 loader.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.0/min/vs' } });
 
@@ -22,84 +27,20 @@ interface K8sLabWorkspaceProps {
   onClose: () => void;
 }
 
-const BRIEF_WIDTH_KEY = 'devlabs.k8sLab.briefWidth';
-const SCRATCH_KEY_PREFIX = 'devlabs.k8sLab.scratch.';
-const DEFAULT_BRIEF = 420;
-const MIN_BRIEF = 280;
-const MAX_BRIEF = 720;
+const BRIEF_PCT_KEY = 'devlabs.k8sLab.briefPct.v1';
+const SCRATCH_KEY_PREFIX = 'devlabs.k8sLab.scratch.v2.';
+/** Description share of the workspace shell (terminal gets the rest). */
+const DEFAULT_BRIEF_PCT = 45;
+const MIN_BRIEF_PCT = 22;
+const MAX_BRIEF_PCT = 70;
 
-const DEFAULT_SCRATCH_BY_CHALLENGE: Record<string, string> = {
-  'l1-namespace-and-pod': `apiVersion: v1
-kind: Pod
-metadata:
-  name: front-desk
-  labels:
-    app: guestbook
-    tier: frontend
-spec:
-  containers:
-    - name: front-desk
-      image: nginx:1.25
-      ports:
-        - containerPort: 80
-`,
-  'l1-deployment-basics': `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: front-desk
-  labels:
-    app: guestbook
-    tier: frontend
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: guestbook
-      tier: frontend
-  template:
-    metadata:
-      labels:
-        app: guestbook
-        tier: frontend
-    spec:
-      containers:
-        - name: front-desk
-          image: nginx:1.25
-          ports:
-            - containerPort: 80
-`,
-  'l1-clusterip-service': `apiVersion: v1
-kind: Service
-metadata:
-  name: front-desk
-  labels:
-    app: guestbook
-    tier: frontend
-spec:
-  type: ClusterIP
-  selector:
-    app: guestbook
-    tier: frontend
-  ports:
-    - port: 80
-      targetPort: 80
-`,
-  'l1-imperative-kubectl': `# Notes only — prefer imperative kubectl in the Terminal.
-# Target:
-#   kubectl create deployment pop-up --image=nginx:1.25 --replicas=2
-#   kubectl label deployment pop-up app=guestbook tier=popup --overwrite
-#   kubectl expose deployment pop-up --name=pop-up --port=80 --target-port=80 --type=ClusterIP
-`,
-};
-
-const FALLBACK_SCRATCH = DEFAULT_SCRATCH_BY_CHALLENGE['l1-namespace-and-pod'];
-
-function defaultScratchFor(challengeId: string): string {
-  return DEFAULT_SCRATCH_BY_CHALLENGE[challengeId] || FALLBACK_SCRATCH;
+/** Scratch pad starts empty — candidates draft their own YAML. */
+function defaultScratchFor(_challengeId: string): string {
+  return '';
 }
 
-function defaultBriefWidth(shellWidth: number): number {
-  return Math.min(MAX_BRIEF, Math.max(MIN_BRIEF, Math.round(shellWidth * 0.38)));
+function clampBriefPct(pct: number): number {
+  return Math.min(MAX_BRIEF_PCT, Math.max(MIN_BRIEF_PCT, Math.round(pct)));
 }
 
 function k8sTerminalWsUrl(sessionId: string): string {
@@ -136,18 +77,32 @@ export default function K8sLabWorkspace({
   session,
   onClose: _onClose,
 }: K8sLabWorkspaceProps): JSX.Element {
-  const ns = session.k8sNamespace || '—';
-  const challengeId = challenge?.id || session.challengeId || '';
+  const { currentUser } = useAppState();
+  const isAdmin = isAdminUser(currentUser) || isAdminUser(getCurrentUser());
+  const ns = session.k8sNamespace || (session.labReady === false ? 'preparing…' : '—');
+  const labReady = session.labReady !== false;
+  const challengeId = challenge?.id || '';
   const shellRef = useRef<HTMLDivElement | null>(null);
   const dragging = useRef(false);
+  const isNarrow = useIsNarrowUi();
+  const [mobilePane, setMobilePane] = useState<WorkspaceMobilePane>('brief');
   const [briefCollapsed, setBriefCollapsed] = useState(false);
-  const [briefWidth, setBriefWidth] = useState(() => {
-    const raw = sessionStorage.getItem(BRIEF_WIDTH_KEY);
-    const n = raw ? Number(raw) : NaN;
-    return Number.isFinite(n) ? Math.min(MAX_BRIEF, Math.max(MIN_BRIEF, n)) : DEFAULT_BRIEF;
+  const [adminEditing, setAdminEditing] = useState(false);
+  const [adminWantEdit, setAdminWantEdit] = useState(false);
+  const [briefPct, setBriefPct] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem(BRIEF_PCT_KEY);
+      const n = raw ? Number(raw) : NaN;
+      return Number.isFinite(n) ? clampBriefPct(n) : DEFAULT_BRIEF_PCT;
+    } catch {
+      return DEFAULT_BRIEF_PCT;
+    }
   });
   const [termEpoch, setTermEpoch] = useState(0);
   const [mainTab, setMainTab] = useState<MainTab>('terminal');
+  const showBrief = isNarrow ? mobilePane === 'brief' : !briefCollapsed;
+  const showWorkspace = isNarrow ? mobilePane === 'workspace' : true;
+  const showResize = !isNarrow && !briefCollapsed;
   const [briefTab, setBriefTab] = useState<ProblemStatementTab>('description');
   const [briefChallenge, setBriefChallenge] = useState<ChallengePublic | ChallengeFull | null>(challenge);
   const [solutionFiles, setSolutionFiles] = useState<Record<string, string> | null>(null);
@@ -172,9 +127,18 @@ export default function K8sLabWorkspace({
   });
 
   const wsUrl = useMemo(() => {
+    if (!labReady || !session.id || session.id.startsWith('pending-k8s-')) return '';
     const base = session.terminalWsUrl || k8sTerminalWsUrl(session.id);
     return `${base}${base.includes('?') ? '&' : '?'}v=${termEpoch}`;
-  }, [session.terminalWsUrl, session.id, termEpoch]);
+  }, [labReady, session.terminalWsUrl, session.id, termEpoch]);
+
+  const prevLabReady = useRef(labReady);
+  useEffect(() => {
+    if (labReady && !prevLabReady.current) {
+      setTermEpoch((n) => n + 1);
+    }
+    prevLabReady.current = labReady;
+  }, [labReady]);
 
   useEffect(() => {
     setBriefChallenge(challenge);
@@ -220,7 +184,7 @@ export default function K8sLabWorkspace({
         // Pack write-up (problemStatement.solution) still shows — do not blank the tab.
         if (!cancelled) solutionFetchedFor.current = challenge.id;
       } finally {
-        if (!cancelled) setSolutionLoading(false);
+        setSolutionLoading(false);
       }
     })();
     return () => {
@@ -242,8 +206,12 @@ export default function K8sLabWorkspace({
   }, [session.id]);
 
   useEffect(() => {
-    sessionStorage.setItem(BRIEF_WIDTH_KEY, String(briefWidth));
-  }, [briefWidth]);
+    try {
+      sessionStorage.setItem(BRIEF_PCT_KEY, String(briefPct));
+    } catch {
+      /* quota */
+    }
+  }, [briefPct]);
 
   useEffect(() => {
     try {
@@ -256,9 +224,9 @@ export default function K8sLabWorkspace({
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (dragging.current && shellRef.current) {
-        const left = shellRef.current.getBoundingClientRect().left;
-        const next = Math.min(MAX_BRIEF, Math.max(MIN_BRIEF, e.clientX - left));
-        setBriefWidth(next);
+        const rect = shellRef.current.getBoundingClientRect();
+        const next = clampBriefPct(((e.clientX - rect.left) / rect.width) * 100);
+        setBriefPct(next);
       }
       if (resizingDrawer.current && shellRef.current) {
         const rect = shellRef.current.getBoundingClientRect();
@@ -340,6 +308,12 @@ export default function K8sLabWorkspace({
       setEvalResult(null);
       setResultsOpen(false);
       setSelectedSubmissionId(null);
+      setScratch('');
+      try {
+        sessionStorage.removeItem(scratchStorageKey(session.id, challengeId));
+      } catch {
+        /* ignore */
+      }
       setTermEpoch((n) => n + 1);
     } catch (e) {
       const err = e as { response?: { data?: { error?: string } }; message?: string };
@@ -409,15 +383,23 @@ export default function K8sLabWorkspace({
     <div
       ref={shellRef}
       className={`workspace sandbox-workspace spark-platform-workspace k8s-lab-workspace${
-        briefCollapsed ? ' spark-brief-collapsed' : ''
-      }`}
+        !isNarrow && briefCollapsed ? ' spark-brief-collapsed' : ''
+      }${isNarrow ? ` workspace--mobile workspace--mobile-pane-${mobilePane}` : ''}`}
       style={
-        briefCollapsed
+        isNarrow || briefCollapsed
           ? { gridTemplateColumns: 'minmax(0, 1fr)' }
-          : { gridTemplateColumns: `${briefWidth}px 6px minmax(0, 1fr)` }
+          : { gridTemplateColumns: `${briefPct}% 6px minmax(0, 1fr)` }
       }
     >
-      {!briefCollapsed && (
+      {isNarrow && (
+        <WorkspaceMobileSwitcher
+          pane={mobilePane}
+          onChange={setMobilePane}
+          briefLabel="Brief"
+          workspaceLabel="Lab"
+        />
+      )}
+      {showBrief && (
         <div className="col spark-brief-col">
           <div className="panel sandbox-brief-panel--solo spark-brief-panel--bare" style={{ flex: 1 }}>
             <div className="spark-brief-tabs" role="tablist" aria-label="Problem sections">
@@ -454,17 +436,51 @@ export default function K8sLabWorkspace({
                   <span className="spark-brief-tab-count">{submissions.length}</span>
                 )}
               </button>
-              <button
-                type="button"
-                className="spark-brief-collapse-btn"
-                title="Collapse problem panel"
-                aria-label="Collapse problem panel"
-                onClick={() => setBriefCollapsed(true)}
-              >
-                ⟨
-              </button>
+              {isAdmin && isEditableBriefTab(briefTab) && !adminEditing && (
+                <button
+                  type="button"
+                  className="spark-brief-edit-tab"
+                  title="Edit this tab"
+                  aria-label="Edit this tab"
+                  onClick={() => setAdminWantEdit(true)}
+                >
+                  <IconPen />
+                </button>
+              )}
+              {!isNarrow && (
+                <button
+                  type="button"
+                  className="spark-brief-collapse-btn"
+                  title="Collapse problem panel"
+                  aria-label="Collapse problem panel"
+                  onClick={() => setBriefCollapsed(true)}
+                >
+                  ⟨
+                </button>
+              )}
             </div>
             <div className="panel-body spark-brief-body">
+              {isAdmin && isEditableBriefTab(briefTab) && (briefChallenge || challenge) && (
+                <BriefAdminEditor
+                  tab={briefTab}
+                  challenge={(briefChallenge || challenge)!}
+                  platform={null}
+                  solutionFiles={solutionFiles}
+                  onEditingChange={(editing) => {
+                    setAdminEditing(editing);
+                    if (!editing) setAdminWantEdit(false);
+                  }}
+                  forceEdit={adminWantEdit}
+                  onSaved={({ challenge: next, solutionFiles: files }) => {
+                    setBriefChallenge(next);
+                    if (files) {
+                      setSolutionFiles(files);
+                      solutionFetchedFor.current = next.id;
+                    }
+                  }}
+                />
+              )}
+              {adminEditing ? null : (
               <ProblemStatement
                 challenge={briefChallenge || challenge}
                 tab={briefTab}
@@ -532,12 +548,13 @@ export default function K8sLabWorkspace({
                   ) : null
                 }
               />
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {!briefCollapsed && (
+      {showResize && (
         <div
           className="spark-resize-handle"
           role="separator"
@@ -549,13 +566,12 @@ export default function K8sLabWorkspace({
             document.body.style.userSelect = 'none';
           }}
           onDoubleClick={() => {
-            const shellWidth = shellRef.current?.getBoundingClientRect().width || window.innerWidth;
-            setBriefWidth(defaultBriefWidth(shellWidth));
+            setBriefPct(DEFAULT_BRIEF_PCT);
           }}
         />
       )}
 
-      {briefCollapsed && (
+      {!isNarrow && briefCollapsed && (
         <button
           type="button"
           className="spark-brief-reopen-float"
@@ -567,6 +583,7 @@ export default function K8sLabWorkspace({
         </button>
       )}
 
+      {showWorkspace && (
       <div className="col col-main">
         <div className="panel spark-ide-panel" style={{ flex: 1 }}>
           <div className="spark-ide-actionbar">
@@ -607,18 +624,18 @@ export default function K8sLabWorkspace({
               <button
                 type="button"
                 className="spark-ide-btn spark-ide-btn--run"
-                disabled={busy}
+                disabled={busy || !labReady}
                 onClick={() => void onReset()}
-                title="Reset workloads in your namespace"
+                title={labReady ? 'Reset workloads in your namespace' : 'Lab is still preparing'}
               >
                 Reset
               </button>
               <button
                 type="button"
                 className="spark-ide-btn spark-ide-btn--submit"
-                disabled={busy}
+                disabled={busy || !labReady}
                 onClick={() => void onGrade()}
-                title="Submit for grading"
+                title={labReady ? 'Submit for grading' : 'Lab is still preparing'}
               >
                 <IconSubmit color="#04120c" />
                 <span>{busy ? 'Submitting…' : 'Submit'}</span>
@@ -642,7 +659,19 @@ export default function K8sLabWorkspace({
               className={`k8s-lab-term-pane-layer${mainTab === 'terminal' ? ' is-active' : ''}`}
               aria-hidden={mainTab !== 'terminal'}
             >
-              <TerminalPanel wsUrl={wsUrl} isActive={mainTab === 'terminal'} resizeProtocol />
+              {!labReady ? (
+                <div className="k8s-lab-terminal-warming" role="status" aria-live="polite">
+                  <span className="spinner" />
+                  <div>
+                    <strong>Preparing your cluster terminal…</strong>
+                    <p>
+                      Read the problem on the left — namespace and shell unlock when the lab is ready.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <TerminalPanel wsUrl={wsUrl} isActive={mainTab === 'terminal'} resizeProtocol />
+              )}
             </div>
             <div
               className={`k8s-lab-scratch${mainTab === 'scratch' ? ' is-active' : ''}`}
@@ -778,6 +807,7 @@ export default function K8sLabWorkspace({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

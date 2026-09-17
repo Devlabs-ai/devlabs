@@ -1,0 +1,46 @@
+{
+  "id": "k8s-03-roll-forward-with-a-deployment",
+  "number": 203,
+  "finalized": true,
+  "title": "Roll Forward with a Deployment",
+  "description": "**SITUATION:**\n\nA few days after the ReplicaSet rollout, things look good: three Pods running, handling ~500 orders/minute. Then QA finds a critical bug in Order Processor **v1.0**: orders under ₹50 (small snacks, quick coffee) are being rejected — about 15–20% of all orders.\n\nEngineering has shipped **v1.1** with the fix. The tech lead says ReplicaSets are a poor fit for version rollouts with zero downtime, so QuickByte is moving Order Processor to a **Deployment**. Users will get a short maintenance window.\n\nThis lab is the jump from ReplicaSet to **Deployment**: image rollouts and history without deleting the whole set by hand. Stay focused on rolling Order Processor to v1.1 cleanly; Services and traffic splitting come later.\n**YOUR TASK:**\n\n1. Create a **Deployment** for the Order Processor using image **v1.1**.\n2. Verify all replicas are **Running** and **Ready (1/1)**.\n\n**SPEC:**\n\n- Deployment name: `order-processor-deploy`\n- Replicas: `3`\n- Pod template labels: `app=order-processor`, `version=v1.1`\n- Selector must match pod template labels\n- Container name: `order-processor`\n- Image: `rithvikreddyalkanti/order-processor:v1.1`\n- `containerPort`: `8000`\n- Resource requests (per Pod): `100m` CPU, `128Mi` memory\n- Ready: **3/3** Pods Ready **1/1**\n\n**CONSTRAINTS:**\n\n- Deployment must be defined in `order-processor-deployment-l3.yaml`.\n- Do **not** use a bare ReplicaSet — grade looks for a Deployment.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l0",
+    "deployments"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Roll Forward with a Deployment",
+    "brief": "Roll Forward with a Deployment",
+    "solution": "# Solution — Roll Forward with a Deployment\n\nStay in your lab namespace. Create Deployment `order-processor-deploy` with **3** replicas on image **v1.1** so Order Processor can roll forward without deleting a bare ReplicaSet by hand.\n\nDocs: [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)\n\n## Solution YAML\n\nSave as `order-processor-deployment-l3.yaml` (Scratch pad or a file in your lab home):\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: order-processor\n      version: v1.1\n  template:\n    metadata:\n      labels:\n        app: order-processor\n        version: v1.1\n    spec:\n      containers:\n        - name: order-processor\n          image: rithvikreddyalkanti/order-processor:v1.1\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n```\n\nSelector labels must match the Pod template labels (`app=order-processor`, `version=v1.1`).\n\n## Declarative\n\nApply the manifest, then check the rollout:\n\n```bash\nkubectl apply -f order-processor-deployment-l3.yaml\nkubectl get deploy order-processor-deploy\nkubectl get pods -l app=order-processor,version=v1.1 -o wide\n```\n\nWait until **3** Pods are `Running` and `READY` is `1/1` each, then **Submit**.\n\nDo not create a bare ReplicaSet — grade looks for a Deployment. Work only in your lab namespace (not `default`).\n",
+    "idLabel": "3",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "900m",
+      "memory": "1024Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

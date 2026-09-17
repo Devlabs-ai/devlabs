@@ -1,0 +1,46 @@
+{
+  "id": "k8s-06-config-without-rebuilding-images",
+  "number": 206,
+  "finalized": true,
+  "title": "Config Without Rebuilding Images",
+  "description": "**SITUATION:**\n\nOrder Processor used to bake settings into the container image:\n\n- `MIN_ORDER_VALUE`: `50`\n- `MAX_ITEMS_PER_ORDER`: `20`\n- `LOG_LEVEL`: `INFO`\n\nThat doesn't scale — changing a threshold means rebuilding and redeploying the image. Different environments need different values (Dev `10`, Staging `25`, Prod `50`) without maintaining three image lines.\n\nPlatform has published **v1.2**, which reads these values from the environment instead of embedding them in code.\n\nThis lab introduces **ConfigMaps**: non-secret settings live outside the image and inject as env vars. Do not put API keys here — Secrets are the next challenge.\n**YOUR TASK:**\n\n1. Create a **ConfigMap** with the production settings below.\n2. Deploy the Order Processor as a **Deployment** on image **v1.2**, wired to the ConfigMap.\n3. Verify all replicas are **Running** and **Ready (1/1)**.\n\n**SPEC:**\n\n- ConfigMap name: `order-processor-config`\n- ConfigMap data:\n  - `MIN_ORDER_VALUE`: `\"50\"`\n  - `MAX_ITEMS_PER_ORDER`: `\"20\"`\n  - `LOG_LEVEL`: `\"INFO\"`\n- Deployment name: `order-processor-deploy`\n- Replicas: `3`\n- Pod template labels: `app=order-processor`, `version=v1.2`\n- Container name: `order-processor`\n- Image: `rithvikreddyalkanti/order-processor:v1.2`\n- `containerPort`: `8000`\n- Resource requests (per Pod): `100m` CPU, `128Mi` memory\n- Inject ConfigMap keys as container **environment variables** (same key names)\n- Ready: **3/3** Pods Ready **1/1**\n\n**CONSTRAINTS:**\n\n- ConfigMap must be in `order-processor-config-l6.yaml`.\n- Deployment must be in `order-processor-deployment-l6.yaml`.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l0",
+    "configmaps"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Config Without Rebuilding Images",
+    "brief": "Config Without Rebuilding Images",
+    "solution": "# Solution — Config Without Rebuilding Images\n\nStay in your lab namespace. Create ConfigMap `order-processor-config` with production settings, then Deploy Order Processor on **v1.2** with those keys injected as environment variables.\n\nDocs: [ConfigMaps](https://kubernetes.io/docs/concepts/configuration/configmap/)\n\n## Solution YAML\n\nSave as `order-processor-config-l6.yaml`:\n\n```yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: order-processor-config\ndata:\n  MIN_ORDER_VALUE: \"50\"\n  MAX_ITEMS_PER_ORDER: \"20\"\n  LOG_LEVEL: \"INFO\"\n```\n\nSave as `order-processor-deployment-l6.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: order-processor\n      version: v1.2\n  template:\n    metadata:\n      labels:\n        app: order-processor\n        version: v1.2\n    spec:\n      containers:\n        - name: order-processor\n          image: rithvikreddyalkanti/order-processor:v1.2\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n          envFrom:\n            - configMapRef:\n                name: order-processor-config\n```\n\nYou may also inject each key with `env[].valueFrom.configMapKeyRef` instead of `envFrom` — grade accepts either style.\n\n## Declarative\n\n```bash\nkubectl apply -f order-processor-config-l6.yaml\nkubectl apply -f order-processor-deployment-l6.yaml\nkubectl get cm order-processor-config\nkubectl get deploy order-processor-deploy\nkubectl get pods -l app=order-processor,version=v1.2\n```\n\nWait until **3** Pods are `Running` and `READY` is `1/1` each, then **Submit**.\n\nWork only in your lab namespace (not `default`).\n",
+    "idLabel": "6",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "900m",
+      "memory": "1024Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

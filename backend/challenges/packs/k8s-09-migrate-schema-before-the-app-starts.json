@@ -1,0 +1,47 @@
+{
+  "id": "k8s-09-migrate-schema-before-the-app-starts",
+  "number": 209,
+  "finalized": true,
+  "title": "Migrate Schema Before the App Starts",
+  "description": "**SITUATION:**\n\nOrder Processor is about to persist orders in Postgres. Schema must exist **before** the app process starts — otherwise Pods crash-loop on missing tables (`orders`, `order_items`).\n\nThe platform team does **not** want migrations inside the main container startup (slow restarts, races across replicas). Pattern: a one-shot **Init Container** waits for Postgres, applies **idempotent** DDL (`CREATE TABLE IF NOT EXISTS`), exits `0`, then the app container starts.\n\nA minimal Postgres is already running in your namespace as Service **`orders-db`**. Your job is the Init Container on Order Processor — not installing the database.\n**YOUR TASK:**\n\n1. **Update** Deployment `order-processor-deploy` to add Init Container **`schema-migrate`**.\n2. The init must connect to **`orders-db`**, create tables **`orders`** and **`order_items`** if missing, and exit successfully before the app starts.\n3. Verify the Deployment is **Ready** and init completed on each Pod (app `Ready` **1/1**).\n\n**SPEC:**\n\n- Deployment name: `order-processor-deploy` (do not rename)\n- Replicas: keep **`2`**\n- Pod template labels: keep `app=order-processor`, `tier=app`\n- Postgres (already seeded — do not recreate unless missing):\n  - Service / Deployment: `orders-db`\n  - Database: `orders`\n  - User: `postgres`\n  - Password: `quickbyte`\n  - Port: `5432`\n- Init container `schema-migrate`:\n  - Image: `postgres:16-alpine` (includes `psql` / `pg_isready`)\n  - Wait until Postgres accepts connections (`pg_isready -h orders-db …`), then apply DDL with `psql`\n  - Create tables if not exist: `orders`, `order_items` (columns can match the solution shape)\n  - Set `PGPASSWORD=quickbyte` (env) for non-interactive `psql`\n  - Resource requests: `50m` CPU, `64Mi` memory\n- Main container `order-processor` (preserve):\n  - Image: `rithvikreddyalkanti/order-processor:v1.2`\n  - `containerPort`: `8000`\n  - Resource requests: `100m` CPU, `128Mi` memory\n- Ready: **2/2** Pods Ready after init finishes\n\n**CONSTRAINTS:**\n\n- Capture your updated Deployment in `order-processor-init-l9.yaml` and apply it.\n- Migrations must run as **`spec.initContainers`**, not a sidecar and not a Job.\n- Do **not** put the migrate command on the main `order-processor` container.\n- Use **idempotent** SQL (`IF NOT EXISTS`) — both replicas run the init.\n- Do **not** delete/rename `order-processor-deploy`.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l0",
+    "init-containers"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Postgres is already running as Service orders-db (password quickbyte).",
+      "Init image postgres:16-alpine has pg_isready and psql.",
+      "Use CREATE TABLE IF NOT EXISTS — both replicas run the init.",
+      "Apply your YAML, wait for Ready 1/1 on both Pods, then Submit."
+    ],
+    "overview": "Migrate Schema Before the App Starts",
+    "brief": "Migrate Schema Before the App Starts",
+    "solution": "# Solution — Migrate Schema Before the App Starts\n\nStay in your lab namespace. Postgres is already running as Deployment/Service **`orders-db`** (database `orders`, user `postgres`, password `quickbyte`). Update Deployment `order-processor-deploy` with Init Container **`schema-migrate`** that waits for Postgres, applies idempotent DDL, then exits `0` so Order Processor can start.\n\nDocs: [Init Containers](https://kubernetes.io/docs/concepts/workloads/pods/init-containers/)\n\n## Solution YAML\n\nSave as `order-processor-init-l9.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: order-processor\n      tier: app\n  template:\n    metadata:\n      labels:\n        app: order-processor\n        tier: app\n    spec:\n      initContainers:\n        - name: schema-migrate\n          image: postgres:16-alpine\n          env:\n            - name: PGPASSWORD\n              value: quickbyte\n          command:\n            - /bin/sh\n            - -c\n            - |\n              set -e\n              until pg_isready -h orders-db -U postgres -d orders; do\n                echo \"waiting for orders-db…\"\n                sleep 2\n              done\n              psql -h orders-db -U postgres -d orders -v ON_ERROR_STOP=1 -c \\\n                \"CREATE TABLE IF NOT EXISTS orders (\n                   order_id TEXT PRIMARY KEY,\n                   customer_id TEXT,\n                   total NUMERIC,\n                   status TEXT\n                 );\"\n              psql -h orders-db -U postgres -d orders -v ON_ERROR_STOP=1 -c \\\n                \"CREATE TABLE IF NOT EXISTS order_items (\n                   id SERIAL PRIMARY KEY,\n                   order_id TEXT,\n                   item TEXT\n                 );\"\n              echo \"Migrations OK\"\n          resources:\n            requests:\n              cpu: \"50m\"\n              memory: \"64Mi\"\n      containers:\n        - name: order-processor\n          image: rithvikreddyalkanti/order-processor:v1.2\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n```\n\n## Declarative\n\n```bash\nkubectl get deploy,svc orders-db\nkubectl apply -f order-processor-init-l9.yaml\nkubectl rollout status deploy/order-processor-deploy\nkubectl get pods -l app=order-processor,tier=app\nkubectl logs deploy/order-processor-deploy -c schema-migrate\n```\n\nConfirm tables (optional):\n\n```bash\nkubectl exec deploy/orders-db -- env PGPASSWORD=quickbyte \\\n  psql -U postgres -d orders -c '\\dt'\n```\n\nWait until **2** Pods are `Running` / `READY` **1/1**, then **Submit**.\n\nUse `CREATE TABLE IF NOT EXISTS` so both replicas’ inits can run safely. Migrations must be `spec.initContainers`, not a sidecar or Job.\n",
+    "idLabel": "9",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1000m",
+      "memory": "1152Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  }
+}

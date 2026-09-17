@@ -1,0 +1,46 @@
+{
+  "id": "k8s-22-dynamic-disks-via-storageclass",
+  "number": 222,
+  "finalized": true,
+  "title": "Dynamic Disks via StorageClass",
+  "description": "**SITUATION:**\n\nEarlier, someone had to **hand-register** archive disk before an app could use it. That does not scale when every team needs disks every week. Platform wants a **catalog entry**: “if an app asks for this kind of disk, create it automatically in the cloud / storage system.”\n\nYour job is to publish that catalog entry, then prove it works by requesting a small disk and attaching it to a tiny helper Pod.\n\nThis lab publishes a **StorageClass** and proves dynamic provisioning with a PVC. No more hand-registering every archive disk — ask for a class, let the cluster create the volume.\n**YOUR TASK:**\n\n1. Create a **StorageClass** named `quickbyte-fast` (the catalog entry).\n2. Create a storage request (**PVC**) that uses that class, plus a small consumer Pod so the disk can be created and bound.\n3. Verify the claim becomes **Bound** (real disk appeared automatically — you did not hand-create a PV).\n\n**SPEC:**\n\n- StorageClass name: `quickbyte-fast`\n- Provisioner: use what your lab cluster documents (authoring default for EKS: `ebs.csi.aws.com`) with:\n  - `volumeBindingMode`: `WaitForFirstConsumer`\n  - `reclaimPolicy`: `Delete`\n  - parameters: `type: gp3` (when using EBS CSI)\n- PVC name: `order-cache-pvc`\n- Access modes: `[\"ReadWriteOnce\"]`\n- Storage request: `2Gi`\n- `storageClassName`: `quickbyte-fast`\n- Consumer Pod `cache-writer`: image `busybox:1.36`, mount PVC at `/cache`, command `sleep 3600`\n\n**CONSTRAINTS:**\n\n- StorageClass in `quickbyte-fast-sc-l22.yaml`; PVC + consumer Pod in `order-cache-pvc-l22.yaml`.\n- Do **not** hand-create a PersistentVolume — let the class provision it.\n- Work only in your lab namespace for namespaced objects.\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "storage"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Dynamic Disks via StorageClass",
+    "brief": "Dynamic Disks via StorageClass",
+    "solution": "# Solution — Dynamic Disks via StorageClass\n\nPublish StorageClass `quickbyte-fast`, then request a PVC and attach it to a small consumer Pod so the provisioner can create the disk.\n\nDocs: [StorageClasses](https://kubernetes.io/docs/concepts/storage/storage-classes/)\n\n## Solution YAML\n\nSave as `quickbyte-fast-sc-l22.yaml`:\n\n```yaml\napiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata:\n  name: quickbyte-fast\nprovisioner: ebs.csi.aws.com\nvolumeBindingMode: WaitForFirstConsumer\nreclaimPolicy: Delete\nparameters:\n  type: gp3\n```\n\nSave as `order-cache-pvc-l22.yaml`:\n\n```yaml\napiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: order-cache-pvc\nspec:\n  accessModes:\n    - ReadWriteOnce\n  resources:\n    requests:\n      storage: 2Gi\n  storageClassName: quickbyte-fast\n---\napiVersion: v1\nkind: Pod\nmetadata:\n  name: cache-writer\nspec:\n  containers:\n    - name: writer\n      image: busybox:1.36\n      command: [\"sleep\", \"3600\"]\n      volumeMounts:\n        - name: cache\n          mountPath: /cache\n  volumes:\n    - name: cache\n      persistentVolumeClaim:\n        claimName: order-cache-pvc\n```\n\n## Declarative\n\n```bash\nkubectl apply -f quickbyte-fast-sc-l22.yaml\nkubectl apply -f order-cache-pvc-l22.yaml\nkubectl get sc quickbyte-fast\nkubectl get pvc order-cache-pvc\nkubectl get pod cache-writer\n```\n\nWait for the PVC to become **Bound** (when the CSI provisioner is available), then **Submit**. Do not hand-create a PersistentVolume.\n",
+    "idLabel": "22",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "600m",
+      "memory": "640Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

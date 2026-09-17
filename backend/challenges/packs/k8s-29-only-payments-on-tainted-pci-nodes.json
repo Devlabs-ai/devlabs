@@ -1,0 +1,46 @@
+{
+  "id": "k8s-29-only-payments-on-tainted-pci-nodes",
+  "number": 229,
+  "finalized": true,
+  "title": "Only Payments on Tainted PCI Nodes",
+  "description": "**SITUATION:**\n\nPCI-scoped machines are marked so **ordinary workloads refuse to schedule there**. Only Payment Handler is allowed on that pool. Taints keep the crowd out; **tolerations** are the VIP pass for Payment Handler.\n\nThis lab teaches **taints and tolerations**: PCI nodes repel ordinary workloads; Payment Handler opts in. Without the toleration, Payment Handler cannot land on the protected pool.\n**YOUR TASK:**\n\n1. **Update** `payment-handler` to **tolerate** the PCI taint.\n2. Optionally combine with `nodeSelector` / affinity if those nodes are also labeled `pci=true` — at minimum the toleration must be present.\n3. Verify Payment Pods can schedule; Notification still has **no** PCI toleration.\n\n**SPEC:**\n\n- Deployment name: `payment-handler` (do not rename)\n- Replicas: keep **`2`**\n- Toleration:\n  - key: `pci`\n  - operator: `Equal`\n  - value: `true`\n  - effect: `NoSchedule`\n- Ready: **2/2** Payment Pods Ready\n\n**CONSTRAINTS:**\n\n- Manifest: `payment-toleration-l29.yaml`.\n- Do **not** add the PCI toleration to `notification-service`.\n- Do not remove the node taint — only tolerate it on Payment Handler.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "scheduling"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Only Payments on Tainted PCI Nodes",
+    "brief": "Only Payments on Tainted PCI Nodes",
+    "solution": "# Solution — Only Payments on Tainted PCI Nodes\n\nAdd a toleration on `payment-handler` for taint `pci=true:NoSchedule`. Do not add that toleration to Notification Service.\n\nDocs: [Taints and Tolerations](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/)\n\n## Solution YAML\n\nSave as `payment-toleration-l29.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payment-handler\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: payment-handler\n  template:\n    metadata:\n      labels:\n        app: payment-handler\n    spec:\n      tolerations:\n        - key: pci\n          operator: Equal\n          value: \"true\"\n          effect: NoSchedule\n      containers:\n        - name: payment-handler\n          image: rithvikreddyalkanti/payment-handler:v1.0\n          ports:\n            - containerPort: 8000\n```\n\n## Declarative\n\n```bash\nkubectl apply -f payment-toleration-l29.yaml\nkubectl get deploy payment-handler -o yaml | grep -A10 tolerations\nkubectl get pods -l app=payment-handler -o wide\n```\n\nWait until **2/2** Payment Pods are Ready, then **Submit**.\n",
+    "idLabel": "29",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "900m",
+      "memory": "1024Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

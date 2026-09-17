@@ -1,0 +1,46 @@
+{
+  "id": "k8s-19-claim-disk-for-order-processor",
+  "number": 219,
+  "finalized": true,
+  "title": "Claim Disk for Order Processor",
+  "description": "**SITUATION:**\n\nOrder Processor must write cold archives under `/data/archive` and keep them when Pods restart. The **platform team** already registered disk with the cluster (a PersistentVolume). As the app team, you do **not** create that PV — you **request** matching storage with a PVC, then mount the claim into Order Processor.\n\n**YOUR TASK:**\n\n1. Create a **PersistentVolumeClaim (PVC)** that matches the platform disk (size, access mode, storage class).\n2. **Update** the Order Processor Deployment so the container sees that storage at `/data/archive`.\n3. Verify the claim is **Bound** and the Pod is **Ready**.\n\n**SPEC:**\n\n- PVC name: `order-archive-pvc`\n- Access modes: `[\"ReadWriteOnce\"]`\n- Resources requests storage: `1Gi`\n- `storageClassName`: `manual`\n- Deployment name: `order-processor-deploy` (do not rename)\n- Replicas: set to **`1`** for this lab (this disk allows one writer — avoid two Pods fighting over it)\n- Volume name in Pod: `archive`\n- Mount path on `order-processor`: `/data/archive`\n- Ready: PVC **Bound**; Deployment **1/1** Ready\n\n**CONSTRAINTS:**\n\n- PVC in `order-archive-pvc-l19.yaml`; updated Deployment in `order-processor-pvc-l19.yaml`.\n- Do **not** create or edit a PersistentVolume — consume what the platform already offered.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "storage"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Claim Disk for Order Processor",
+    "brief": "Claim Disk for Order Processor",
+    "solution": "# Solution — Claim Disk for Order Processor\n\nCreate PVC `order-archive-pvc` matching the platform PV, then mount it into Deployment `order-processor-deploy` at `/data/archive`.\n\nDocs: [PersistentVolumeClaims](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims)\n\n## Solution YAML\n\nSave as `order-archive-pvc-l19.yaml`:\n\n```yaml\napiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: order-archive-pvc\nspec:\n  accessModes:\n    - ReadWriteOnce\n  resources:\n    requests:\n      storage: 1Gi\n  storageClassName: manual\n```\n\nSave as `order-processor-pvc-l19.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 1\n  selector:\n    matchLabels:\n      app: order-processor\n      version: v1.1\n  template:\n    metadata:\n      labels:\n        app: order-processor\n        version: v1.1\n    spec:\n      containers:\n        - name: order-processor\n          image: rithvikreddyalkanti/order-processor:v1.1\n          ports:\n            - containerPort: 8000\n          volumeMounts:\n            - name: archive\n              mountPath: /data/archive\n      volumes:\n        - name: archive\n          persistentVolumeClaim:\n            claimName: order-archive-pvc\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-archive-pvc-l19.yaml\nkubectl apply -f order-processor-pvc-l19.yaml\nkubectl get pvc order-archive-pvc\nkubectl get deploy order-processor-deploy\nkubectl get pods -l app=order-processor -o wide\n```\n\nWait until the PVC is **Bound** and the Deployment is **1/1 Ready**, then **Submit**.\n\nDo **not** create or edit a PersistentVolume — request and mount what the platform already offered. Work only in your lab namespace (not `default`).\n",
+    "idLabel": "19",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "700m",
+      "memory": "768Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

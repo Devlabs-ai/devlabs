@@ -1,0 +1,46 @@
+{
+  "id": "k8s-39-keep-enough-payments-during-node-drains",
+  "number": 239,
+  "finalized": true,
+  "title": "Keep Enough Payments During Node Drains",
+  "description": "**SITUATION:**\n\nCluster upgrades drain nodes. Without a safety net, Kubernetes can evict almost every Payment Handler Pod at once — payments drop during maintenance. A **Pod Disruption Budget** tells the cluster: “never voluntarily evict so many that we go below N available.”\n\nThis lab adds a **PodDisruptionBudget** so node drains cannot evict all Payment Handler Pods at once. It limits voluntary disruption during maintenance — it does not replace probes or anti-affinity.\n**YOUR TASK:**\n\n1. Create a **PodDisruptionBudget** for Payment Handler.\n2. Verify it selects the payment Pods and enforces the availability floor (optional: observe a drain that respects the PDB).\n\n**SPEC:**\n\n- PDB name: `payment-handler-pdb`\n- Selector: `app=payment-handler`\n- `minAvailable`: **3**  (out of 5 replicas — at most 2 can be down from voluntary disruption)\n- Success: PDB exists; `ALLOWED disruptions` / status reflects the budget\n\n**CONSTRAINTS:**\n\n- Manifest: `payment-handler-pdb-l39.yaml`.\n- Use `minAvailable` (not `maxUnavailable`) for this lab.\n- PDB only limits **voluntary** disruptions (drains, evictions) — not node crashes.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "pdb"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Keep Enough Payments During Node Drains",
+    "brief": "Keep Enough Payments During Node Drains",
+    "solution": "# Solution — Keep Enough Payments During Node Drains\n\nStay in your lab namespace. Create a PodDisruptionBudget so voluntary drains cannot take Payment Handler below 3 available Pods.\n\nDocs: [Pod Disruption Budgets](https://kubernetes.io/docs/tasks/run-application/configure-pdb/)\n\n## Solution YAML\n\nSave as `payment-handler-pdb-l39.yaml`:\n\n```yaml\napiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: payment-handler-pdb\nspec:\n  minAvailable: 3\n  selector:\n    matchLabels:\n      app: payment-handler\n```\n\n## Declarative\n\n```bash\nkubectl apply -f payment-handler-pdb-l39.yaml\nkubectl get pdb payment-handler-pdb\nkubectl describe pdb payment-handler-pdb\n```\n\nConfirm `MIN AVAILABLE` is **3** and the selector matches payment Pods, then **Submit**. Use `minAvailable` (not `maxUnavailable`).\n",
+    "idLabel": "39",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1100m",
+      "memory": "1280Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "id": "k8s-17-run-settlement-export-as-a-job",
+  "number": 217,
+  "finalized": true,
+  "title": "Run Settlement Export as a Job",
+  "description": "**SITUATION:**\n\nIdentity is ready. Finance now wants a **one-shot Job** that uses that ServiceAccount to list Payment Handler Pods (settlement inventory). The Job must not run as `default`.\n\nThis lab runs a one-shot **Job** under the settlement ServiceAccount from the previous lab. Default ServiceAccount is off-limits; prove the dedicated identity works end to end.\n**YOUR TASK:**\n\n1. Create a **Job** that uses `serviceAccountName: settlement-exporter`.\n2. Verify the Job **Completes** successfully.\n\n**SPEC:**\n\n- Job name: `settlement-export`\n- `serviceAccountName: settlement-exporter`\n- Image: `bitnami/kubectl:latest` (or platform-provided kubectl image)\n- Command example:  \n  `[\"kubectl\", \"get\", \"pods\", \"-l\", \"app=payment-handler\", \"-o\", \"wide\"]`\n- Restart policy: `OnFailure` or `Never`\n- Completions: `1`\n- Job status: **Complete**\n\n**CONSTRAINTS:**\n\n- Manifest: `settlement-export-job-l17.yaml`.\n- Do **not** recreate the SA/Role/RoleBinding unless missing — reuse the existing ones.\n- Do **not** use the `default` ServiceAccount.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "jobs"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Run Settlement Export as a Job",
+    "brief": "Run Settlement Export as a Job",
+    "solution": "# Solution — Run Settlement Export as a Job\n\nStay in your lab namespace. Run a one-shot Job under ServiceAccount `settlement-exporter` (from the previous lab) to list Payment Handler Pods.\n\nDocs: [Jobs](https://kubernetes.io/docs/concepts/workloads/controllers/job/)\n\n## Solution YAML\n\nSave as `settlement-export-job-l17.yaml`:\n\n```yaml\napiVersion: batch/v1\nkind: Job\nmetadata:\n  name: settlement-export\nspec:\n  completions: 1\n  template:\n    spec:\n      serviceAccountName: settlement-exporter\n      restartPolicy: OnFailure\n      containers:\n        - name: exporter\n          image: bitnami/kubectl:latest\n          command: [\"kubectl\", \"get\", \"pods\", \"-l\", \"app=payment-handler\", \"-o\", \"wide\"]\n```\n\n## Declarative\n\n```bash\nkubectl apply -f settlement-export-job-l17.yaml\nkubectl wait --for=condition=complete job/settlement-export --timeout=120s\nkubectl get job settlement-export\n```\n\nWait until the Job is **Complete**, then **Submit**. Do not use the `default` ServiceAccount.\n",
+    "idLabel": "17",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "700m",
+      "memory": "768Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

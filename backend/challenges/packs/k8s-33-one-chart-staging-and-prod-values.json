@@ -1,0 +1,46 @@
+{
+  "id": "k8s-33-one-chart-staging-and-prod-values",
+  "number": 233,
+  "finalized": true,
+  "title": "One Chart, Staging and Prod Values",
+  "description": "**SITUATION:**\n\nStaging wants 1 replica and image `v1.1-rc`; production wants 3 replicas and `v1.1`. Same chart — **different values files** — so environments do not fork the templates.\n\nThis lab keeps **one chart** and swaps **values files** for staging vs prod. Do not fork templates per environment — only replica counts and image tags should differ.\n**YOUR TASK:**\n\n1. Add `values-staging.yaml` and `values-prod.yaml` (or equivalent) with the settings below.\n2. Install/upgrade a release using the **staging** values file for this lab namespace.\n3. Verify replicas and image match staging.\n\n**SPEC:**\n\n- Release name: `notifications`\n- `values-staging.yaml`:\n  - `replicaCount: 1`\n  - `image.repository: rithvikreddyalkanti/notification-service`\n  - `image.tag: v1.1-rc`\n- `values-prod.yaml` (must exist for review even if not installed here):\n  - `replicaCount: 3`\n  - `image.tag: v1.1`\n- Install with staging values, e.g.  \n  `helm upgrade --install notifications ./charts/notification-service -n \"$LEARNER_NS\" -f values-staging.yaml`\n- Ready: **1/1** Pod Ready; image tag contains `v1.1-rc`\n\n**CONSTRAINTS:**\n\n- Do **not** hard-code staging replica counts inside templates — drive them from values.\n- Prod values file must be present even though you deploy staging in this lab.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "helm"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "One Chart, Staging and Prod Values",
+    "brief": "One Chart, Staging and Prod Values",
+    "solution": "# Solution — One Chart, Staging and Prod Values\n\nStay in your lab namespace. Keep one Notification Service chart; drive staging vs prod with values files. Install **staging** here.\n\nDocs: [Helm values files](https://helm.sh/docs/chart_template_guide/values_files/)\n\n## Solution YAML\n\n`values-staging.yaml`:\n\n```yaml\nreplicaCount: 1\nimage:\n  repository: rithvikreddyalkanti/notification-service\n  tag: \"v1.1-rc\"\n```\n\n`values-prod.yaml` (must exist for review; not installed in this lab):\n\n```yaml\nreplicaCount: 3\nimage:\n  repository: rithvikreddyalkanti/notification-service\n  tag: \"v1.1\"\n```\n\nReuse the chart from the previous lab (`charts/notification-service/`) with `replicaCount` and image driven by values — do not hard-code staging counts in templates.\n\n## Declarative\n\n```bash\nhelm upgrade --install notifications ./charts/notification-service   -n \"$LEARNER_NS\" -f values-staging.yaml\nkubectl get deploy notification-service -o wide\nkubectl get pods -l app=notification-service -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{.spec.containers[0].image}{\"\\n\"}{end}'\n```\n\nWait until **1/1** Ready with image tag `v1.1-rc`, then **Submit**.\n",
+    "idLabel": "33",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "700m",
+      "memory": "768Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

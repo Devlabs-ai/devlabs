@@ -1,0 +1,13 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: order-reconciliation-manual
+spec:
+  completions: 1
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: order-reconciliation
+          image: rithvikreddyalkanti/order-reconciliation:v1.0
+          command: ["/reconciliation", "--mode=full"]

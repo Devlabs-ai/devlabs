@@ -1,0 +1,6 @@
+replicaCount: 2
+image:
+  repository: rithvikreddyalkanti/notification-service
+  tag: "v1.0"
+service:
+  port: 8080

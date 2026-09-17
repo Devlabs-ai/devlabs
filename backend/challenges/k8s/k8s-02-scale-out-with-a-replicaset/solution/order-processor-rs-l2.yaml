@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: order-processor-rs
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: order-processor
+      version: v1.0
+  template:
+    metadata:
+      labels:
+        app: order-processor
+        version: v1.0
+    spec:
+      containers:
+        - name: order-processor
+          image: rithvikreddyalkanti/order-processor:v1.0
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"

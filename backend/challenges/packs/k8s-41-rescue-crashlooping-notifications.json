@@ -1,0 +1,46 @@
+{
+  "id": "k8s-41-rescue-crashlooping-notifications",
+  "number": 241,
+  "finalized": true,
+  "title": "Rescue CrashLooping Notifications",
+  "description": "**SITUATION:**\n\nPager: Notification Service is down. Customers are not getting SMS/email. You were not the one who deployed it. Your job is to **read the signals**, find the fault, and restore a healthy Deployment — not to rebuild the whole stack from memory.\n\nThis lab is **incident response**: read events/logs, find why Notification is CrashLooping, restore health. You inherit a broken Deployment — fix it in place rather than redesigning the whole stack.\n**YOUR TASK:**\n\n1. Inspect Pods (`get`, `describe`, `logs`, events) until you identify the failure mode.\n2. Fix the Deployment (image, command/args, env, or probe — whatever is actually wrong).\n3. Verify Pods are **Running** and **Ready**.\n\n**SPEC:**\n\n- Deployment name: `notification-service` (keep the name)\n- End state:\n  - Image: `rithvikreddyalkanti/notification-service:v1.0` (unless events prove a different valid tag is required)\n  - Replicas: **2** Ready\n  - Container port **8080** if declared\n- Success: no CrashLoopBackOff / ImagePullBackOff; Ready **2/2**\n\n**CONSTRAINTS:**\n\n- You may apply a fixed manifest `notification-service-fix-l41.yaml`.\n- Do **not** delete the namespace or unrelated apps.\n- Prefer fixing the Deployment over creating a second competing Deployment.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "troubleshooting"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Rescue CrashLooping Notifications",
+    "brief": "Rescue CrashLooping Notifications",
+    "solution": "# Solution — Rescue CrashLooping Notifications\n\nStay in your lab namespace. Inspect the broken Notification Service Deployment, fix the fault (image / command / env / probe), and restore **2/2** Ready.\n\nDocs: [Debug running pods](https://kubernetes.io/docs/tasks/debug/debug-application/debug-running-pod/) · [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)\n\n## Solution YAML\n\nTypical fix — restore a healthy Deployment (apply as `notification-service-fix-l41.yaml`):\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notification-service\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: notification-service\n  template:\n    metadata:\n      labels:\n        app: notification-service\n    spec:\n      containers:\n        - name: notification-service\n          image: rithvikreddyalkanti/notification-service:v1.0\n          ports:\n            - containerPort: 8080\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n```\n\nStart with `kubectl describe` / `kubectl logs` on the CrashLooping Pods — the actual break may be a bad image tag, wrong command, or a failing probe. Prefer patching the existing Deployment over creating a second one.\n\n## Declarative\n\n```bash\nkubectl get pods -l app=notification-service\nkubectl describe deploy/notification-service\nkubectl logs -l app=notification-service --tail=50\nkubectl apply -f notification-service-fix-l41.yaml\nkubectl rollout status deploy/notification-service\n```\n\nWait until **2/2** Ready with no CrashLoopBackOff / ImagePullBackOff, then **Submit**.\n",
+    "idLabel": "41",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "800m",
+      "memory": "896Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "id": "k8s-08-audit-trail-with-a-sidecar",
+  "number": 208,
+  "finalized": true,
+  "title": "Audit Trail with a Sidecar",
+  "description": "**SITUATION:**\n\nOrder Processor is live, but compliance wants an **audit trail** of every order event written to disk. The app team will write order lines under `/var/log/orders` inside the Pod.\n\nThose files still need to be **read and forwarded** (to a collector, object store, etc.). Do **not** put that log-shipping logic inside the Order Processor app container. Baking agents, shipping libraries, and retry loops into the business image would **bloat Order Processor** — larger image, more CPU/memory, and failure modes mixed into the order API.\n\nOps prefers a **sidecar**: a second container in the same Pod that shares a volume, tails the log directory, and keeps running — while Order Processor stays focused on orders.\n\nThis lab is a **multi-container Pod**: app + sidecar sharing a volume for the audit trail. You are not shipping logs off-cluster yet — just get both containers writing and reading the shared path.\n**YOUR TASK:**\n\n1. **Update** the existing Deployment so each Pod has **two containers**:\n   - main app: `order-processor` (keep image/port; set CPU request and limit to `50m`)\n   - sidecar: `log-shipper` (add; CPU request and limit `50m`)\n2. Share an `emptyDir` volume between them so both can see `/var/log/orders`.\n3. Verify all Pods are **Running** and **Ready** (both containers Ready).\n\n**SPEC:**\n\n- Deployment name: `order-processor-deploy` (edit / replace the existing one — do not rename)\n- Replicas: keep **`2`**\n- Pod template labels: keep `app=order-processor`, `tier=app`\n- Shared volume:\n  - name: `order-logs`\n  - type: `emptyDir`\n  - mount path on **both** containers: `/var/log/orders`\n- Container `order-processor` (existing — update resources as needed):\n  - Image: `rithvikreddyalkanti/order-processor:v1.2`\n  - `containerPort`: `8000`\n  - CPU **request and limit**: `50m`\n  - Memory request and limit: `128Mi`\n- Container `log-shipper` (sidecar — add):\n  - Image: `busybox:1.36`\n  - Command must keep the container running while watching the shared log dir, e.g.  \n    `[\"/bin/sh\", \"-c\", \"tail -F /var/log/orders/orders.log 2>/dev/null || sleep 3600\"]`\n  - CPU **request and limit**: `50m`\n  - Memory request and limit: `64Mi`\n- Ready: **2/2** Pods with **both** containers Ready\n\n**CONSTRAINTS:**\n\n- Capture your updated Deployment in `order-processor-sidecar-l8.yaml` and apply it.\n- Both containers must live in the **same** Pod template (not two separate Deployments).\n- Do **not** use an Init Container for the shipper — this is a long-running sidecar.\n- Do **not** delete the Deployment and recreate under a different name.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l0",
+    "multi-container"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Audit Trail with a Sidecar",
+    "brief": "Audit Trail with a Sidecar",
+    "solution": "# Solution — Audit Trail with a Sidecar\n\nStay in your lab namespace. Update Deployment `order-processor-deploy` so each Pod runs **order-processor** plus a **log-shipper** sidecar sharing emptyDir `order-logs` at `/var/log/orders`. Set CPU **request and limit to `50m`** on both containers (keeps the lab inside a tight shared-cluster quota).\n\nDocs: [Sidecar containers](https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/)\n\n## Solution YAML\n\nSave as `order-processor-sidecar-l8.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: order-processor\n      tier: app\n  template:\n    metadata:\n      labels:\n        app: order-processor\n        tier: app\n    spec:\n      volumes:\n        - name: order-logs\n          emptyDir: {}\n      containers:\n        - name: order-processor\n          image: rithvikreddyalkanti/order-processor:v1.2\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"50m\"\n              memory: \"128Mi\"\n            limits:\n              cpu: \"50m\"\n              memory: \"128Mi\"\n          volumeMounts:\n            - name: order-logs\n              mountPath: /var/log/orders\n        - name: log-shipper\n          image: busybox:1.36\n          command: [\"/bin/sh\", \"-c\", \"tail -F /var/log/orders/orders.log 2>/dev/null || sleep 3600\"]\n          resources:\n            requests:\n              cpu: \"50m\"\n              memory: \"64Mi\"\n            limits:\n              cpu: \"50m\"\n              memory: \"64Mi\"\n          volumeMounts:\n            - name: order-logs\n              mountPath: /var/log/orders\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-processor-sidecar-l8.yaml\nkubectl get deploy order-processor-deploy\nkubectl get pods -l app=order-processor,tier=app\n```\n\nWait until **2** Pods show `READY` **2/2**, then **Submit**.\n\nBoth containers must share the same Pod template (not two Deployments). Do not use an Init Container for the shipper. Work only in your lab namespace (not `default`).\n",
+    "idLabel": "8",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "800m",
+      "memory": "1088Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    },
+    "limitRange": {
+      "defaultRequest": {
+        "cpu": "25m",
+        "memory": "32Mi"
+      },
+      "default": {
+        "cpu": "50m",
+        "memory": "128Mi"
+      },
+      "max": {
+        "cpu": "100m",
+        "memory": "256Mi"
+      }
+    }
+  }
+}

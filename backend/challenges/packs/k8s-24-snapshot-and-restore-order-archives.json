@@ -1,0 +1,46 @@
+{
+  "id": "k8s-24-snapshot-and-restore-order-archives",
+  "number": 224,
+  "finalized": true,
+  "title": "Snapshot and Restore Order Archives",
+  "description": "**SITUATION:**\n\nOps is about to run a risky change against order archives. Before they touch anything, they want a **backup freeze** of the disk “as it is right now.” If the change goes badly, they want a **fresh copy** of that backup mounted somewhere safe — without destroying the original archive disk.\n\nThis lab takes a **VolumeSnapshot** of order archives and restores it to a fresh PVC. The original disk stays intact — you are proving backup/restore, not replacing production in place.\n**YOUR TASK:**\n\n1. Create a **VolumeSnapshot** of the current archive claim (`order-archive-pvc`).\n2. Create a **new** storage claim restored from that snapshot.\n3. Verify the snapshot is ready and the restored claim is **Bound** (use a tiny check Pod `archive-restore-check` mounting it at `/restore` if needed).\n\n**SPEC:**\n\n- VolumeSnapshot name: `order-archive-snap`\n- `volumeSnapshotClassName`: `quickbyte-snapclass`\n- Source: PVC `order-archive-pvc`\n- Restored PVC name: `order-archive-pvc-restore`\n- Restored PVC:\n  - accessModes: `[\"ReadWriteOnce\"]`\n  - storage request: `1Gi`\n  - dataSource:\n    - name: `order-archive-snap`\n    - kind: `VolumeSnapshot`\n    - apiGroup: `snapshot.storage.k8s.io`\n- Snapshot `readyToUse: true`; restored PVC **Bound**\n\n**CONSTRAINTS:**\n\n- Manifest: `order-archive-snapshot-l24.yaml` (snapshot + restore PVC + optional check Pod).\n- Do **not** delete the original archive claim on the happy path.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "storage"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Snapshot and Restore Order Archives",
+    "brief": "Snapshot and Restore Order Archives",
+    "solution": "# Solution — Snapshot and Restore Order Archives\n\nTake VolumeSnapshot `order-archive-snap` of `order-archive-pvc`, then restore into a new PVC `order-archive-pvc-restore` (optional check Pod mounts it at `/restore`).\n\nDocs: [Volume Snapshots](https://kubernetes.io/docs/concepts/storage/volume-snapshots/)\n\n## Solution YAML\n\nSave as `order-archive-snapshot-l24.yaml`:\n\n```yaml\napiVersion: snapshot.storage.k8s.io/v1\nkind: VolumeSnapshot\nmetadata:\n  name: order-archive-snap\nspec:\n  volumeSnapshotClassName: quickbyte-snapclass\n  source:\n    persistentVolumeClaimName: order-archive-pvc\n---\napiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: order-archive-pvc-restore\nspec:\n  accessModes:\n    - ReadWriteOnce\n  resources:\n    requests:\n      storage: 1Gi\n  dataSource:\n    name: order-archive-snap\n    kind: VolumeSnapshot\n    apiGroup: snapshot.storage.k8s.io\n---\napiVersion: v1\nkind: Pod\nmetadata:\n  name: archive-restore-check\nspec:\n  containers:\n    - name: check\n      image: busybox:1.36\n      command: [\"sleep\", \"3600\"]\n      volumeMounts:\n        - name: restore\n          mountPath: /restore\n  volumes:\n    - name: restore\n      persistentVolumeClaim:\n        claimName: order-archive-pvc-restore\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-archive-snapshot-l24.yaml\nkubectl get volumesnapshot order-archive-snap\nkubectl get pvc order-archive-pvc-restore\n```\n\nWait until the snapshot is ready and the restored PVC is **Bound** (when the snapshot CSI is available), then **Submit**. Do not delete the original archive claim.\n",
+    "idLabel": "24",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "600m",
+      "memory": "640Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

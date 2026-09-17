@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: notification-service
+      track: stable
+  template:
+    metadata:
+      labels:
+        app: notification-service
+        track: stable
+    spec:
+      containers:
+        - name: notification-service
+          image: rithvikreddyalkanti/notification-service:v1.0
+          ports:
+            - containerPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service-canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification-service
+      track: canary
+  template:
+    metadata:
+      labels:
+        app: notification-service
+        track: canary
+    spec:
+      containers:
+        - name: notification-service
+          image: rithvikreddyalkanti/notification-service:v1.1
+          ports:
+            - containerPort: 8080
+

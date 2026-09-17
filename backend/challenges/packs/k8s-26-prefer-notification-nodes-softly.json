@@ -1,0 +1,46 @@
+{
+  "id": "k8s-26-prefer-notification-nodes-softly",
+  "number": 226,
+  "finalized": true,
+  "title": "Prefer Notification Nodes Softly",
+  "description": "**SITUATION:**\n\nSMS/email workers are happier on notification-tuned nodes, but the pool is small. If those nodes are full, Notification Service should still start somewhere else rather than sit Pending during a festival rush. You need a **soft preference**, not a hard pin.\n\nThis lab uses **preferred (soft) affinity** for Notification Service. Prefer notification nodes when free, but still schedule elsewhere rather than sit Pending.\n**YOUR TASK:**\n\n1. **Update** Notification Service to use **node affinity** with a preferred rule.\n2. Verify Pods are **Ready** (they may land on preferred nodes when capacity allows).\n\n**SPEC:**\n\n- Deployment name: `notification-service` (do not rename)\n- Replicas: keep **`2`**\n- `affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution`:\n  - weight: `100`\n  - match label `workload=notifications`\n- Do **not** add a required node affinity rule\n- Ready: **2/2** Pods Ready\n\n**CONSTRAINTS:**\n\n- Manifest: `notification-nodeaffinity-l26.yaml`.\n- Use **nodeAffinity**, not `nodeSelector`.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "scheduling"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Prefer Notification Nodes Softly",
+    "brief": "Prefer Notification Nodes Softly",
+    "solution": "# Solution — Prefer Notification Nodes Softly\n\nUpdate `notification-service` with preferred (soft) node affinity for `workload=notifications`. Do not add a required rule.\n\nDocs: [Node affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity)\n\n## Solution YAML\n\nSave as `notification-nodeaffinity-l26.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notification-service\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: notification-service\n  template:\n    metadata:\n      labels:\n        app: notification-service\n    spec:\n      affinity:\n        nodeAffinity:\n          preferredDuringSchedulingIgnoredDuringExecution:\n            - weight: 100\n              preference:\n                matchExpressions:\n                  - key: workload\n                    operator: In\n                    values:\n                      - notifications\n      containers:\n        - name: notification-service\n          image: rithvikreddyalkanti/notification-service:v1.0\n          ports:\n            - containerPort: 8080\n```\n\n## Declarative\n\n```bash\nkubectl apply -f notification-nodeaffinity-l26.yaml\nkubectl get deploy notification-service -o yaml | grep -A20 affinity\nkubectl get pods -l app=notification-service -o wide\n```\n\nWait until **2/2** Pods are Ready, then **Submit**.\n",
+    "idLabel": "26",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "800m",
+      "memory": "896Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

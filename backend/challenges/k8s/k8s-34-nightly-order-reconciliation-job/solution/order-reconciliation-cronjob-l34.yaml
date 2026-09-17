@@ -1,0 +1,16 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: order-reconciliation-nightly
+spec:
+  schedule: "15 1 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: order-reconciliation
+              image: rithvikreddyalkanti/order-reconciliation:v1.0
+              command: ["/reconciliation", "--mode=full"]

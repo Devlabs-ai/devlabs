@@ -1,0 +1,46 @@
+{
+  "id": "k8s-16-identity-for-settlement-export",
+  "number": 216,
+  "finalized": true,
+  "title": "Identity for Settlement Export",
+  "description": "**SITUATION:**\n\nFinance will soon run automation that talks to the Kubernetes API (for example, listing Payment Handler Pods). That workload would use the namespace **`default` ServiceAccount** unless you give it a dedicated one — and `default` is a blunt shared identity. First step: create a **dedicated identity** and grant it **only** the permission to read Pods — no Job yet.\n\n(`devlabs-learner` is only for your interactive kubectl session in this lab product; do not use it for the Finance automation identity.)\n\nThis lab creates a **ServiceAccount + RBAC** identity with least privilege (list/get Pods only). You are not running the Job yet — identity first, Job next.\n**YOUR TASK:**\n\n1. Create a **ServiceAccount** for settlement export automation.\n2. Create a **Role** that can only get/list Pods in your namespace.\n3. Create a **RoleBinding** that attaches the Role to that ServiceAccount.\n4. Verify the three objects exist (no Pod/Job required in this lab).\n\n**SPEC:**\n\n- ServiceAccount name: `settlement-exporter`\n- Role name: `settlement-exporter-pod-reader`\n  - verbs: `[\"get\", \"list\"]`\n  - resources: `[\"pods\"]`\n  - apiGroups: `[\"\"]`\n- RoleBinding name: `settlement-exporter-pod-reader`\n  - roleRef: Role `settlement-exporter-pod-reader`\n  - subject: ServiceAccount `settlement-exporter` in your namespace\n\n**CONSTRAINTS:**\n\n- Manifest: `settlement-rbac-identity-l16.yaml` (SA + Role + RoleBinding).\n- Do **not** create a ClusterRole or bind `cluster-admin`.\n- Do **not** use, modify, or bind to the `default` or `devlabs-learner` ServiceAccounts for this identity.\n- Work only in your lab namespace (not the `default` namespace).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "rbac"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Identity for Settlement Export",
+    "brief": "Identity for Settlement Export",
+    "solution": "# Solution — Identity for Settlement Export\n\nStay in your lab namespace. Create a dedicated ServiceAccount plus least-privilege Role/RoleBinding so settlement automation can only get/list Pods (no Job yet).\n\nDocs: [RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) · [ServiceAccounts](https://kubernetes.io/docs/concepts/security/service-accounts/)\n\n## Solution YAML\n\nSave as `settlement-rbac-identity-l16.yaml`:\n\n```yaml\napiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: settlement-exporter\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: Role\nmetadata:\n  name: settlement-exporter-pod-reader\nrules:\n  - apiGroups: [\"\"]\n    resources: [\"pods\"]\n    verbs: [\"get\", \"list\"]\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata:\n  name: settlement-exporter-pod-reader\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: Role\n  name: settlement-exporter-pod-reader\nsubjects:\n  - kind: ServiceAccount\n    name: settlement-exporter\n```\n\n## Declarative\n\n```bash\nkubectl apply -f settlement-rbac-identity-l16.yaml\nkubectl get sa settlement-exporter\nkubectl get role settlement-exporter-pod-reader\nkubectl get rolebinding settlement-exporter-pod-reader\n```\n\nConfirm all three exist, then **Submit**. Do not create a ClusterRole or use the `default` ServiceAccount.\n",
+    "idLabel": "16",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "500m",
+      "memory": "512Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

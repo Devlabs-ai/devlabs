@@ -1,0 +1,46 @@
+{
+  "id": "k8s-02-scale-out-with-a-replicaset",
+  "number": 202,
+  "finalized": true,
+  "title": "Scale Out with a ReplicaSet",
+  "description": "**SITUATION:**\n\nDuring the 6–9 PM peak rush, a single Order Processor Pod can't keep up. QuickByte is losing orders due to timeouts. Ops wants **three identical copies** of the Order Processor running at the same time — still as plain Pods, but managed as a group.\n\nThis lab is about **ReplicaSets**: one controller that owns several identical Pods so copies stay up when one dies. You are not adding a Service or Deployment yet — just get three Order Processor Pods managed as a group.\n**YOUR TASK:**\n\n1. Create a **ReplicaSet** for the Order Processor service.\n2. Verify all replicas are **Running** and **Ready (1/1)**.\n\n**SPEC:**\n\n- ReplicaSet name: `order-processor-rs`\n- Replicas: `3`\n- Pod template labels: `app=order-processor`, `version=v1.0`\n- Selector must match pod template labels\n- Container name: `order-processor`\n- Image: `rithvikreddyalkanti/order-processor:v1.0`\n- `containerPort`: `8000`\n- Resource requests (per Pod): `100m` CPU, `128Mi` memory\n- Ready: **3/3** Pods Ready **1/1**\n\n**CONSTRAINTS:**\n\n- ReplicaSet must be defined in `order-processor-rs-l2.yaml`.\n- Do **not** use a Deployment yet — that comes in the next challenge.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l0",
+    "replicasets"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Scale Out with a ReplicaSet",
+    "brief": "Scale Out with a ReplicaSet",
+    "solution": "# Solution — Scale Out with a ReplicaSet\n\nStay in your lab namespace. Create ReplicaSet `order-processor-rs` with **3** replicas so Order Processor runs as a managed group of identical Pods (not a Deployment yet).\n\nDocs: [ReplicaSet](https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/)\n\n## Solution YAML\n\nSave as `order-processor-rs-l2.yaml` (Scratch pad or a file in your lab home):\n\n```yaml\napiVersion: apps/v1\nkind: ReplicaSet\nmetadata:\n  name: order-processor-rs\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: order-processor\n      version: v1.0\n  template:\n    metadata:\n      labels:\n        app: order-processor\n        version: v1.0\n    spec:\n      containers:\n        - name: order-processor\n          image: rithvikreddyalkanti/order-processor:v1.0\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n```\n\nSelector labels must match the Pod template labels (`app=order-processor`, `version=v1.0`).\n\n## Declarative\n\nApply the manifest, then check replicas:\n\n```bash\nkubectl apply -f order-processor-rs-l2.yaml\nkubectl get rs order-processor-rs\nkubectl get pods -l app=order-processor,version=v1.0 -o wide\n```\n\nWait until **3** Pods are `Running` and `READY` is `1/1` each, then **Submit**.\n\nDo not create a Deployment — that is the next challenge. Work only in your lab namespace (not `default`).\n",
+    "idLabel": "2",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "900m",
+      "memory": "1024Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

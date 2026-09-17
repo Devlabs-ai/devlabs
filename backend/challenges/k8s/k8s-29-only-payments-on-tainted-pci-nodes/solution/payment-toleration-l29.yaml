@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-handler
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payment-handler
+  template:
+    metadata:
+      labels:
+        app: payment-handler
+    spec:
+      tolerations:
+        - key: pci
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      containers:
+        - name: payment-handler
+          image: rithvikreddyalkanti/payment-handler:v1.0
+          ports:
+            - containerPort: 8000

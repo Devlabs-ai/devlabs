@@ -1,0 +1,46 @@
+{
+  "id": "k8s-05-expose-order-processor-for-qa",
+  "number": 205,
+  "finalized": true,
+  "title": "Expose Order Processor for QA",
+  "description": "**SITUATION:**\n\nOrder Processor and Payment Handler can talk inside the cluster. QA now needs to hit Order Processor **from outside the cluster** — a stable URL for manual and automated tests. `kubectl port-forward` works for developers, but QA wants something that survives Pod restarts without someone holding a tunnel open.\n\nThis lab creates a **NodePort Service**. In production, QA would curl `NodeIP:30080` once network and security groups allow it. On this shared lab cluster, a direct `NodeIP:nodePort` curl from your terminal often **times out** — that does not mean your Service is wrong.\n**YOUR TASK:**\n\n1. Create a **NodePort Service** that exposes the Order Processor Deployment (exact name, selectors, and `nodePort: 30080` in SPEC).\n2. Verify the Service is correct: `type=NodePort`, `nodePort=30080`, and **ready Endpoints**. Optionally smoke-test the app with `kubectl port-forward` or an in-cluster curl to the Service — do **not** expect `curl http://<NodeIP>:30080/...` from the lab terminal to work here.\n\n**SPEC:**\n\n- Service name: `order-processor-svc`\n- Type: **NodePort**\n- Selector: `app=order-processor`, `version=v1.1`\n- Port: `8000`\n- Target port: `8000`\n- Node port: `30080` (use this exact value)\n- Endpoints: at least one ready address\n\n**CONSTRAINTS:**\n\n- Service must be defined in `order-processor-svc-l5.yaml`.\n- Do **not** use `LoadBalancer` (cost control on the shared lab cluster).\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l0",
+    "services"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Expose Order Processor for QA",
+    "brief": "Expose Order Processor for QA",
+    "solution": "# Solution — Expose Order Processor for QA\n\nStay in your lab namespace. Order Processor Pods (labels `app=order-processor`, `version=v1.1`) should already be running. Create NodePort Service `order-processor-svc` on node port **30080** so QA *can* reach the app via `NodeIP:30080` when the network allows it (no laptop holding `port-forward` for them).\n\nDocs: [Service NodePort](https://kubernetes.io/docs/concepts/services-networking/service/#type-nodeport)\n\n## Solution YAML\n\nSave as `order-processor-svc-l5.yaml` (Scratch pad or a file in your lab home):\n\n```yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: order-processor-svc\nspec:\n  type: NodePort\n  selector:\n    app: order-processor\n    version: v1.1\n  ports:\n    - port: 8000\n      targetPort: 8000\n      nodePort: 30080\n```\n\n## Declarative\n\nApply the Service, then confirm type, node port, and Endpoints:\n\n```bash\nkubectl apply -f order-processor-svc-l5.yaml\nkubectl get svc order-processor-svc\nkubectl get endpoints order-processor-svc\n```\n\nYou should see `TYPE=NodePort`, `8000:30080/TCP`, and at least one ready Endpoint address.\n\nOptional smoke-test from the lab terminal (NodeIP curls often time out here — use port-forward instead):\n\n```bash\nkubectl port-forward svc/order-processor-svc 8000:8000\n# in another shell: curl -sS http://127.0.0.1:8000/health\n```\n\nThen **Submit**. Do not use `LoadBalancer`. Work only in your lab namespace (not `default`).\n",
+    "idLabel": "5",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "800m",
+      "memory": "896Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "id": "k8s-14-give-slow-starters-time-to-boot",
+  "number": 214,
+  "finalized": true,
+  "title": "Give Slow Starters Time to Boot",
+  "description": "**SITUATION:**\n\nA heavier Order Processor build (JIT / schema warmup) takes **~25 seconds** before `/health` is OK. The existing liveness probe kills the container mid-warmup → **CrashLoopBackOff**. Pattern: a **startup probe** gates liveness/readiness until the app has finished starting.\n\nConfirm the failure:\n\n```bash\nkubectl get pods -l app=order-processor\n```\n\nThis lab adds a **startup probe** so slow boots are not killed by liveness during warmup. Keep existing live/ready probes in place — startup just gates them until the app is actually healthy.\n**YOUR TASK:**\n\n1. **Update** the Deployment to add an HTTP **startup probe** on `/health` (keep image `slow-order-processor:1.0`).\n2. Keep existing liveness and readiness probes.\n3. Verify Pods become Ready without CrashLooping (allow ~25s+ for warmup).\n\n**SPEC:**\n\n- Deployment name: `order-processor-deploy` (do not rename)\n- Replicas: keep **`2`**\n- Image: keep `rithvikreddyalkanti/slow-order-processor:1.0`\n- Startup probe on container `order-processor`:\n  - `httpGet.path`: `/health`\n  - `httpGet.port`: `8000`\n  - `periodSeconds`: `5`\n  - `failureThreshold`: `30`  (≈ 150s max startup window)\n- Preserve existing liveness and readiness probes (`initialDelaySeconds=3`, `periodSeconds=3`, `failureThreshold=3`)\n- Ready: **2/2** Pods Ready\n\n**CONSTRAINTS:**\n\n- Capture the updated Deployment in `order-processor-startup-l14.yaml` and apply it.\n- Do **not** remove liveness or readiness — add startup alongside them.\n- Do **not** switch to `order-processor:v1.2` to “fix” the slow boot — use the startup probe.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l0",
+    "probes"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Give Slow Starters Time to Boot",
+    "brief": "Give Slow Starters Time to Boot",
+    "solution": "# Solution — Give Slow Starters Time to Boot\n\nStay in your lab namespace. PRE RUN uses **`slow-order-processor:1.0`**: the process listens immediately, but `/health` returns **503 for ~25s**. Existing liveness (`3s` / `3s` / `failureThreshold=3`) kills it mid-warmup → CrashLoopBackOff. Add an HTTP **startup** probe on `/health` so liveness/readiness wait out the warmup. Keep the slow image and the existing live/ready probes.\n\nDocs: [Startup probe](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-startup-probes)\n\n## Optional: confirm the CrashLoop before you fix it\n\n```bash\nkubectl get pods -l app=order-processor\nkubectl describe pod -l app=order-processor | grep -A4 \"Liveness\\|Warning\\|Last State\"\n```\n\n## Solution YAML\n\nSave as `order-processor-startup-l14.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: order-processor\n  template:\n    metadata:\n      labels:\n        app: order-processor\n    spec:\n      containers:\n        - name: order-processor\n          image: rithvikreddyalkanti/slow-order-processor:1.0\n          imagePullPolicy: Always\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n          startupProbe:\n            httpGet:\n              path: /health\n              port: 8000\n            periodSeconds: 5\n            failureThreshold: 30\n          livenessProbe:\n            httpGet:\n              path: /health\n              port: 8000\n            initialDelaySeconds: 3\n            periodSeconds: 3\n            failureThreshold: 3\n          readinessProbe:\n            httpGet:\n              path: /health\n              port: 8000\n            initialDelaySeconds: 3\n            periodSeconds: 3\n            failureThreshold: 3\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-processor-startup-l14.yaml\nkubectl rollout status deploy/order-processor-deploy\nkubectl get pods -l app=order-processor\n```\n\nWarmup still takes ~25s — wait until **2** Pods are Ready without CrashLooping, then **Submit**.\n\nKeep image `slow-order-processor:1.0`. Do not remove liveness or readiness. Work only in your lab namespace (not `default`).\n",
+    "idLabel": "14",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "800m",
+      "memory": "896Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  }
+}

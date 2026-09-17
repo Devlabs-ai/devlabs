@@ -1,0 +1,46 @@
+{
+  "id": "k8s-37-scale-notifications-with-load",
+  "number": 237,
+  "finalized": true,
+  "title": "Scale Notifications With Load",
+  "description": "**SITUATION:**\n\nFestival sales flood SMS/email. Manually bumping replicas is slow. Notification Service should **add copies when CPU is busy** and shrink when quiet — within a safe min/max.\n\nThis lab attaches an **HPA** so Notification Service scales on CPU within min/max bounds. You are not resizing each Pod’s CPU yet — that is vertical sizing in a later lab.\n**YOUR TASK:**\n\n1. Create a **HorizontalPodAutoscaler** for Notification Service.\n2. Generate or wait for load (platform may provide a load script) until replicas rise above the minimum.\n3. Verify the HPA is active and the Deployment scales within bounds.\n\n**SPEC:**\n\n- HPA name: `notification-service-hpa`\n- Target: Deployment `notification-service`\n- Min replicas: **1**\n- Max replicas: **5**\n- Metric: CPU utilization **50%** of requested CPU (or platform-equivalent `averageUtilization: 50`)\n- Success: HPA shows targets; replica count can move between 1 and 5 under load\n\n**CONSTRAINTS:**\n\n- Manifest: `notification-hpa-l37.yaml`.\n- Deployment must have CPU **requests** (already set on the Deployment) — HPA needs them for CPU metrics.\n- Do not set a fixed replica count that fights the HPA after it is applied (leave replicas to the HPA).\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "autoscaling"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Scale Notifications With Load",
+    "brief": "Scale Notifications With Load",
+    "solution": "# Solution — Scale Notifications With Load\n\nStay in your lab namespace. Attach an HPA so Notification Service scales on CPU between 1 and 5 replicas.\n\nDocs: [HorizontalPodAutoscaler](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)\n\n## Solution YAML\n\nSave as `notification-hpa-l37.yaml`:\n\n```yaml\napiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: notification-service-hpa\nspec:\n  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: notification-service\n  minReplicas: 1\n  maxReplicas: 5\n  metrics:\n    - type: Resource\n      resource:\n        name: cpu\n        target:\n          type: Utilization\n          averageUtilization: 50\n```\n\nThe Deployment must already have CPU **requests**. After applying the HPA, leave replica count to the autoscaler.\n\n## Declarative\n\n```bash\nkubectl apply -f notification-hpa-l37.yaml\nkubectl get hpa notification-service-hpa\nkubectl describe hpa notification-service-hpa\n```\n\nConfirm targets show CPU 50% and bounds 1–5, then **Submit**. Generating load is optional for grading if the HPA object matches SPEC.\n",
+    "idLabel": "37",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1100m",
+      "memory": "1280Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

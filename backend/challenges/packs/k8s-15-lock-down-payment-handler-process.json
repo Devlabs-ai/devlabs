@@ -1,0 +1,46 @@
+{
+  "id": "k8s-15-lock-down-payment-handler-process",
+  "number": 215,
+  "finalized": true,
+  "title": "Lock Down Payment Handler Process",
+  "description": "**SITUATION:**\n\nSecurity reviewed Payment Handler and flagged “runs as whatever the image defaults to, full rootfs writable, Linux capabilities left on.” For payment workloads they want the process **non-root**, a **read-only root filesystem**, and **dropped capabilities** — without changing business logic.\n\nThis lab hardens Payment Handler with a **SecurityContext** (non-root, read-only rootfs, drop caps). Business logic and image tag stay the same — only the Pod security posture changes.\n**YOUR TASK:**\n\n1. **Update** `payment-handler` with a container **securityContext** (and Pod-level settings if needed for the image).\n2. Verify Pods stay **Ready** after the rollout.\n\n**SPEC:**\n\n- Deployment name: `payment-handler` (do not rename)\n- Replicas: keep **`2`**\n- Container `securityContext`:\n  - `runAsNonRoot: true`\n  - `runAsUser: 1000` (if the image supports it; otherwise use the platform-documented non-root UID)\n  - `allowPrivilegeEscalation: false`\n  - `readOnlyRootFilesystem: true`\n  - `capabilities.drop: [\"ALL\"]`\n- If the app needs a writable temp dir, add an `emptyDir` mounted at `/tmp`\n- Ready: **2/2** Pods Ready\n\n**CONSTRAINTS:**\n\n- Manifest: `payment-handler-securitycontext-l15.yaml`.\n- Do **not** set `privileged: true`.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "security"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Lock Down Payment Handler Process",
+    "brief": "Lock Down Payment Handler Process",
+    "solution": "# Solution — Lock Down Payment Handler Process\n\nStay in your lab namespace. Update Deployment `payment-handler` with a hardened container **securityContext** (non-root, read-only rootfs, drop all capabilities). Mount an emptyDir at `/tmp` if the app needs a writable temp dir.\n\nDocs: [Configure a Security Context](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/)\n\n## Solution YAML\n\nSave as `payment-handler-securitycontext-l15.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payment-handler\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: payment-handler\n  template:\n    metadata:\n      labels:\n        app: payment-handler\n    spec:\n      securityContext:\n        runAsNonRoot: true\n        runAsUser: 1000\n        fsGroup: 1000\n      containers:\n        - name: payment-handler\n          image: rithvikreddyalkanti/payment-handler:v1.0\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n          securityContext:\n            runAsNonRoot: true\n            runAsUser: 1000\n            allowPrivilegeEscalation: false\n            readOnlyRootFilesystem: true\n            capabilities:\n              drop:\n                - ALL\n          volumeMounts:\n            - name: tmp\n              mountPath: /tmp\n      volumes:\n        - name: tmp\n          emptyDir: {}\n```\n\n## Declarative\n\n```bash\nkubectl apply -f payment-handler-securitycontext-l15.yaml\nkubectl get deploy payment-handler\nkubectl get pods -l app=payment-handler\nkubectl get deploy payment-handler -o yaml | grep -A12 securityContext\n```\n\nWait until **2** Pods are Ready, then **Submit**.\n\nDo not set `privileged: true`. Work only in your lab namespace (not `default`).\n",
+    "idLabel": "15",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "800m",
+      "memory": "896Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

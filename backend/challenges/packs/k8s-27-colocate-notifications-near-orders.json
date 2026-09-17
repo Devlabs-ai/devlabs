@@ -1,0 +1,46 @@
+{
+  "id": "k8s-27-colocate-notifications-near-orders",
+  "number": 227,
+  "finalized": true,
+  "title": "Colocate Notifications Near Orders",
+  "description": "**SITUATION:**\n\nAfter an order is created, Notification Service fires SMS/email. When those Pods land on far-away nodes, queue lag shows up in dashboards. Ops wants Notification Pods to **prefer sitting on the same node as Order Processor** when possible — still soft enough that the app can schedule if orders move.\n\nThis lab colocates Notification near Order Processor with **pod affinity** (still soft). The goal is lower queue lag when possible — not a hard requirement that blocks scheduling.\n**YOUR TASK:**\n\n1. **Update** `notification-service` with **pod affinity** toward Order Processor Pods.\n2. Verify Notification Pods are **Ready**.\n\n**SPEC:**\n\n- Deployment name: `notification-service` (do not rename)\n- Replicas: keep **`2`**\n- `affinity.podAffinity.preferredDuringSchedulingIgnoredDuringExecution`:\n  - weight: `100`\n  - topologyKey: `kubernetes.io/hostname`\n  - labelSelector: `app=order-processor`\n- Ready: **2/2** Notification Pods Ready\n\n**CONSTRAINTS:**\n\n- Manifest: `notification-podaffinity-l27.yaml`.\n- Affinity targets **Pods**, not node labels.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "scheduling"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Colocate Notifications Near Orders",
+    "brief": "Colocate Notifications Near Orders",
+    "solution": "# Solution — Colocate Notifications Near Orders\n\nUpdate `notification-service` with preferred pod affinity toward Pods labeled `app=order-processor` (`topologyKey: kubernetes.io/hostname`).\n\nDocs: [Inter-pod affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity)\n\n## Solution YAML\n\nSave as `notification-podaffinity-l27.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notification-service\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: notification-service\n  template:\n    metadata:\n      labels:\n        app: notification-service\n    spec:\n      affinity:\n        podAffinity:\n          preferredDuringSchedulingIgnoredDuringExecution:\n            - weight: 100\n              podAffinityTerm:\n                topologyKey: kubernetes.io/hostname\n                labelSelector:\n                  matchLabels:\n                    app: order-processor\n      containers:\n        - name: notification-service\n          image: rithvikreddyalkanti/notification-service:v1.0\n          ports:\n            - containerPort: 8080\n```\n\n## Declarative\n\n```bash\nkubectl apply -f notification-podaffinity-l27.yaml\nkubectl get deploy notification-service -o yaml | grep -A30 podAffinity\nkubectl get pods -l app=notification-service -o wide\n```\n\nWait until **2/2** Notification Pods are Ready, then **Submit**.\n",
+    "idLabel": "27",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "900m",
+      "memory": "1024Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

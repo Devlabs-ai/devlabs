@@ -1,0 +1,46 @@
+{
+  "id": "k8s-25-pin-payment-handler-to-payment-nodes",
+  "number": 225,
+  "finalized": true,
+  "title": "Pin Payment Handler to Payment Nodes",
+  "description": "**SITUATION:**\n\nPayment traffic must stay on a reserved pool of machines (PCI reviews, dedicated NICs). Today Payment Handler can land on any node — including general Order Processor nodes. Platform labeled the payment pool; you need to tell Kubernetes: **only schedule Payment Handler there**.\n\nThis lab **pins Payment Handler** onto payment-labeled nodes with a hard rule (nodeSelector / required affinity). Soft preferences come next; here “anywhere else” is not acceptable.\n**YOUR TASK:**\n\n1. **Update** the Payment Handler Deployment so Pods use a **nodeSelector**.\n2. Verify Pods are **Ready** and running only on nodes with that label.\n\n**SPEC:**\n\n- Deployment name: `payment-handler` (do not rename)\n- Replicas: keep **`2`**\n- `nodeSelector`: `workload: payments`\n- Keep existing container image, labels, and port\n- Ready: **2/2** Pods Ready on matching nodes\n\n**CONSTRAINTS:**\n\n- Manifest: `payment-handler-nodeselector-l25.yaml`.\n- Do **not** use nodeAffinity / taints for this lab — plain `nodeSelector` only.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "scheduling"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Pin Payment Handler to Payment Nodes",
+    "brief": "Pin Payment Handler to Payment Nodes",
+    "solution": "# Solution — Pin Payment Handler to Payment Nodes\n\nUpdate Deployment `payment-handler` with a hard `nodeSelector` so replicas only land on nodes labeled `workload=payments`.\n\nDocs: [Assigning Pods to Nodes](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/)\n\n## Solution YAML\n\nSave as `payment-handler-nodeselector-l25.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payment-handler\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: payment-handler\n  template:\n    metadata:\n      labels:\n        app: payment-handler\n    spec:\n      nodeSelector:\n        workload: payments\n      containers:\n        - name: payment-handler\n          image: rithvikreddyalkanti/payment-handler:v1.0\n          ports:\n            - containerPort: 8000\n```\n\n## Declarative\n\n```bash\nkubectl apply -f payment-handler-nodeselector-l25.yaml\nkubectl get deploy payment-handler -o wide\nkubectl get pods -l app=payment-handler -o wide\n```\n\nWait until **2/2** Pods are Ready on payment-labeled nodes, then **Submit**. Use `nodeSelector` only (no affinity/taints).\n",
+    "idLabel": "25",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "800m",
+      "memory": "896Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

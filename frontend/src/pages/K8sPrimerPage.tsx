@@ -73,7 +73,7 @@ export default function K8sPrimerPage(): JSX.Element {
           <p className="spark-primer-section-eyebrow">Next</p>
           <h2 className="spark-primer-section-title">Open a lab</h2>
           <p className="spark-primer-copy">
-            You do not need every Kubernetes resource first. Read Containers, runtimes, and
+            You do not need every Kubernetes resource first. Read Containers, Runtimes, and
             Pods for the core entities, then practice on the track. Official docs if you want
             more depth after a few labs.
           </p>

@@ -1,0 +1,46 @@
+{
+  "id": "k8s-10-firewall-rules-between-order-and-payment",
+  "number": 210,
+  "finalized": true,
+  "title": "Firewall Rules Between Order and Payment",
+  "description": "**SITUATION:**\n\nSecurity reviewed QuickByte’s cluster and flagged **open east-west traffic**.\n\nIn networking jargon:\n- **North-south** = traffic in/out of the cluster (browsers, partners, load balancers).\n- **East-west** = traffic **between Pods inside** the cluster (Order Processor → Payment Handler, debug Pod → anything, Notification Service → Payment Handler, etc.).\n\nKubernetes’ default is permissive east-west: **any Pod can dial any other Pod** on any port, as long as it knows the Service DNS or Pod IP. There is no host firewall between them unless you add one.\n\nThat is the problem for payments. Payment Handler should only take calls from Order Processor on `handler:8000`. Today a random debug Pod, a compromised sidecar, or a future Notification Service could also reach the payment API — same network path, no gate.\n\nOps wants a **NetworkPolicy**: allow east-west to Payment Handler **only** from Order Processor (TCP **8000**); block everyone else. You are not changing Ingress/north-south in this lab — only Pod-to-Pod rules.\n\nThis lab adds a **NetworkPolicy** so only Order Processor may reach Payment Handler. Workloads are already running — your job is the firewall rule, not redeploying the apps from scratch.\n**YOUR TASK:**\n\n1. Create a **NetworkPolicy** that allows ingress to Payment Handler Pods **only** from Order Processor Pods on TCP port **8000**.\n2. Deny other ingress to Payment Handler (default-deny for that app via the policy).\n3. Verify the policy is applied and selects the Payment Handler Pods.\n\n**SPEC:**\n\n- NetworkPolicy name: `payment-handler-allow-orders`\n- `podSelector`: `app=payment-handler`\n- `policyTypes`: `[\"Ingress\"]`\n- Allow ingress:\n  - from Pods with label `app=order-processor`\n  - ports: TCP `8000`\n- Do not open egress rules in this lab (leave egress unrestricted / unspecified)\n\n**CONSTRAINTS:**\n\n- NetworkPolicy must be defined in `payment-handler-netpol-l10.yaml`.\n- Do **not** apply a namespace-wide default-deny that breaks DNS / platform agents unless the policy above is carefully scoped — target Payment Handler only.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l0",
+    "networkpolicy"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Firewall Rules Between Order and Payment",
+    "brief": "Firewall Rules Between Order and Payment",
+    "solution": "# Solution — Firewall Rules Between Order and Payment\n\nStay in your lab namespace. Create NetworkPolicy `payment-handler-allow-orders` so only Pods labeled `app=order-processor` may reach Payment Handler on TCP **8000**.\n\nDocs: [NetworkPolicies](https://kubernetes.io/docs/concepts/services-networking/network-policies/)\n\n## Solution YAML\n\nSave as `payment-handler-netpol-l10.yaml`:\n\n```yaml\napiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: payment-handler-allow-orders\nspec:\n  podSelector:\n    matchLabels:\n      app: payment-handler\n  policyTypes:\n    - Ingress\n  ingress:\n    - from:\n        - podSelector:\n            matchLabels:\n              app: order-processor\n      ports:\n        - protocol: TCP\n          port: 8000\n```\n\n## Declarative\n\n```bash\nkubectl apply -f payment-handler-netpol-l10.yaml\nkubectl get networkpolicy payment-handler-allow-orders\nkubectl describe networkpolicy payment-handler-allow-orders\n```\n\nConfirm the policy selects `app=payment-handler` and allows ingress from `app=order-processor` on TCP 8000, then **Submit**.\n\nDo not apply a namespace-wide default-deny that breaks DNS. Work only in your lab namespace (not `default`).\n",
+    "idLabel": "10",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1000m",
+      "memory": "1152Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

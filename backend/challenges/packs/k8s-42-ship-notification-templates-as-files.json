@@ -1,0 +1,46 @@
+{
+  "id": "k8s-42-ship-notification-templates-as-files",
+  "number": 242,
+  "finalized": true,
+  "title": "Ship Notification Templates as Files",
+  "description": "**SITUATION:**\n\nTemplate bodies are multi-line HTML/text — awkward as environment variables. The app expects **files on disk**. ConfigMaps can be exposed as a volume so each key becomes a file.\n\nThis lab mounts a ConfigMap as **files on disk** for multi-line notification templates. Env vars are awkward for HTML bodies; volume-mounted keys become real files the app can read.\n**YOUR TASK:**\n\n1. Create a **ConfigMap** with at least two template keys.\n2. **Update** the Deployment to mount it at `/etc/notification/templates`.\n3. Verify Pods are Ready and the files are visible inside the container.\n\n**SPEC:**\n\n- ConfigMap name: `notification-templates`\n- Data keys (filenames):\n  - `order-confirm.txt`: `Your QuickByte order is confirmed.`\n  - `payment-ok.txt`: `Payment received. Thank you.`\n- Deployment name: `notification-service`\n- Volume name: `templates`\n- Mount path: `/etc/notification/templates`\n- Ready: **2/2**; `order-confirm.txt` and `payment-ok.txt` exist in the mount\n\n**CONSTRAINTS:**\n\n- ConfigMap in `notification-templates-l42.yaml`; Deployment update in `notification-templates-deploy-l42.yaml`.\n- Mount as files (volume), **not** only `env` / `envFrom`.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "configmaps"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Ship Notification Templates as Files",
+    "brief": "Ship Notification Templates as Files",
+    "solution": "# Solution — Ship Notification Templates as Files\n\nStay in your lab namespace. Create ConfigMap `notification-templates` and mount it as files at `/etc/notification/templates` on Notification Service.\n\nDocs: [ConfigMap as files](https://kubernetes.io/docs/concepts/configuration/configmap/#using-configmaps-as-files-from-a-pod)\n\n## Solution YAML\n\nSave as `notification-templates-l42.yaml`:\n\n```yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: notification-templates\ndata:\n  order-confirm.txt: \"Your QuickByte order is confirmed.\"\n  payment-ok.txt: \"Payment received. Thank you.\"\n```\n\nSave as `notification-templates-deploy-l42.yaml` (Deployment update):\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notification-service\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: notification-service\n  template:\n    metadata:\n      labels:\n        app: notification-service\n    spec:\n      containers:\n        - name: notification-service\n          image: rithvikreddyalkanti/notification-service:v1.0\n          ports:\n            - containerPort: 8080\n          volumeMounts:\n            - name: templates\n              mountPath: /etc/notification/templates\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n      volumes:\n        - name: templates\n          configMap:\n            name: notification-templates\n```\n\n## Declarative\n\n```bash\nkubectl apply -f notification-templates-l42.yaml\nkubectl apply -f notification-templates-deploy-l42.yaml\nkubectl rollout status deploy/notification-service\nPOD=$(kubectl -n \"$LEARNER_NS\" get pod -l app=notification-service -o jsonpath='{.items[0].metadata.name}')\nkubectl exec \"$POD\" -- ls /etc/notification/templates\n```\n\nConfirm both template files exist in the mount and Deployment is **2/2** Ready, then **Submit**. Mount as a volume — not only `env` / `envFrom`.\n",
+    "idLabel": "42",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "800m",
+      "memory": "896Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

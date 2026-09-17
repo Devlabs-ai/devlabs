@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Grade l1-namespace-and-pod — namespaced checks only.
+# Grade l1-namespace-and-pod — QuickByte Order Processor Pod.
 set -euo pipefail
 
 : "${LEARNER_NS:?LEARNER_NS required}"
@@ -15,34 +15,46 @@ pass() {
   exit 0
 }
 
-POD_NAME="front-desk"
+POD_NAME="order-processor-pod"
+WANT_IMAGE="rithvikreddyalkanti/order-processor:v1.0"
+WANT_CONTAINER="order-processor"
+WANT_PORT="8000"
 
 if ! kubectl -n "$LEARNER_NS" get pod "$POD_NAME" >/dev/null 2>&1; then
   fail "pod/${POD_NAME} not found in namespace ${LEARNER_NS}"
 fi
 
-APP_LABEL="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.metadata.labels.app}' 2>/dev/null || true)"
-TIER_LABEL="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.metadata.labels.tier}' 2>/dev/null || true)"
+CONTAINER_NAME="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.spec.containers[0].name}' 2>/dev/null || true)"
 IMAGE="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.spec.containers[0].image}' 2>/dev/null || true)"
 PHASE="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+READY="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
 PORTS="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.spec.containers[0].ports[*].containerPort}' 2>/dev/null || true)"
+CPU_REQ="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.spec.containers[0].resources.requests.cpu}' 2>/dev/null || true)"
+MEM_REQ="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.spec.containers[0].resources.requests.memory}' 2>/dev/null || true)"
 
-[[ "$APP_LABEL" == "guestbook" ]] || fail "label app must be guestbook (got '${APP_LABEL}')"
-[[ "$TIER_LABEL" == "frontend" ]] || fail "label tier must be frontend (got '${TIER_LABEL}')"
-[[ "$IMAGE" == *nginx* ]] || fail "container image must be nginx (got '${IMAGE}')"
+[[ "$CONTAINER_NAME" == "$WANT_CONTAINER" ]] || fail "container name must be ${WANT_CONTAINER} (got '${CONTAINER_NAME}')"
+[[ "$IMAGE" == "$WANT_IMAGE" ]] || fail "image must be ${WANT_IMAGE} (got '${IMAGE}')"
 [[ "$PHASE" == "Running" ]] || fail "pod phase must be Running (got '${PHASE}')"
+[[ "$READY" == "True" ]] || fail "pod must be Ready (got '${READY}')"
 
-# Require containerPort 80 to be declared (not merely that nginx listens by default).
 if [[ -z "$PORTS" ]]; then
-  fail "containerPort 80 must be declared on the container (got no ports)"
+  fail "containerPort ${WANT_PORT} must be declared on the container (got no ports)"
 fi
-FOUND_80=0
+FOUND_PORT=0
 for p in $PORTS; do
-  if [[ "$p" == "80" ]]; then
-    FOUND_80=1
+  if [[ "$p" == "$WANT_PORT" ]]; then
+    FOUND_PORT=1
     break
   fi
 done
-[[ "$FOUND_80" -eq 1 ]] || fail "containerPort must include 80 (got '${PORTS}')"
+[[ "$FOUND_PORT" -eq 1 ]] || fail "containerPort must include ${WANT_PORT} (got '${PORTS}')"
 
-pass "pod/${POD_NAME} is Running in ${LEARNER_NS} with required labels and port 80"
+# Accept 100m or 0.1
+case "$CPU_REQ" in
+  100m|0.1) ;;
+  *) fail "cpu request must be 100m (got '${CPU_REQ}')" ;;
+esac
+
+[[ "$MEM_REQ" == "128Mi" ]] || fail "memory request must be 128Mi (got '${MEM_REQ}')"
+
+pass "pod/${POD_NAME} is Running and Ready in ${LEARNER_NS} with required image, port, and resources"

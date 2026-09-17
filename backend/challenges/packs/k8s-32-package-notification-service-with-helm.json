@@ -1,0 +1,46 @@
+{
+  "id": "k8s-32-package-notification-service-with-helm",
+  "number": 232,
+  "finalized": true,
+  "title": "Package Notification Service with Helm",
+  "description": "**SITUATION:**\n\nNotification Service YAML is copy-pasted across clusters and drifting. Platform wants a **versioned package**: one chart that installs Deployment + Service together, so upgrades are `helm upgrade` instead of hunting manifests.\n\nThis lab packages Notification Service as a **Helm chart** (Deployment + Service together). The point is one versioned install/upgrade path instead of drifting copy-pasted YAML.\n**YOUR TASK:**\n\n1. Create (or complete) a Helm chart for Notification Service.\n2. **Install** the release into your lab namespace.\n3. Verify the release is deployed and Pods are **Ready**.\n\n**SPEC:**\n\n- Chart name: `notification-service`\n- Release name: `notifications`\n- Chart must render at least:\n  - Deployment `notification-service` (2 replicas, image configurable, port **8080**, label `app=notification-service`)\n  - ClusterIP Service `notification-service` (port **8080**, selector `app=notification-service`)\n- Default image in values: `rithvikreddyalkanti/notification-service:v1.0`\n- Install example:  \n  `helm upgrade --install notifications ./charts/notification-service -n \"$LEARNER_NS\"`\n- Ready: Helm release **deployed**; Deployment **2/2** Ready\n\n**CONSTRAINTS:**\n\n- Chart lives under `charts/notification-service/` (with `Chart.yaml`, `values.yaml`, `templates/`).\n- Use Helm — do not only `kubectl apply` raw YAML unless rendered via `helm template` then apply as a documented fallback.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "services"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Package Notification Service with Helm",
+    "brief": "Package Notification Service with Helm",
+    "solution": "# Solution — Package Notification Service with Helm\n\nStay in your lab namespace. Package Notification Service as a Helm chart (Deployment + Service) and install release `notifications`.\n\nDocs: [Helm](https://helm.sh/docs/) · [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)\n\n## Solution YAML\n\nChart layout under `charts/notification-service/`:\n\n`Chart.yaml`:\n\n```yaml\napiVersion: v2\nname: notification-service\ndescription: QuickByte Notification Service\ntype: application\nversion: 0.1.0\nappVersion: \"1.0\"\n```\n\n`values.yaml`:\n\n```yaml\nreplicaCount: 2\nimage:\n  repository: rithvikreddyalkanti/notification-service\n  tag: \"v1.0\"\nservice:\n  port: 8080\n```\n\n`templates/deployment.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notification-service\nspec:\n  replicas: {{ .Values.replicaCount }}\n  selector:\n    matchLabels:\n      app: notification-service\n  template:\n    metadata:\n      labels:\n        app: notification-service\n    spec:\n      containers:\n        - name: notification-service\n          image: \"{{ .Values.image.repository }}:{{ .Values.image.tag }}\"\n          ports:\n            - containerPort: {{ .Values.service.port }}\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n```\n\n`templates/service.yaml`:\n\n```yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: notification-service\nspec:\n  type: ClusterIP\n  selector:\n    app: notification-service\n  ports:\n    - port: {{ .Values.service.port }}\n      targetPort: {{ .Values.service.port }}\n```\n\n## Declarative\n\n```bash\nhelm upgrade --install notifications ./charts/notification-service -n \"$LEARNER_NS\"\nkubectl rollout status deploy/notification-service\nkubectl get svc notification-service\n```\n\nWait until Deployment is **2/2** Ready, then **Submit**. Prefer Helm over raw `kubectl apply` unless you use `helm template` then apply as a documented fallback.\n",
+    "idLabel": "32",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "800m",
+      "memory": "896Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

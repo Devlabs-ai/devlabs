@@ -1,0 +1,46 @@
+{
+  "id": "k8s-43-drain-order-processor-without-dropping-inflight",
+  "number": 243,
+  "finalized": true,
+  "title": "Drain Order Processor Without Dropping Inflight Work",
+  "description": "**SITUATION:**\n\nNode drains and rollouts kill Pods quickly. In-flight `POST /orders` calls get cut mid-request. Ops wants Order Processor to **stop taking new traffic**, finish brief in-flight work, then exit — using a lifecycle hook and enough termination time (PDB from earlier labs protects how many can go at once; this lab focuses on **how each Pod dies**).\n\nThis lab focuses on **graceful shutdown**: preStop / terminationGracePeriod so in-flight orders finish. PDBs limit how many Pods leave at once; here you control how each Pod dies when it must leave.\n**YOUR TASK:**\n\n1. **Update** the Deployment with `terminationGracePeriodSeconds` and a **preStop** lifecycle hook.\n2. Keep (or create) a PDB so voluntary drains cannot take too many replicas at once.\n3. Verify the rollout is Ready.\n\n**SPEC:**\n\n- Deployment name: `order-processor-deploy`\n- Replicas: keep **`4`**\n- `terminationGracePeriodSeconds: 30`\n- Container lifecycle `preStop`:\n  - `exec.command`: `[\"/bin/sh\", \"-c\", \"sleep 5\"]`  \n    (simulates “finish in-flight / give Endpoints time to drop”; platform may substitute a real drain script)\n- PDB name: `order-processor-pdb`\n  - selector: `app=order-processor`\n  - `minAvailable: 3`\n- Ready: Deployment **4/4**; PDB exists\n\n**CONSTRAINTS:**\n\n- Manifests: `order-processor-graceful-l43.yaml` (+ PDB in same file or `order-processor-pdb-l43.yaml`).\n- Do not set grace period to `0`.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "pdb"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Drain Order Processor Without Dropping Inflight Work",
+    "brief": "Drain Order Processor Without Dropping Inflight Work",
+    "solution": "# Solution — Drain Order Processor Without Dropping Inflight Work\n\nStay in your lab namespace. Give Order Processor a graceful shutdown (`terminationGracePeriodSeconds` + `preStop`) and a PDB so drains keep enough replicas.\n\nDocs: [Container lifecycle hooks](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/) · [Pod Disruption Budgets](https://kubernetes.io/docs/tasks/run-application/configure-pdb/)\n\n## Solution YAML\n\nSave as `order-processor-graceful-l43.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 4\n  selector:\n    matchLabels:\n      app: order-processor\n  template:\n    metadata:\n      labels:\n        app: order-processor\n    spec:\n      terminationGracePeriodSeconds: 30\n      containers:\n        - name: order-processor\n          image: rithvikreddyalkanti/order-processor:v1.0\n          ports:\n            - containerPort: 8000\n          lifecycle:\n            preStop:\n              exec:\n                command: [\"/bin/sh\", \"-c\", \"sleep 5\"]\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n---\napiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: order-processor-pdb\nspec:\n  minAvailable: 3\n  selector:\n    matchLabels:\n      app: order-processor\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-processor-graceful-l43.yaml\nkubectl rollout status deploy/order-processor-deploy\nkubectl get pdb order-processor-pdb\n```\n\nWait until Deployment is **4/4** Ready and the PDB exists with `minAvailable: 3`, then **Submit**. Do not set grace period to `0`.\n",
+    "idLabel": "43",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1000m",
+      "memory": "1152Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "id": "k8s-11-cap-order-processor-cpu-and-memory",
+  "number": 211,
+  "finalized": true,
+  "title": "Cap Order Processor CPU and Memory",
+  "description": "**SITUATION:**\n\nDuring peak, one noisy Order Processor Pod spiked CPU and starved neighbors on the node. Platform wants **hard caps**: keep the existing requests, and add **limits** so the kubelet can throttle / OOM-kill runaway containers instead of taking the whole node down.\n\nThis lab adds **resource limits** on top of the requests you already know from earlier Pods. Requests help scheduling; limits cap how much one noisy container can steal from neighbors.\n**YOUR TASK:**\n\n1. **Update** the existing Deployment to set **resource limits** on `order-processor` (keep requests).\n2. Verify Pods roll out and stay **Ready**.\n\n**SPEC:**\n\n- Deployment name: `order-processor-deploy` (do not rename)\n- Replicas: keep **`2`**\n- Container `order-processor`:\n  - Requests (preserve): CPU `100m`, memory `128Mi`\n  - Limits (add): CPU `250m`, memory `256Mi`\n- Ready: **2/2** Pods Ready\n\n**CONSTRAINTS:**\n\n- Capture the updated Deployment in `order-processor-resources-l11.yaml` and apply it.\n- Limits must be **≥** requests for both CPU and memory.\n- Do **not** remove the existing requests.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l0",
+    "resources"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Cap Order Processor CPU and Memory",
+    "brief": "Cap Order Processor CPU and Memory",
+    "solution": "# Solution — Cap Order Processor CPU and Memory\n\nStay in your lab namespace. Update Deployment `order-processor-deploy` to keep existing requests and add limits **250m** CPU / **256Mi** memory.\n\nDocs: [Resource limits](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/)\n\n## Solution YAML\n\nSave as `order-processor-resources-l11.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: order-processor\n  template:\n    metadata:\n      labels:\n        app: order-processor\n    spec:\n      containers:\n        - name: order-processor\n          image: rithvikreddyalkanti/order-processor:v1.2\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n            limits:\n              cpu: \"250m\"\n              memory: \"256Mi\"\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-processor-resources-l11.yaml\nkubectl get deploy order-processor-deploy\nkubectl get pods -l app=order-processor\nkubectl get pod -l app=order-processor -o jsonpath='{range .items[0].spec.containers[0].resources}{.limits}{end}'\n```\n\nWait until **2** Pods are Ready, then **Submit**.\n\nDo not remove requests. Work only in your lab namespace (not `default`).\n",
+    "idLabel": "11",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1250m",
+      "memory": "1280Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    },
+    "limitRange": {
+      "defaultRequest": {
+        "cpu": "25m",
+        "memory": "32Mi"
+      },
+      "default": {
+        "cpu": "100m",
+        "memory": "128Mi"
+      },
+      "max": {
+        "cpu": "500m",
+        "memory": "512Mi"
+      }
+    }
+  }
+}

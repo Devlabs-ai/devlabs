@@ -1,0 +1,46 @@
+{
+  "id": "k8s-18-provision-order-archive-disk",
+  "number": 218,
+  "finalized": true,
+  "title": "Provision Order Archive Disk",
+  "description": "**SITUATION:**\n\nOrder archives must survive Pod restarts and reschedules. Today, anything written inside a container’s filesystem disappears when the Pod is replaced — fine for temp files, bad for cold order history QuickByte must keep for months.\n\nSomeone on the platform team has to **register a chunk of durable disk with the cluster** so apps can use it later. You are that person for this lab. You are **not** wiring Order Processor to the disk yet — that comes in the next challenge, when an app team “asks” for storage and mounts it.\n\nThis lab registers durable disk as a **PersistentVolume** — platform inventory, not an app mount yet. Claiming and mounting that disk into Order Processor is the next challenge.\n**YOUR TASK:**\n\n1. Create a **PersistentVolume** (PV) that describes 1Gi of archive disk for the cluster.\n2. Verify it shows up as **Available** (registered and free — nothing is using it yet).\n\n**SPEC:**\n\n- PersistentVolume name: `order-archive-pv`\n- Capacity: `1Gi`\n- Access modes: `[\"ReadWriteOnce\"]`\n- Reclaim policy: `Retain`\n- Storage class name: `manual` (set `storageClassName: manual`)\n- Volume mode: `Filesystem`\n- Backing: `hostPath` path `/mnt/data/order-archive` (lab stand-in for real networked / cloud disk)\n\n**CONSTRAINTS:**\n\n- Manifest file: `order-archive-pv-l18.yaml`.\n- Do **not** mount this disk into a Pod in this challenge — only register the volume.\n- A PersistentVolume is cluster-scoped (not namespaced); still do not use `default` for any namespaced work.\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "storage"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Provision Order Archive Disk",
+    "brief": "Provision Order Archive Disk",
+    "solution": "# Solution — Provision Order Archive Disk\n\nRegister 1Gi of archive disk as a cluster-scoped PersistentVolume. Do not mount it into a Pod yet.\n\nDocs: [PersistentVolumes](https://kubernetes.io/docs/concepts/storage/persistent-volumes/)\n\n## Solution YAML\n\nSave as `order-archive-pv-l18.yaml`:\n\n```yaml\napiVersion: v1\nkind: PersistentVolume\nmetadata:\n  name: order-archive-pv\nspec:\n  capacity:\n    storage: 1Gi\n  accessModes:\n    - ReadWriteOnce\n  persistentVolumeReclaimPolicy: Retain\n  storageClassName: manual\n  volumeMode: Filesystem\n  hostPath:\n    path: /mnt/data/order-archive\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-archive-pv-l18.yaml\nkubectl get pv order-archive-pv\n```\n\nWait until the PV is **Available**, then **Submit**.\n",
+    "idLabel": "18",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "500m",
+      "memory": "512Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}

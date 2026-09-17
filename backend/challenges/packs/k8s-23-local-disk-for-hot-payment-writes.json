@@ -1,0 +1,46 @@
+{
+  "id": "k8s-23-local-disk-for-hot-payment-writes",
+  "number": 223,
+  "finalized": true,
+  "title": "Local Disk for Hot Payment Writes",
+  "description": "**SITUATION:**\n\nPayment authorization logs are write-heavy. Network-attached disks are fine for archives, but here latency matters — the data should sit on **SSD attached to one specific node**.\n\nThat means three linked steps: describe that node-local disk to the cluster, request it from your namespace, and run Payment Handler on the node that actually has the disk (only one replica — two Pods cannot share this kind of single-node disk).\n\nThis lab wires **local / node-attached storage** for hot payment writes and pins the workload to that node. Network disks from earlier labs are fine for archives; this path is for latency-sensitive logs.\n**YOUR TASK:**\n\n1. Register a **local** PersistentVolume pinned to the labeled node.\n2. Create a **PVC** that claims it.\n3. Run Deployment `payment-handler` with **1** replica, mounting the disk at `/var/log/payments`.\n\n**SPEC:**\n\n- PV name: `payment-local-pv`\n- Capacity: `5Gi`\n- Access modes: `[\"ReadWriteOnce\"]`\n- `storageClassName`: `local-storage`\n- Volume source: `local.path: /mnt/local-ssd/payments`\n- Node affinity: required — node with label `quickbyte.ai/local-ssd=true`\n- PVC name: `payment-local-pvc`\n- Requests: `5Gi`, `ReadWriteOnce`, `storageClassName: local-storage`\n- Deployment `payment-handler`: **1** replica; mount PVC at `/var/log/payments`\n- Ready: PVC **Bound**; Pod **Ready** on the labeled node\n\n**CONSTRAINTS:**\n\n- Manifests in `payment-local-storage-l23.yaml` (PV + PVC + Deployment).\n- Do **not** use `hostPath` for this lab — use `local` volumes with node affinity.\n- Work only in your lab namespace for namespaced objects.\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "storage"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Local Disk for Hot Payment Writes",
+    "brief": "Local Disk for Hot Payment Writes",
+    "solution": "# Solution — Local Disk for Hot Payment Writes\n\nCreate a `local` PersistentVolume with node affinity, claim it, and mount it into Payment Handler at `/var/log/payments`.\n\nDocs: [Local Volumes](https://kubernetes.io/docs/concepts/storage/volumes/#local)\n\n## Solution YAML\n\nSave as `payment-local-storage-l23.yaml`:\n\n```yaml\napiVersion: v1\nkind: PersistentVolume\nmetadata:\n  name: payment-local-pv\nspec:\n  capacity:\n    storage: 5Gi\n  accessModes:\n    - ReadWriteOnce\n  storageClassName: local-storage\n  local:\n    path: /mnt/local-ssd/payments\n  nodeAffinity:\n    required:\n      nodeSelectorTerms:\n        - matchExpressions:\n            - key: quickbyte.ai/local-ssd\n              operator: In\n              values:\n                - \"true\"\n---\napiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: payment-local-pvc\nspec:\n  accessModes:\n    - ReadWriteOnce\n  resources:\n    requests:\n      storage: 5Gi\n  storageClassName: local-storage\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payment-handler\nspec:\n  replicas: 1\n  selector:\n    matchLabels:\n      app: payment-handler\n  template:\n    metadata:\n      labels:\n        app: payment-handler\n    spec:\n      containers:\n        - name: payment-handler\n          image: rithvikreddyalkanti/payment-handler:v1.0\n          ports:\n            - containerPort: 8000\n          volumeMounts:\n            - name: payment-logs\n              mountPath: /var/log/payments\n      volumes:\n        - name: payment-logs\n          persistentVolumeClaim:\n            claimName: payment-local-pvc\n```\n\n## Declarative\n\n```bash\nkubectl apply -f payment-local-storage-l23.yaml\nkubectl get pv payment-local-pv\nkubectl get pvc payment-local-pvc\nkubectl get deploy payment-handler\nkubectl get pods -l app=payment-handler -o wide\n```\n\nWait until the PVC is **Bound** and the Pod is **Ready** on the labeled node, then **Submit**. Use `local` (not `hostPath`).\n",
+    "idLabel": "23",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "700m",
+      "memory": "768Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  }
+}
