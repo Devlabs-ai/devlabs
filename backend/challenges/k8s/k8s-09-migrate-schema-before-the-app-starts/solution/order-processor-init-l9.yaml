@@ -43,16 +43,8 @@ spec:
                    item TEXT
                  );"
               echo "Migrations OK"
-          resources:
-            requests:
-              cpu: "50m"
-              memory: "64Mi"
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.2
+          image: devsetu/order-processor:v1.2
           ports:
             - containerPort: 8000
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"

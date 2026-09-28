@@ -31,10 +31,6 @@ spec:
               value: quickbyte
             - name: POSTGRES_DB
               value: orders
-          resources:
-            requests:
-              cpu: "50m"
-              memory: "64Mi"
 ---
 apiVersion: v1
 kind: Service
@@ -67,13 +63,9 @@ spec:
     spec:
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.2
+          image: devsetu/order-processor:v1.2
           ports:
             - containerPort: 8000
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
 EOF
 
 # Wait for Postgres so learner inits can connect (image pull may take a bit).

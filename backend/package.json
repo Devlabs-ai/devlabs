@@ -1,7 +1,7 @@
 {
   "name": "devlabs-backend",
   "version": "0.1.0",
-  "description": "Devlabs backend (Express + WebSocket + Postgres + Redis)",
+  "description": "DevSetu backend (Express + WebSocket + Postgres + Redis)",
   "private": true,
   "type": "commonjs",
   "main": "dist/server.js",

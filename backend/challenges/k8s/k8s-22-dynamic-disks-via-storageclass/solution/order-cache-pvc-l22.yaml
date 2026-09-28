@@ -7,8 +7,10 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 2Gi
-  storageClassName: quickbyte-fast
+      # From SC annotation quickbyte.ai/size-hint
+      storage: REPLACE_WITH_SIZE_HINT
+  # From: kubectl get sc — name ending with -$LEARNER_NS
+  storageClassName: REPLACE_WITH_DISCOVERED_SC_NAME
 ---
 apiVersion: v1
 kind: Pod
@@ -21,7 +23,8 @@ spec:
       command: ["sleep", "3600"]
       volumeMounts:
         - name: cache
-          mountPath: /cache
+          # From SC annotation quickbyte.ai/mount-path
+          mountPath: REPLACE_WITH_MOUNT_PATH
   volumes:
     - name: cache
       persistentVolumeClaim:

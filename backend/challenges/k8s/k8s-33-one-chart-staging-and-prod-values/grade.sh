@@ -18,7 +18,7 @@ pass() {
 DEPLOY="notification-service"
 WANT_REPLICAS="1"
 WANT_TAG="v1.1-rc"
-WANT_REPO="rithvikreddyalkanti/notification-service"
+WANT_REPO="devsetu/notification-service"
 
 if ! kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" >/dev/null 2>&1; then
   fail "deployment/${DEPLOY} not found — install with staging values"

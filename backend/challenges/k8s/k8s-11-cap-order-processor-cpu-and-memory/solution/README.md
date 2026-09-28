@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Update Deployment `order-processor-deploy` to keep existing requests and add limits **250m** CPU / **256Mi** memory.
 
-Docs: [Resource limits](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/)
+Docs: [DevSetu Blog — Requests, Limits, and Quotas](/play/devops-engineer/kubernetes/read/requests-limits-quotas) · [Resource limits](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/)
 
 ## Solution YAML
 
@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.2
+          image: devsetu/order-processor:v1.2
           ports:
             - containerPort: 8000
           resources:

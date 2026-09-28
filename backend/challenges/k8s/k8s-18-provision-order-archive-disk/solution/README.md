@@ -2,7 +2,7 @@
 
 Register 1Gi of archive disk as a cluster-scoped PersistentVolume. Do not mount it into a Pod yet.
 
-Docs: [PersistentVolumes](https://kubernetes.io/docs/concepts/storage/persistent-volumes/)
+Docs: [DevSetu Blog — Volumes, PVs, PVCs, and StorageClasses](/play/devops-engineer/kubernetes/read/volumes-pvs-pvcs-storageclasses) · [PersistentVolumes](https://kubernetes.io/docs/concepts/storage/persistent-volumes/)
 
 ## Solution YAML
 

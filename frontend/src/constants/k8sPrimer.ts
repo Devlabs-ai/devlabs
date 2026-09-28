@@ -1,9 +1,4 @@
-/** Kubernetes "Start here" primer — plain notes before labs. */
-
-import engineImg from '../assets/k8s-primer/k8s-primer-engine.png';
-import wallImg from '../assets/k8s-primer/k8s-primer-wall.png';
-import sharingImg from '../assets/k8s-primer/k8s-primer-sharing.png';
-import labImg from '../assets/k8s-primer/k8s-primer-lab.png';
+/** Kubernetes "Start here" primer — why the platform exists, before labs. */
 
 export const K8S_PRIMER_PATH = '/play/devops-engineer/kubernetes/intro';
 export const K8S_LABS_PATH = '/play/devops-engineer/kubernetes';
@@ -20,147 +15,83 @@ export interface K8sPrimerSection {
   title: string;
   body: string[];
   example?: K8sPrimerExample;
-  image: string;
-  imageAlt: string;
-  caption: string;
 }
 
 export const K8S_PRIMER_SECTIONS: K8sPrimerSection[] = [
   {
-    id: 'engine',
-    eyebrow: 'The engine',
-    title: 'Kubernetes is the orchestration layer',
+    id: 'history',
+    eyebrow: 'History',
+    title: 'From Borg to the industry default',
     body: [
-      'Kubernetes schedules and keeps containerized apps running across a cluster of machines. You describe what you want (pods, replicas, services); the cluster places containers, restarts failures, and gives workloads a stable way to talk to each other.',
-      'It is not a replacement for your app code, and it is not “just Docker.” Docker (or another runtime) runs a container on one machine. Kubernetes decides where containers run, how many, and what happens when a node or process dies.',
+      'Kubernetes did not appear out of nowhere. Google had already run containers at enormous scale for more than a decade with an internal system called Borg. Engineers who worked on that world open-sourced Kubernetes in 2014 so the rest of the industry could get a portable way to schedule and heal containerized apps across machines.',
+      'The project moved under the Cloud Native Computing Foundation (CNCF) and became the shared control plane that vendors, clouds, and startups could agree on. Managed offerings (GKE, EKS, AKS, and many others) made “a cluster” a product you buy, not a research project you build from scratch.',
+      'That combination — battle-tested ideas, open governance, and cloud packaging — is why Kubernetes is still the default answer when teams ask how to run many services reliably without tying the company to one vendor’s proprietary orchestrator.',
     ],
-    image: engineImg,
-    imageAlt: 'Hand-drawn sketch: app containers scheduled as pods across a Kubernetes cluster',
-    caption: 'Same app idea — containers scheduled across machines.',
   },
   {
-    id: 'wall',
-    eyebrow: 'The wall',
-    title: 'When one server and docker run fall short',
+    id: 'problem',
+    eyebrow: 'What it solves',
+    title: 'An abstract of the problem',
     body: [
-      'Running containers on a single server is fine for demos. It breaks down when you need several copies for traffic, automatic restarts at 3 a.m., or the machine itself fails and someone has to babysit `docker run` again.',
-      'That wall shows up as manual restarts, snowflake hosts, and “it worked on my server” — not as a clean error message on day one.',
+      'Modern products are not one process on one server. They are dozens or hundreds of services that must start, stop, scale with traffic, survive machine failure, and roll out without weekend fire drills. Containers package each service; something still has to decide where those containers run, how many copies exist, and what happens when a box dies at 3 a.m.',
+      'Kubernetes is that something: a control plane that takes a desired state (“keep three healthy copies of checkout behind this name”) and continuously drives the cluster toward it. Scheduling, restarts, rolling updates, and a stable network front for changing backends are the core jobs — not writing your business logic for you.',
+      'In short: Docker (or another runtime) runs a container on a machine. Kubernetes keeps fleets of containers alive across machines so product teams can ship faster without reinventing ops for every service.',
     ],
     example: {
-      title: 'Example: guestbook front desk on one box vs a cluster',
+      title: 'The wall it removes',
       paragraphs: [
-        'Same task: keep a small web front end up for a class project or internal demo.',
-        'On one server you might `docker run` a container, publish a port, and hope the process stays up. With light traffic that works. When the process crashes overnight, the host reboots, or you need three copies behind one name, hand-operated containers stop being a plan.',
+        'Without an orchestrator, growth usually means more SSH sessions, more snowflake hosts, and more “it worked on my box” incidents. With one, capacity and recovery become declared policy instead of tribal knowledge.',
       ],
       bullets: [
-        'Single server — one container: easy to start; you own restarts and upgrades',
-        'Single server — crash or reboot: app stays down until a human fixes it',
-        'Single server — need more capacity: you SSH in and start more containers by hand (or write fragile scripts)',
-        'Kubernetes — same app as a Deployment: declare replicas; cluster creates pods and replaces dead ones',
-        'What changes: desired state is continuous — the control plane keeps trying to make reality match your YAML',
+        'Place work across a pool of machines instead of pinning each app to a pet server',
+        'Replace failed instances automatically instead of paging a human for every crash',
+        'Scale replicas with demand instead of hand-starting containers under load',
+        'Roll out (and roll back) versions safely instead of big-bang weekend cutovers',
       ],
     },
-    image: wallImg,
-    imageAlt: 'Hand-drawn sketch: overloaded single server versus pods rescheduled across nodes',
-    caption: 'When docker run on one server is not enough.',
   },
   {
-    id: 'sharing',
-    eyebrow: 'Sharing the work',
-    title: 'Desired state, pods, nodes, and Services',
+    id: 'impact',
+    eyebrow: 'In the wild',
+    title: 'Companies that grew on Kubernetes',
     body: [
-      'You give the cluster a desired state — usually YAML or imperative kubectl flags. The control plane reconciles: create missing pods, remove extras, reschedule work if a node disappears.',
-      'A Pod is the smallest deployable unit (one or more containers that schedule together). Nodes are the machines that run pods. A Service gives pods a stable name and load-balances traffic so clients do not chase changing pod IPs.',
-      'Going back to the front-desk example: a Deployment keeps N replicas Ready; a Service named front-desk points at those pods. You watch with kubectl — not by SSHing into every node.',
+      'Public case studies are not marketing fluff when you read them for the outcome: more deploys, better machine use, or surviving a traffic spike without rewriting the product. A few well-known stories:',
     ],
     example: {
-      title: 'How orchestration eases the same app',
+      title: 'Growth and ops wins teams talk about',
       paragraphs: [
-        'Instead of one process on one host, Kubernetes spreads replicas across nodes. If a pod dies, a replacement is scheduled. Scaling is changing a number (replicas), not inventing a new ops ritual each time.',
+        'These are condensed from public engineering posts and conference talks — useful as orientation, not as lab specs.',
       ],
       bullets: [
-        'Control plane: stores desired state and reconciles toward it',
-        'Nodes: run kubelet + containers for the pods assigned to them',
-        'Pods: your running units (often one main container for L1 labs)',
-        'Service: stable network handle in front of matching pods',
+        'Niantic (Pokémon GO) — sudden global launch traffic was absorbed on Google Kubernetes Engine; the stack could scale nodes and pods without rebuilding the game for “viral day.”',
+        'Spotify — moved from a home-grown Helios fleet to Kubernetes so hundreds of squads shared one deployment model; engineering time shifted from cluster babysitting to product work as the catalog of services grew.',
+        'Airbnb — standardized services on Kubernetes to raise utilization and cut the toil of custom deployment paths as the marketplace scaled.',
+        'Shopify — runs core commerce on Kubernetes so Black Friday / Cyber Monday peaks are capacity and rollout problems, not “rebuild the platform” problems — critical when GMV spikes are the business.',
+        'The New York Times — migrated publishing and digital products onto cloud Kubernetes to retire aging data-center workflows and ship features on a shared platform as digital readership became the growth engine.',
+        'Capital One — adopted Kubernetes as a standard runtime so product teams could provision and ship faster under bank-grade controls, supporting more digital products without a linear ops headcount curve.',
       ],
     },
-    image: sharingImg,
-    imageAlt: 'Hand-drawn sketch: control plane reconciles desired YAML state onto nodes and pods with a Service',
-    caption: 'Declare what you want — the cluster keeps it true.',
   },
   {
     id: 'lab',
-    eyebrow: 'Inside a lab',
-    title: 'What you will do in DevLabs',
+    eyebrow: 'Why labs',
+    title: 'What you will practice in DevSetu',
     body: [
-      'You work inside your own namespace with kubectl (and a YAML scratch pad). Apply resources, watch pods become Ready, then submit for grading.',
-      'Labs grade the cluster state — Deployments, Services, labels — not memorized trivia. When something fails, describe + logs + events are your first mirrors.',
-      'Start with small L1 objects (Pod → Deployment → Service). The “one server vs cluster” intuition above is why those labs matter before every API resource.',
+      'The stories above all rest on the same muscle: declare what should be running, apply it, and let the cluster reconcile. Labs train that muscle in a small namespace with kubectl — Deployments, Services, labels, and the mirrors you use when something is not Ready.',
+      'You do not need every API object before Lab 1. You need the intuition that Kubernetes exists because companies outgrew one-server ops — and that desired state is how they keep shipping while the fleet grows.',
     ],
-    image: labImg,
-    imageAlt: 'Hand-drawn comic: write YAML, apply in your namespace, pods run, submit grade',
-    caption: 'Declare → apply → run → grade.',
   },
 ];
 
 export const K8S_PRIMER_NEXT_LINKS: Array<{ label: string; href: string; external?: boolean }> = [
   {
-    label: 'Reading: Containers, Runtimes, and Pods',
-    href: '/play/devops-engineer/kubernetes/read/containers-runtimes-pods',
-  },
-  {
-    label: 'Reading: ReplicaSets and Deployments',
-    href: '/play/devops-engineer/kubernetes/read/controllers-replicasets-deployments',
-  },
-  {
-    label: 'Reading: Services, DNS, and Endpoints',
-    href: '/play/devops-engineer/kubernetes/read/services',
-  },
-  {
-    label: 'Reading: ConfigMaps and Secrets',
-    href: '/play/devops-engineer/kubernetes/read/configmaps-secrets',
-  },
-  {
-    label: 'Reading: Multi-Container Pods',
-    href: '/play/devops-engineer/kubernetes/read/multi-container-pods',
-  },
-  {
-    label: 'Reading: Pod Networking and NetworkPolicies',
-    href: '/play/devops-engineer/kubernetes/read/pod-networking-and-policies',
-  },
-  {
-    label: 'Reading: Requests, Limits, and Quotas',
-    href: '/play/devops-engineer/kubernetes/read/requests-limits-quotas',
-  },
-  {
-    label: 'Reading: Probes: Startup, Readiness, and Liveness',
-    href: '/play/devops-engineer/kubernetes/read/probes-liveness-readiness-startup',
-  },
-  {
-    label: 'Reading: SecurityContext',
-    href: '/play/devops-engineer/kubernetes/read/security-context',
-  },
-  {
-    label: 'Reading: ServiceAccounts, Roles, and RoleBindings',
-    href: '/play/devops-engineer/kubernetes/read/serviceaccounts-rbac',
-  },
-  {
-    label: 'Reading: Volumes, PVs, PVCs, and StorageClasses',
-    href: '/play/devops-engineer/kubernetes/read/volumes-pvs-pvcs-storageclasses',
-  },
-  {
-    label: 'Official Kubernetes concepts',
-    href: 'https://kubernetes.io/docs/concepts/',
+    label: 'Official Kubernetes documentation',
+    href: 'https://kubernetes.io/docs/',
     external: true,
   },
   {
-    label: 'Pods documentation',
-    href: 'https://kubernetes.io/docs/concepts/workloads/pods/',
+    label: 'CKAD exam curriculum (CNCF)',
+    href: 'https://github.com/cncf/curriculum',
     external: true,
-  },
-  {
-    label: 'Open Kubernetes labs',
-    href: K8S_LABS_PATH,
   },
 ];

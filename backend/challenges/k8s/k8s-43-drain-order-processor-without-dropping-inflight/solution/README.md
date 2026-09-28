@@ -26,7 +26,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.0
+          image: devsetu/order-processor:v1.0
           ports:
             - containerPort: 8000
           lifecycle:

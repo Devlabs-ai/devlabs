@@ -18,7 +18,7 @@ pass() {
 DEPLOY="notification-service"
 SVC="notification-service"
 WANT_REPLICAS="2"
-WANT_IMAGE="rithvikreddyalkanti/notification-service:v1.0"
+WANT_IMAGE="devsetu/notification-service:v1.0"
 WANT_APP="notification-service"
 WANT_PORT="8080"
 RELEASE="notifications"

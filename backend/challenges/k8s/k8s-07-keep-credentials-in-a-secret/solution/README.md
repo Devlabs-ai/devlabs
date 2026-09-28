@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Put non-secret settings in a ConfigMap and the payment gateway API key in a Secret, then Deploy Order Processor **v1.2** wired to both.
 
-Docs: [Secrets](https://kubernetes.io/docs/concepts/configuration/secret/)
+Docs: [DevSetu Blog — ConfigMaps and Secrets](/play/devops-engineer/kubernetes/read/configmaps-secrets) · [Secrets](https://kubernetes.io/docs/concepts/configuration/secret/)
 
 ## Solution YAML
 
@@ -52,13 +52,9 @@ spec:
     spec:
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.2
+          image: devsetu/order-processor:v1.2
           ports:
             - containerPort: 8000
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
           envFrom:
             - configMapRef:
                 name: order-processor-config

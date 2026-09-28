@@ -1,8 +1,8 @@
 # Solution — Lock Down Payment Handler Process
 
-Stay in your lab namespace. Update Deployment `payment-handler` with a hardened container **securityContext** (non-root, read-only rootfs, drop all capabilities). Mount an emptyDir at `/tmp` if the app needs a writable temp dir.
+Stay in your lab namespace. Update Deployment `payment-handler` with a hardened container **securityContext** (non-root, read-only rootfs, drop all capabilities). Mount an emptyDir at `/tmp` if the app needs a writable temp dir: with `readOnlyRootFilesystem: true` nothing on the image filesystem is writable, so the `emptyDir` gives the process a small scratch area that is deleted with the Pod.
 
-Docs: [Configure a Security Context](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/)
+Docs: [DevSetu Blog — SecurityContext](/play/devops-engineer/kubernetes/read/security-context) · [Configure a Security Context](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/)
 
 ## Solution YAML
 
@@ -29,7 +29,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: payment-handler
-          image: rithvikreddyalkanti/payment-handler:v1.0
+          image: devsetu/payment-handler:v1.0
           ports:
             - containerPort: 8000
           resources:

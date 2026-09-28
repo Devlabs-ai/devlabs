@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Update Deployment `order-processor-deploy` with an HTTP **readiness** probe on `/health` so half-booted Pods stay out of Service Endpoints.
 
-Docs: [Readiness probe](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
+Docs: [DevSetu Blog — Probes: Startup, Readiness, and Liveness](/play/devops-engineer/kubernetes/read/probes-liveness-readiness-startup) · [Readiness probe](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
 
 ## Solution YAML
 
@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.2
+          image: devsetu/order-processor:v1.2
           ports:
             - containerPort: 8000
           resources:

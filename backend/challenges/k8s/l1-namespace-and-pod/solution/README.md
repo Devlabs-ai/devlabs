@@ -1,8 +1,8 @@
 # Solution — Migrate Order Processor
 
-Stay in your lab namespace (kubectl already defaults there). Create Pod `order-processor-pod` with container `order-processor`, image `rithvikreddyalkanti/order-processor:v1.0`, **containerPort 8000**, and resource requests **100m** CPU / **128Mi** memory.
+Stay in your lab namespace (kubectl already defaults there). Create Pod `order-processor-pod` with container `order-processor`, image `devsetu/order-processor:v1.0`, and **containerPort 8000**.
 
-Docs: [Pods](https://kubernetes.io/docs/concepts/workloads/pods/)
+Docs: [DevSetu Blog — Containers, Runtimes, and Pods](/play/devops-engineer/kubernetes/read/containers-runtimes-pods) · [Pods](https://kubernetes.io/docs/concepts/workloads/pods/)
 
 ## Solution YAML
 
@@ -16,13 +16,9 @@ metadata:
 spec:
   containers:
     - name: order-processor
-      image: rithvikreddyalkanti/order-processor:v1.0
+      image: devsetu/order-processor:v1.0
       ports:
         - containerPort: 8000
-      resources:
-        requests:
-          cpu: "100m"
-          memory: "128Mi"
 ```
 
 ## Declarative
@@ -35,5 +31,3 @@ kubectl get pod order-processor-pod -w
 ```
 
 Wait until `STATUS` is `Running` and `READY` is `1/1`, then **Submit**.
-
-Do not create the Pod in `default`.

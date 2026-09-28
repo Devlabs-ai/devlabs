@@ -26,8 +26,37 @@ Reference: [memkv `v0.1.0`](https://github.com/Rithvik89/memkv/releases/tag/v0.1
 
 ## Theory rule
 
-Each chapter’s `theory.md` should be full depth (motivation, mechanics, seams,
-checklist) with **ASCII / hand-drawn-feel block diagrams** — not a thin stub.
+Each chapter’s `theory.md` is a sequence of **sub-chapters** (`##` headings). Every
+sub-chapter is read through. Mark mode with an HTML comment on the line after `##`:
+
+```markdown
+## Why Cinder needs one thread
+<!-- mode: read-only -->
+
+## What Register and Run do
+<!-- mode: read-and-implement tasks:1.1,1.2 -->
+```
+
+- **Read only** — own the idea; no code change in this section.
+- **Read and Implement** — read, then complete the listed `TODO(id)` tasks before moving on.
+
+Full depth (motivation, mechanics, seams) with **hand-drawn figures** (under
+`frontend/public/…`) and typed highlight boxes — not a thin stub and not ASCII walls.
+
+Highlight boxes use blockquote alerts the theory renderer understands:
+
+```markdown
+> [!idea] Title
+> Body…
+
+> [!warn] …
+> [!takeaway] …
+> [!scope] …
+> [!check] …
+> [!tip] …
+```
+
+Mode labels show in the majors theory brief.
 
 ## Branch rule
 

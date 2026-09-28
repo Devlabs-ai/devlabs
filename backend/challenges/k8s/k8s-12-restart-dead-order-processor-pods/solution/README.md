@@ -2,7 +2,9 @@
 
 Stay in your lab namespace. PRE RUN uses image **`zombie-order-processor:1.0`**: the container is Running, but `GET /health` **hangs** until Kubernetes restarts it. Add an HTTP **liveness** probe on `/health`. Leave the rest of the seeded pod template as-is (including any mounts already present — lab plumbing, not part of this lesson).
 
-Docs: [Liveness probe](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
+The seeded `zombie-mark` volume is an `emptyDir`: scratch space that lives as long as the **Pod**, so it survives a container restart. The image uses it to remember it already hung once, which is why `/health` answers after liveness restarts the container. More in the *Sharing files* section of the [Multi-Container Pods](/play/devops-engineer/kubernetes/read/multi-container-pods) blog.
+
+Docs: [DevSetu Blog — Probes: Startup, Readiness, and Liveness](/play/devops-engineer/kubernetes/read/probes-liveness-readiness-startup) · [Liveness probe](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
 
 ## Optional: see the hang before you fix it
 
@@ -36,7 +38,7 @@ spec:
           emptyDir: {}
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/zombie-order-processor:1.0
+          image: devsetu/zombie-order-processor:1.0
           ports:
             - containerPort: 8000
           resources:

@@ -30,7 +30,7 @@ spec:
     spec:
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.2
+          image: devsetu/order-processor:v1.2
           ports:
             - containerPort: 8000
           resources:
@@ -44,10 +44,10 @@ spec:
 ```bash
 kubectl apply -f order-processor-rollout-l40.yaml
 kubectl rollout status deploy/order-processor-deploy
-kubectl set image deploy/order-processor-deploy order-processor=rithvikreddyalkanti/order-processor:v1.2  # if already applied via YAML
+kubectl set image deploy/order-processor-deploy order-processor=devsetu/order-processor:v1.2  # if already applied via YAML
 kubectl rollout undo deploy/order-processor-deploy
 kubectl rollout status deploy/order-processor-deploy
 kubectl get deploy order-processor-deploy -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
 ```
 
-Final image must be `rithvikreddyalkanti/order-processor:v1.1` with **3/3** Ready. Do not delete the Deployment to “fix” the version.
+Final image must be `devsetu/order-processor:v1.1` with **3/3** Ready. Do not delete the Deployment to “fix” the version.

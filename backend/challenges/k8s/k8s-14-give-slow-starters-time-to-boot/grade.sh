@@ -29,7 +29,7 @@ READY="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.status.rea
 
 IMAGE="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{range .spec.template.spec.containers[?(@.name=="order-processor")]}{.image}{end}' 2>/dev/null || true)"
 [[ "$IMAGE" == *slow-order-processor:1.0* ]] \
-  || fail "image must remain rithvikreddyalkanti/slow-order-processor:1.0 (got '${IMAGE}')"
+  || fail "image must remain devsetu/slow-order-processor:1.0 (got '${IMAGE}')"
 
 SP_PATH="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{range .spec.template.spec.containers[?(@.name=="order-processor")]}{.startupProbe.httpGet.path}{end}' 2>/dev/null || true)"
 SP_PORT="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{range .spec.template.spec.containers[?(@.name=="order-processor")]}{.startupProbe.httpGet.port}{end}' 2>/dev/null || true)"

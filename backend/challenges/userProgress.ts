@@ -29,6 +29,29 @@ async function listSolvedChallengeIds(rawUserId: string | null | undefined): Pro
   );
 }
 
+/** challengeId → time of the user's first passed submit. */
+async function listFirstSolveTimes(rawUserId: string | null | undefined): Promise<Map<string, number>> {
+  const userId = sanitizeOwner(rawUserId || '');
+  const out = new Map<string, number>();
+  if (!userId || userId === 'anonymous') return out;
+
+  const { rows } = await pool.query(
+    `SELECT challenge_id AS id, MIN(submitted_at) AS solved_at
+       FROM submissions
+      WHERE user_id = $1
+        AND challenge_id IS NOT NULL
+        AND mode = 'submit'
+        AND grade_status = 'passed'
+      GROUP BY challenge_id`,
+    [userId],
+  );
+  for (const r of rows as Array<{ id: string | null; solved_at: string | number }>) {
+    const id = String(r.id || '').trim();
+    if (id) out.set(id, Number(r.solved_at));
+  }
+  return out;
+}
+
 /** Distinct users who have submitted each challenge (scored submit mode). */
 async function countSubmittersByChallenge(): Promise<Map<string, number>> {
   const { rows } = await pool.query(
@@ -53,5 +76,6 @@ async function countSubmittersByChallenge(): Promise<Map<string, number>> {
 
 module.exports = {
   listSolvedChallengeIds,
+  listFirstSolveTimes,
   countSubmittersByChallenge,
 };

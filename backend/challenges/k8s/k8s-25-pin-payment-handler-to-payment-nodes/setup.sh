@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
+# Baseline payment-handler Deployment. Node labels (workload=payments) come from
+# the platform node pool — setup must not label or taint nodes.
 set -euo pipefail
 : "${LEARNER_NS:?}"
-NODE="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-if [[ -n "$NODE" ]]; then
-  kubectl label node "$NODE" workload=payments --overwrite >/dev/null 2>&1 || true
-fi
+
 kubectl -n "$LEARNER_NS" apply -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -22,7 +21,7 @@ spec:
     spec:
       containers:
         - name: payment-handler
-          image: rithvikreddyalkanti/payment-handler:v1.0
+          image: devsetu/payment-handler:v1.0
           ports:
             - containerPort: 8000
 EOF

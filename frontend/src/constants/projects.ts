@@ -59,7 +59,6 @@ const CINDER_MODULES: ProjectModule[] = [
     blurb:
       'A single-threaded loop over epoll or kqueue. The scratch repo starts here — only the files this chapter needs.',
     status: 'ready',
-    minors: ['tcp-server'],
   },
   {
     id: 'csp-protocol',
@@ -235,7 +234,6 @@ export const PROJECTS: ProjectEntry[] = [
     level: 'Intermediate',
     language: 'Go',
     facts: ['Event loop', 'Append-only log', '8 chapters'],
-    minors: ['tcp-server'],
     status: 'ready',
     modules: CINDER_MODULES,
   },

@@ -1,8 +1,8 @@
 # Solution — Canary the Notification Service
 
-Keep stable `notification-service` on v1.0 at **4** replicas (`track=stable`) and add canary Deployment `notification-service-canary` with **1** replica on v1.1 (`track=canary`). The shared Service selector `app=notification-service` covers both tracks.
+Keep stable `notification-service` on v1.0 at **3** replicas (`track=stable`) and add canary Deployment `notification-service-canary` with **1** replica on v1.1 (`track=canary`). The shared Service selector `app=notification-service` covers both tracks (**4** pods total).
 
-Docs: [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+Docs: [DevSetu Blog — Canary and Blue-Green Releases](/play/devops-engineer/kubernetes/read/canary-blue-green) · [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
 
 ## Solution YAML
 
@@ -14,7 +14,7 @@ kind: Deployment
 metadata:
   name: notification-service
 spec:
-  replicas: 4
+  replicas: 3
   selector:
     matchLabels:
       app: notification-service
@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
         - name: notification-service
-          image: rithvikreddyalkanti/notification-service:v1.0
+          image: devsetu/notification-service:v1.0
           ports:
             - containerPort: 8080
 ---
@@ -49,7 +49,7 @@ spec:
     spec:
       containers:
         - name: notification-service
-          image: rithvikreddyalkanti/notification-service:v1.1
+          image: devsetu/notification-service:v1.1
           ports:
             - containerPort: 8080
 ```
@@ -63,5 +63,4 @@ kubectl get endpoints notification-service
 kubectl get pods -l app=notification-service -o wide
 ```
 
-Wait until stable is **4/4**, canary is **1/1**, and the Service has ≥ 5 endpoint addresses, then **Submit**.
-
+Wait until stable is **3/3**, canary is **1/1**, and the Service has ≥ 4 endpoint addresses, then **Submit**.

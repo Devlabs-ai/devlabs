@@ -1,10 +1,10 @@
-# Devlabs
+# DevSetu
 
 A technical interview platform for production-style challenges. Candidates solve real Spark (and compose) incidents in live workspaces — not toy puzzles.
 
 ---
 
-## What Devlabs is (v0.2)
+## What DevSetu is (v0.2)
 
 **Play** — run a candidate through a challenge: incident brief, workspace, Run/Submit, grading signals.
 
@@ -29,7 +29,7 @@ Spark play sessions require MinIO + the Spark platform API (see `backend/.env.ex
 
 ## Roadmap
 
-### Devlabs V0.2 — Evaluation & Play *(current)*
+### DevSetu V0.2 — Evaluation & Play *(current)*
 
 Focus:
 

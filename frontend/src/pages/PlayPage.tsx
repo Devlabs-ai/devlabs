@@ -8,10 +8,12 @@ import SparkPlatformWorkspace, {
 import BoardWorkspace, { isBoardChallenge } from '../components/BoardWorkspace';
 import K8sLabWorkspace, { isKubernetesChallenge } from '../components/K8sLabWorkspace';
 import {
+  LeaderboardIcon,
+  PrimerGuideIcon,
   StatusBookIcon,
-  StatusCheckIcon,
-  StatusPlayIcon,
 } from '../components/TrackStatusIcons';
+import TrackLeaderboardModal from '../components/TrackLeaderboardModal';
+import { IconCoins } from '../components/ChromeIcons';
 import {
   PLAY_DOMAINS,
   getPlayDomain,
@@ -34,6 +36,8 @@ import {
   type K8sTrackItem,
 } from '../constants/k8sReadings';
 import type { ChallengePublic } from '../types/domain';
+import { isAdminUser, isReviewStaff, getCurrentUser } from '../services/authApi';
+import { visibilityMark } from '../constants/roles';
 
 function panelPrimerPath(panelId: string): string | null {
   if (panelId === 'spark') return SPARK_PRIMER_PATH;
@@ -49,7 +53,6 @@ function domainLabCount(domain: PlayDomain): number {
   return domain.panels.reduce((n, p) => n + panelLabCount(p), 0);
 }
 
-type DifficultyFilter = 'all' | 'l0' | 'l1' | 'l2' | 'l3' | 'l4';
 type KindFilter = 'all' | 'blog' | 'lab';
 
 interface LibraryViewProps {
@@ -59,39 +62,42 @@ interface LibraryViewProps {
   onSelectChallenge: (challenge: ChallengePublic) => void | Promise<void>;
 }
 
-function difficultyClass(d: string | undefined): string {
-  const s = (d || '').trim().toLowerCase();
-  if (s === 'l0' || s.includes('easy')) return 'l0';
-  if (s === 'l1' || s.includes('medium')) return 'l1';
-  if (s === 'l2') return 'l2';
-  if (s === 'l3' || s.includes('hard')) return 'l3';
-  if (s === 'l4') return 'l4';
-  return 'l1';
-}
-
-function matchesDifficulty(challenge: ChallengePublic, filter: DifficultyFilter): boolean {
-  if (filter === 'all') return true;
-  return difficultyClass(challenge.difficulty) === filter;
-}
-
+/**
+ * Lab number from challenge id (source of truth), e.g. k8s-25-… → "25".
+ * Prefer id over problemStatement.idLabel so a stale DB/catalog cannot drift
+ * from pack folders / solution filenames (*-l25.yaml).
+ */
 function catalogIdLabel(challenge: ChallengePublic): string {
+  const fromK8sId = /^k8s-0*(\d+)-/i.exec(challenge.id)?.[1];
+  if (fromK8sId) return String(Number(fromK8sId)); // "02" → "2", "25" → "25"
+  if (/^l1-/i.test(challenge.id)) return '1';
   const ps = challenge.problemStatement;
   const fromPs =
     ps && typeof ps === 'object' && typeof (ps as { idLabel?: unknown }).idLabel === 'string'
       ? (ps as { idLabel: string }).idLabel.trim()
       : '';
   if (fromPs) return fromPs;
-  if (challenge.number != null) return String(challenge.number);
   return '—';
+}
+
+function labTrackId(challenge: ChallengePublic): string {
+  const label = catalogIdLabel(challenge);
+  return label === '—' ? '—' : `L${label}`;
 }
 
 function LibraryView({ challenges, challengesError, startError, onSelectChallenge }: LibraryViewProps): JSX.Element {
   const navigate = useNavigate();
+  const { currentUser } = useAppState();
+  const showVisibilityMarks =
+    isAdminUser(currentUser) ||
+    isAdminUser(getCurrentUser()) ||
+    isReviewStaff(currentUser) ||
+    isReviewStaff(getCurrentUser());
   const params = useParams<{ domainId?: string; panelId?: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState('');
-  const [difficulty, setDifficulty] = useState<DifficultyFilter>('all');
-  const [kindFilter, setKindFilter] = useState<KindFilter>('all');
+  const [kindFilter, setKindFilter] = useState<KindFilter>('lab');
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
 
   const domainId = isPlayDomainId(params.domainId) ? (params.domainId as PlayDomainId) : null;
   const domain = getPlayDomain(domainId);
@@ -166,13 +172,13 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
 
     if (isK8sPanel) {
       const items = listK8sTrackItems();
-      let labOrdinal = 0;
       const rows: TrackRow[] = [];
       for (const item of items) {
         if (item.type === 'reading') {
           if (kindFilter === 'lab') continue;
           const reading = getK8sReading(item.readingId);
           if (!reading) continue;
+          if (reading.gatedByChallengeId && !byId.has(reading.gatedByChallengeId)) continue;
           if (q) {
             const hay = [reading.trackId, reading.title, reading.lede, 'blog', 'reading']
               .join(' ')
@@ -188,12 +194,10 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
           });
           continue;
         }
-        labOrdinal += 1;
-        const trackId = `L${labOrdinal}`;
         if (kindFilter === 'blog') continue;
         const challenge = byId.get(item.challengeId);
         if (!challenge || isBoardChallenge(challenge)) continue;
-        if (!matchesDifficulty(challenge, difficulty)) continue;
+        const trackId = labTrackId(challenge);
         if (q) {
           const hay = [
             trackId,
@@ -219,14 +223,11 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
 
     if (kindFilter === 'blog') return [];
 
-    let labOrdinal = 0;
     const rows: TrackRow[] = [];
     for (const row of catalogRows) {
       if (domainId && row.domainId !== domainId) continue;
       if (activeTopicId && row.panelId !== activeTopicId) continue;
-      labOrdinal += 1;
-      const trackId = `L${labOrdinal}`;
-      if (!matchesDifficulty(row.challenge, difficulty)) continue;
+      const trackId = labTrackId(row.challenge);
       if (q) {
         const hay = [
           trackId,
@@ -253,7 +254,6 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
     catalogRows,
     domainId,
     activeTopicId,
-    difficulty,
     kindFilter,
     search,
     showLabList,
@@ -265,7 +265,10 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
     if (!showLabList || !domainId || !activeTopicId) return 0;
     if (isK8sPanel) {
       return listK8sTrackItems().filter((item: K8sTrackItem) => {
-        if (item.type === 'reading') return true;
+        if (item.type === 'reading') {
+          const gate = getK8sReading(item.readingId)?.gatedByChallengeId;
+          return !gate || byId.has(gate);
+        }
         return byId.has(item.challengeId);
       }).length;
     }
@@ -460,15 +463,39 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
               <header className="play-hub-header play-hub-header--compact">
                 <div className="play-hub-title-row">
                   <h2 className="play-hub-title">{panel.label}</h2>
-                  {primerPath && (
-                    <Link to={primerPath} className="play-primer-link">
-                      Read the primer
-                      <span aria-hidden> →</span>
-                    </Link>
-                  )}
+                  <div className="play-hub-title-actions">
+                    {primerPath && (
+                      <Link
+                        to={primerPath}
+                        className="play-primer-link"
+                        aria-label="Read the primer"
+                        title="Read the primer"
+                      >
+                        <PrimerGuideIcon className="play-primer-link-icon" title="" />
+                      </Link>
+                    )}
+                    {panel.challengeIds.length > 0 && (
+                      <button
+                        type="button"
+                        className="play-primer-link play-leaderboard-link"
+                        aria-label={`${panel.label} leaderboard`}
+                        title="Leaderboard"
+                        onClick={() => setLeaderboardOpen(true)}
+                      >
+                        <LeaderboardIcon className="play-primer-link-icon" title="" />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <p className="play-hub-lead">{panel.blurb}</p>
               </header>
+              <TrackLeaderboardModal
+                open={leaderboardOpen}
+                trackLabel={panel.label}
+                challengeIds={panel.challengeIds}
+                fullPath={`${playCatalogPath(domain.id, panel.id)}/leaderboard`}
+                onClose={() => setLeaderboardOpen(false)}
+              />
 
               <section className="play-problems-toolbar">
                 <label className="play-search">
@@ -480,39 +507,31 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                     placeholder="Search track…"
                   />
                 </label>
-                <select
-                  className="play-filter-select"
-                  value={kindFilter}
-                  onChange={(e) => setKindFilter(e.target.value as KindFilter)}
-                  aria-label="Kind"
-                >
-                  <option value="all">Kind</option>
-                  <option value="blog">Blog</option>
-                  <option value="lab">Lab</option>
-                </select>
-                <select
-                  className="play-filter-select"
-                  value={difficulty}
-                  onChange={(e) => setDifficulty(e.target.value as DifficultyFilter)}
-                  aria-label="Level"
-                >
-                  <option value="all">Level</option>
-                  <option value="l0">L0</option>
-                  <option value="l1">L1</option>
-                  <option value="l2">L2</option>
-                  <option value="l3">L3</option>
-                  <option value="l4">L4</option>
-                </select>
+                <div className="play-kind-toggle" role="group" aria-label="Kind">
+                  <button
+                    type="button"
+                    className={`play-kind-toggle-btn${kindFilter === 'lab' ? ' is-active' : ''}`}
+                    aria-pressed={kindFilter === 'lab'}
+                    onClick={() => setKindFilter('lab')}
+                  >
+                    Lab
+                  </button>
+                  <button
+                    type="button"
+                    className={`play-kind-toggle-btn${kindFilter === 'blog' ? ' is-active' : ''}`}
+                    aria-pressed={kindFilter === 'blog'}
+                    onClick={() => setKindFilter('blog')}
+                  >
+                    Blog
+                  </button>
+                </div>
               </section>
 
               <section className="play-problems-table-wrap" aria-label={`${panel.label} track`}>
                 <div className="play-problems-table-head">
-                  {/* Icon column (blog / play / completed) — no header label */}
-                  <span className="play-problems-col-icon" aria-hidden="true" />
                   <span>ID</span>
                   <span>Title</span>
-                  <span className="play-problems-col-kind">Kind</span>
-                  <span className="play-problems-col-level">Level</span>
+                  <span className="play-problems-col-tokens" aria-hidden="true" />
                 </div>
                 {filteredRows.length === 0 ? (
                   <div className="play-problems-empty">
@@ -531,20 +550,12 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                               className="play-problem-row play-problem-row--reading"
                               onClick={() => navigate(row.href)}
                             >
-                              <span className="play-problem-status" aria-label="Open blog">
-                                <StatusBookIcon className="play-problem-status-icon" />
-                              </span>
                               <span className="play-problem-id" title={row.trackId}>
                                 {row.trackId}
                               </span>
                               <span className="play-problem-title">{row.title}</span>
-                              <span className="play-problem-topics">
-                                <span className="play-topic-pill play-topic-pill--reading">
-                                  Blog
-                                </span>
-                              </span>
-                              <span className="play-problem-level play-problem-level-empty" aria-label="No level">
-                                —
+                              <span className="play-problem-meta" aria-label="Blog">
+                                <StatusBookIcon className="play-problem-status-icon play-problem-meta-book" />
                               </span>
                             </button>
                           </li>
@@ -554,6 +565,11 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                       const { challenge, trackId } = row;
                       const playable = Boolean(challenge.finalized);
                       const solved = Boolean(challenge.solved);
+                      const vis = visibilityMark(challenge.visibleTo);
+                      const tokens =
+                        typeof challenge.tokens === 'number' && Number.isFinite(challenge.tokens)
+                          ? challenge.tokens
+                          : 10;
                       return (
                         <li key={row.key}>
                           <button
@@ -564,27 +580,30 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                               if (playable) void onSelectChallenge(challenge);
                             }}
                           >
-                            <span
-                              className={`play-problem-status${solved ? ' is-solved' : ''}`}
-                              aria-label={solved ? 'Completed' : 'Open lab'}
-                            >
-                              {solved ? (
-                                <StatusCheckIcon className="play-problem-status-icon" />
-                              ) : (
-                                <StatusPlayIcon className="play-problem-status-icon" />
-                              )}
-                            </span>
                             <span className="play-problem-id" title={challenge.id}>
                               {trackId}
                             </span>
                             <span className="play-problem-title">{challenge.title}</span>
-                            <span className="play-problem-topics">
-                              <span className="play-topic-pill play-topic-pill--lab">Lab</span>
-                            </span>
                             <span
-                              className={`play-problem-level pill ${difficultyClass(challenge.difficulty)}`}
+                              className={`play-problem-meta${showVisibilityMarks ? ' play-problem-meta--staff' : ''}`}
                             >
-                              {challenge.difficulty || 'L1'}
+                              {showVisibilityMarks ? (
+                                <span
+                                  className={`play-visibility-badge play-visibility-badge--${vis.key}`}
+                                  title={vis.label}
+                                  aria-label={vis.label}
+                                >
+                                  {vis.letter}
+                                </span>
+                              ) : null}
+                              {challenge.k8sPlatform?.practice ? null : (
+                                <span className="play-problem-tokens" title={`${tokens} tokens`}>
+                                  <span className="play-problem-tokens-coin">
+                                    <IconCoins size={14} />
+                                  </span>
+                                  {tokens}
+                                </span>
+                              )}
                             </span>
                           </button>
                         </li>
@@ -673,21 +692,27 @@ export default function PlayPage(): JSX.Element | null {
     );
   }
 
+  const closingOverlay = (overLab: boolean): JSX.Element | null => (ending ? (
+    <div
+      className={`lab-closing-overlay${overLab ? ' is-over-lab' : ''}`}
+      role="status"
+      aria-live="polite"
+    >
+      <div className="lab-closing-toast">
+        <span className="spinner" />
+        <span>
+          Closing lab
+          {closingLabTitle ? <> · <strong>{closingLabTitle}</strong></> : null}
+          …
+        </span>
+      </div>
+    </div>
+  ) : null);
+
   if (playState === 'library') {
     return (
       <>
-        {ending && (
-          <div className="lab-closing-overlay" role="status" aria-live="polite">
-            <div className="lab-closing-toast">
-              <span className="spinner" />
-              <span>
-                Closing lab
-                {closingLabTitle ? <> · <strong>{closingLabTitle}</strong></> : null}
-                …
-              </span>
-            </div>
-          </div>
-        )}
+        {closingOverlay(false)}
         <div className={`play-library-shell${ending ? ' lab-closing-catalog' : ''}`}>
           <LibraryView
             challenges={challenges}
@@ -712,11 +737,14 @@ export default function PlayPage(): JSX.Element | null {
     }
     if (isKubernetesChallenge(activeChallenge) || activeSession.runtime === 'kubernetes') {
       return (
-        <K8sLabWorkspace
-          challenge={activeChallenge}
-          session={activeSession}
-          onClose={onEnd}
-        />
+        <>
+          {closingOverlay(true)}
+          <K8sLabWorkspace
+            challenge={activeChallenge}
+            session={activeSession}
+            onClose={onEnd}
+          />
+        </>
       );
     }
     if (isSparkPlatformChallenge(activeChallenge) || activeSession.runtime === 'spark-platform') {

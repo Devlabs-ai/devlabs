@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Grade k8s-19-claim-disk-for-order-processor — PVC + Order Processor mount.
+# Grade k8s-19-claim-disk-for-order-processor — PVC pins platform PV + Order Processor mount.
 set -euo pipefail
 
 : "${LEARNER_NS:?LEARNER_NS required}"
@@ -17,16 +17,19 @@ pass() {
 
 PVC="order-archive-pvc"
 DEP="order-processor-deploy"
+EXPECTED_PV="order-archive-pv-${LEARNER_NS}"
 
 kubectl -n "$LEARNER_NS" get pvc "$PVC" >/dev/null 2>&1 || fail "pvc/${PVC} not found"
 SC="$(kubectl -n "$LEARNER_NS" get pvc "$PVC" -o jsonpath='{.spec.storageClassName}' 2>/dev/null || true)"
 REQ="$(kubectl -n "$LEARNER_NS" get pvc "$PVC" -o jsonpath='{.spec.resources.requests.storage}' 2>/dev/null || true)"
 AM="$(kubectl -n "$LEARNER_NS" get pvc "$PVC" -o jsonpath='{.spec.accessModes[*]}' 2>/dev/null || true)"
+VN="$(kubectl -n "$LEARNER_NS" get pvc "$PVC" -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)"
 PHASE="$(kubectl -n "$LEARNER_NS" get pvc "$PVC" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
 
 [[ "$SC" == "manual" ]] || fail "PVC storageClassName must be manual (got '${SC}')"
-[[ "$REQ" == "1Gi" ]] || fail "PVC storage request must be 1Gi (got '${REQ}')"
+[[ "$REQ" == "100Mi" ]] || fail "PVC storage request must be 100Mi (got '${REQ}')"
 echo " $AM " | grep -Eq '(^| )ReadWriteOnce( |$)' || fail "PVC accessModes must include ReadWriteOnce (got '${AM}')"
+[[ "$VN" == "$EXPECTED_PV" ]] || fail "PVC volumeName must pin platform PV ${EXPECTED_PV} (got '${VN}')"
 [[ "$PHASE" == "Bound" ]] || fail "PVC must be Bound (got '${PHASE}')"
 
 kubectl -n "$LEARNER_NS" get deploy "$DEP" >/dev/null 2>&1 || fail "deployment/${DEP} not found"
@@ -40,4 +43,4 @@ MP="$(kubectl -n "$LEARNER_NS" get deploy "$DEP" -o jsonpath='{.spec.template.sp
 [[ "$CLAIM" == "$PVC" ]] || fail "volume archive must claim ${PVC} (got '${CLAIM}')"
 [[ "$MP" == "/data/archive" ]] || fail "mountPath must be /data/archive (got '${MP}')"
 
-pass "pvc/${PVC} Bound and deployment/${DEP} mounts it at /data/archive"
+pass "pvc/${PVC} Bound to ${EXPECTED_PV} and deployment/${DEP} mounts it at /data/archive"

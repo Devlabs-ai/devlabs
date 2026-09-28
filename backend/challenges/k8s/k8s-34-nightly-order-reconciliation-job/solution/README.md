@@ -20,7 +20,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: order-reconciliation
-          image: rithvikreddyalkanti/order-reconciliation:v1.0
+          image: devsetu/order-reconciliation:v1.0
           command: ["/reconciliation", "--mode=full"]
 ```
 
@@ -41,7 +41,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: order-reconciliation
-              image: rithvikreddyalkanti/order-reconciliation:v1.0
+              image: devsetu/order-reconciliation:v1.0
               command: ["/reconciliation", "--mode=full"]
 ```
 

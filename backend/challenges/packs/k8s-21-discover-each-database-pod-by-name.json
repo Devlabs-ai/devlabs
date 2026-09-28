@@ -3,13 +3,15 @@
   "number": 221,
   "finalized": true,
   "title": "Discover Each Database Pod by Name",
-  "description": "**SITUATION:**\n\nFor Order Processor HTTP, a normal Service that load-balances across any healthy Pod is perfect. For the database, that is often wrong: backups, replicas, and admin tools need to talk to **one specific copy** (for example always `orders-db-0`), not a random one behind a shared VIP.\n\nYou need a special kind of Service that does **not** invent a single ClusterIP, but instead helps DNS point at **each Pod individually**.\n\nThis lab adds a **headless Service** so each database Pod is reachable by a stable DNS name. A normal load-balanced Service is the wrong tool when clients must talk to one specific replica.\n**YOUR TASK:**\n\n1. Create a **headless Service** named `orders-db` for the database Pods.\n2. Verify it has **no ClusterIP** and lists both Pods as backends.\n\n**SPEC:**\n\n- Service name: `orders-db`\n- `clusterIP`: `None` (headless)\n- Selector: `app=orders-db`\n- Port name: `postgres`\n- Port: `5432`\n- Target port: `5432`\n- Endpoints include `orders-db-0` and `orders-db-1`\n\n**CONSTRAINTS:**\n\n- Manifest: `orders-db-headless-l21.yaml`.\n- Do **not** create a normal ClusterIP Service for this lab.\n- Do not rename the StatefulSet — keep `serviceName: orders-db`.\n- Work only in your lab namespace (not `default`).\n",
-  "difficulty": "L1",
+  "description": "**SITUATION:**\n\nQuickByte’s **orders-db** StatefulSet is already running with two sticky members (`orders-db-0`, `orders-db-1`). The set declares `serviceName: orders-db`, but the matching Service is not there yet — so clients cannot discover each database Pod by a stable DNS name.\n\nYour job is to create that governing Service so each member is reachable by name (not via a load-balanced VIP). Review the **StatefulSets** reading for why this Service is headless and how the DNS names look.\n\nSetup already started the StatefulSet (labels `app=orders-db`). You only add the Service.\n\n[DevSetu Blog — StatefulSets](/play/devops-engineer/kubernetes/read/statefulsets)\n\n**YOUR TASK:**\n\n1. Create Service `orders-db` for the database Pods.\n2. Verify it matches the SPEC (headless, correct selector and port).\n3. Confirm both Pods show up as backends (Endpoints include `orders-db-0` and `orders-db-1`).\n\n**SPEC:**\n\n- Service name: `orders-db` (must match the StatefulSet’s `serviceName`)\n- `spec.clusterIP`: `None`\n- Selector: `app=orders-db`\n- Ports:\n  - name: `postgres`\n  - `port`: `5432`\n  - `targetPort`: `5432`\n- Backends: Endpoints for this Service include both `orders-db-0` and `orders-db-1`\n\n**GOOD PRACTICES:**\n\n- Manifest: `orders-db-headless-l21.yaml`.\n- Do **not** create a normal ClusterIP Service for this lab.\n- Do **not** rename or replace the StatefulSet — keep `serviceName: orders-db`.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L0",
   "tags": [
     "kubernetes",
     "ckad",
-    "l1",
-    "pods"
+    "l0",
+    "services",
+    "statefulsets",
+    "dns"
   ],
   "category": "kubernetes",
   "sandboxType": "kubernetes",
@@ -20,12 +22,14 @@
   "problemStatement": {
     "hints": [
       "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Service name must be orders-db — same as the StatefulSet serviceName.",
+      "Read the StatefulSets blog section on headless Services if clusterIP: None is unfamiliar.",
       "Work only in your lab namespace (not default).",
       "Read SPEC carefully, apply your YAML, then Submit."
     ],
     "overview": "Discover Each Database Pod by Name",
     "brief": "Discover Each Database Pod by Name",
-    "solution": "# Solution — Discover Each Database Pod by Name\n\nCreate a headless Service `orders-db` (`clusterIP: None`) so each StatefulSet Pod gets a stable DNS name.\n\nDocs: [Headless Services](https://kubernetes.io/docs/concepts/services-networking/service/#headless-services)\n\n## Solution YAML\n\nSave as `orders-db-headless-l21.yaml`:\n\n```yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: orders-db\nspec:\n  clusterIP: None\n  selector:\n    app: orders-db\n  ports:\n    - name: postgres\n      port: 5432\n      targetPort: 5432\n```\n\n## Declarative\n\n```bash\nkubectl apply -f orders-db-headless-l21.yaml\nkubectl get svc orders-db\nkubectl get endpoints orders-db\n```\n\nConfirm `CLUSTER-IP` is **None** and both Pods appear as backends, then **Submit**.\n",
+    "solution": "# Solution — Discover Each Database Pod by Name\n\nCreate Service `orders-db` with `clusterIP: None` so it matches the StatefulSet’s `serviceName` and publishes per-Pod DNS. See the **StatefulSets** reading for the headless vs ClusterIP story.\n\nDocs: [DevSetu Blog — StatefulSets](/play/devops-engineer/kubernetes/read/statefulsets) · [Headless Services](https://kubernetes.io/docs/concepts/services-networking/service/#headless-services)\n\n## Solution YAML\n\nSave as `orders-db-headless-l21.yaml`:\n\n```yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: orders-db\nspec:\n  clusterIP: None\n  selector:\n    app: orders-db\n  ports:\n    - name: postgres\n      port: 5432\n      targetPort: 5432\n```\n\n## Declarative\n\n```bash\nkubectl apply -f orders-db-headless-l21.yaml\nkubectl get svc orders-db\nkubectl get endpoints orders-db\n```\n\nConfirm `CLUSTER-IP` is **None** and both Pods appear as backends, then **Submit**.\n",
     "idLabel": "21",
     "theory": ""
   },
@@ -33,14 +37,14 @@
     "quota": {
       "pods": "10",
       "cpu": "700m",
-      "memory": "1024Mi"
+      "memory": "1536Mi"
     },
     "setup": {
       "script": "setup.sh"
     },
     "grade": {
       "script": "grade.sh",
-      "timeoutSeconds": 90
+      "timeoutSeconds": 180
     },
     "limitRange": {
       "defaultRequest": {
@@ -48,9 +52,11 @@
         "memory": "32Mi"
       },
       "default": {
-        "cpu": "100m",
-        "memory": "256Mi"
+        "cpu": "200m",
+        "memory": "512Mi"
       }
     }
-  }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

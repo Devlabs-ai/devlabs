@@ -1,8 +1,8 @@
 # Solution — Colocate Notifications Near Orders
 
-Update `notification-service` with preferred pod affinity toward Pods labeled `app=order-processor` (`topologyKey: kubernetes.io/hostname`).
+During peak order traffic, prefer Notification on the same node as Order Processor (`podAffinity`, soft) so confirmations do not lag across the fabric. Still schedule elsewhere if that node is full.
 
-Docs: [Inter-pod affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity)
+Docs: [DevSetu Blog — Where Pods Land: Selectors, Affinity, and Taints](/play/devops-engineer/kubernetes/read/scheduling-affinity-taints) · [Inter-pod affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity)
 
 ## Solution YAML
 
@@ -34,7 +34,7 @@ spec:
                     app: order-processor
       containers:
         - name: notification-service
-          image: rithvikreddyalkanti/notification-service:v1.0
+          image: devsetu/notification-service:v1.0
           ports:
             - containerPort: 8080
 ```
@@ -44,7 +44,7 @@ spec:
 ```bash
 kubectl apply -f notification-podaffinity-l27.yaml
 kubectl get deploy notification-service -o yaml | grep -A30 podAffinity
-kubectl get pods -l app=notification-service -o wide
+kubectl get pods -l 'app in (notification-service,order-processor)' -o wide
 ```
 
 Wait until **2/2** Notification Pods are Ready, then **Submit**.

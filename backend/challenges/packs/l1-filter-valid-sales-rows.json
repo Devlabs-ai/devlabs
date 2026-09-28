@@ -271,5 +271,7 @@
     "runScript": "run.sh",
     "jobYaml": "job.yaml",
     "s3Prefix": "challenges/l1-filter-valid-sales-rows"
-  }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

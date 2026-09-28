@@ -17,7 +17,7 @@ pass() {
 
 DEPLOY="order-processor-deploy"
 WANT_REPLICAS="3"
-WANT_IMAGE="rithvikreddyalkanti/order-processor:v1.1"
+WANT_IMAGE="devsetu/order-processor:v1.1"
 WANT_SURGE="1"
 WANT_UNAVAIL="0"
 

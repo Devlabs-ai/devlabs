@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Run a one-shot Job under ServiceAccount `settlement-exporter` (from the previous lab) to list Payment Handler Pods.
 
-Docs: [Jobs](https://kubernetes.io/docs/concepts/workloads/controllers/job/)
+Docs: [DevSetu Blog — ServiceAccounts, Roles, and RoleBindings](/play/devops-engineer/kubernetes/read/serviceaccounts-rbac) · [Jobs](https://kubernetes.io/docs/concepts/workloads/controllers/job/)
 
 ## Solution YAML
 

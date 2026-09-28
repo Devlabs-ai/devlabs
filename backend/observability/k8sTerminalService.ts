@@ -3,7 +3,9 @@
 /**
  * Interactive kubectl shell for kubernetes lab sessions (xterm.js via PTY).
  * Mints a short-lived kubeconfig for the per-namespace learner ServiceAccount
- * (Role/RoleBinding), then spawns bash with that KUBECONFIG.
+ * (Role/RoleBinding), then spawns bash with that KUBECONFIG. With
+ * K8S_LAB_SHELL_MODE=container, bash runs in an isolated per-terminal
+ * container (see workspace/labShell) instead of inside the backend.
  */
 
 import type { IncomingMessage } from 'http';
@@ -15,6 +17,21 @@ const path = require('path');
 const pty = require('node-pty');
 const sessionStore = require('../db/sessionStore');
 const k8sCluster = require('../workspace/k8sCluster');
+const labShell = require('../workspace/labShell');
+const sessionIdle = require('../workspace/sessionIdle');
+const terminalEventBus = require('./terminalEventBus');
+
+/** sessionId → close callbacks of its open terminals. */
+const openTerminals = new Map<string, Set<() => void>>();
+
+// A finished lab is parked and its namespace handed to the next lab, so a shell
+// left open must not keep writing into it.
+terminalEventBus.on('session_end', ({ sessionId }: { sessionId?: string }) => {
+  const closers = sessionId ? openTerminals.get(sessionId) : undefined;
+  if (!closers) return;
+  openTerminals.delete(sessionId!);
+  for (const close of closers) close();
+});
 
 function parseQuery(req: IncomingMessage): URLSearchParams {
   try {
@@ -67,19 +84,19 @@ function ensureLearnerHome(userName: string): string {
   const preferred = path.join(root, userName);
   let home: string;
   try {
-    fs.mkdirSync(preferred, { recursive: true, mode: 0o755 });
+    fs.mkdirSync(preferred, { recursive: true, mode: 0o700 });
     fs.accessSync(preferred, fs.constants.W_OK);
     home = preferred;
   } catch (err: unknown) {
     const fallback = path.join(os.homedir(), 'devlabs-homes', userName);
-    fs.mkdirSync(fallback, { recursive: true, mode: 0o755 });
+    fs.mkdirSync(fallback, { recursive: true, mode: 0o700 });
     console.warn(
       `[k8s-terminal] could not use ${preferred} (${(err as Error).message}); using ${fallback}`,
     );
     home = fallback;
   }
 
-  // Drop leftover DevLabs YAML vim / editorconfig so stock vi/vim is used.
+  // Drop leftover lab YAML vim / editorconfig so stock vi/vim is used.
   for (const name of ['.vimrc', '.editorconfig']) {
     const p = path.join(home, name);
     try {
@@ -147,55 +164,98 @@ function handleConnection(ws: ObservabilityWebSocket, req: IncomingMessage): voi
       return;
     }
 
-    // Non-login / non-rc shell so host profiles cannot overwrite KUBECONFIG.
-    const shellPath = '/bin/bash';
-    const shellArgs = ['--noprofile', '--norc'];
+    const shellEnv: Record<string, string> = {
+      USER: userName,
+      LOGNAME: userName,
+      TERM: 'xterm-256color',
+      LEARNER_NS: ns,
+      CHALLENGE_ID: challengeId,
+      EDITOR: 'vi',
+      VISUAL: 'vi',
+      KUBE_EDITOR: 'vi',
+      PS1: `\\[\\e[1;32m\\]${userName}\\[\\e[0m\\]:\\w $ `,
+    };
 
+    let containerName: string | null = null;
+    let displayHome = labHome;
     let child: IPty;
     try {
-      child = pty.spawn(shellPath, shellArgs, {
-        name: 'xterm-256color',
-        cols,
-        rows,
-        cwd: labHome,
-        env: {
-          PATH: process.env.PATH || '/usr/bin:/bin:/usr/sbin:/sbin',
-          HOME: labHome,
-          USER: userName,
-          LOGNAME: userName,
-          TERM: 'xterm-256color',
-          KUBECONFIG: kubeconfigPath,
-          LEARNER_NS: ns,
-          CHALLENGE_ID: challengeId,
-          PS1: `\\[\\e[1;32m\\]${userName}\\[\\e[0m\\]:\\w $ `,
-        },
-      });
+      if (labShell.enabled()) {
+        const started = await labShell.startShellContainer({
+          sessionId,
+          userName,
+          ns,
+          challengeId,
+          labHome,
+          kubeconfigPath,
+          env: shellEnv,
+        });
+        containerName = started.name;
+        displayHome = started.home;
+        if (ws.readyState !== ws.OPEN) {
+          labShell.stopShellContainer(started.name);
+          return;
+        }
+        child = pty.spawn('docker', labShell.execArgs(started.name), {
+          name: 'xterm-256color',
+          cols,
+          rows,
+          env: { PATH: process.env.PATH || '/usr/bin:/bin:/usr/sbin:/sbin', TERM: 'xterm-256color' },
+        });
+      } else {
+        // Non-login / non-rc shell so host profiles cannot overwrite KUBECONFIG.
+        child = pty.spawn('/bin/bash', ['--noprofile', '--norc'], {
+          name: 'xterm-256color',
+          cols,
+          rows,
+          cwd: labHome,
+          env: {
+            ...shellEnv,
+            PATH: process.env.PATH || '/usr/bin:/bin:/usr/sbin:/sbin',
+            HOME: labHome,
+            KUBECONFIG: kubeconfigPath,
+          },
+        });
+      }
     } catch (err: unknown) {
+      if (containerName) labShell.stopShellContainer(containerName);
       k8sCluster.removeLearnerKubeconfig(kubeconfigPath);
-      sendJson(ws, { type: 'error', message: `terminal spawn failed: ${(err as Error).message}` });
+      console.error(`[k8s-terminal] session=${sessionId} spawn failed: ${(err as Error).message}`);
+      sendJson(ws, { type: 'error', message: 'terminal could not start; please retry in a moment' });
       ws.close();
       return;
     }
 
     console.log(
-      `[k8s-terminal] session=${sessionId} ns=${ns} user=${userName} home=${labHome} sa=${k8sCluster.LEARNER_SA} challenge=${challengeId}`,
+      `[k8s-terminal] session=${sessionId} ns=${ns} user=${userName} home=${labHome} sa=${k8sCluster.LEARNER_SA} challenge=${challengeId}${containerName ? ` container=${containerName}` : ''}`,
     );
+    sessionIdle.touch(sessionId);
 
     let closed = false;
     const closeAll = () => {
       if (closed) return;
       closed = true;
+      openTerminals.get(sessionId)?.delete(closeAll);
       try {
         child.kill('SIGTERM');
       } catch (_e) {
         /* noop */
       }
+      if (containerName) labShell.stopShellContainer(containerName);
       k8sCluster.removeLearnerKubeconfig(kubeconfigPath);
       if (ws.readyState === ws.OPEN) ws.close();
     };
+    if (!openTerminals.has(sessionId)) openTerminals.set(sessionId, new Set());
+    openTerminals.get(sessionId)!.add(closeAll);
+    // The lab may have ended while the shell was starting.
+    if (sessionStore.get(sessionId)?.status !== 'active') {
+      closeAll();
+      return;
+    }
 
     ws.on('message', (msg: unknown) => {
       const buf = Buffer.isBuffer(msg) ? msg : Buffer.from(msg as ArrayBuffer);
+      sessionIdle.touch(sessionId);
       if (buf.length > 0 && buf[0] === 0x7b /* { */) {
         const asText = buf.toString('utf8');
         if (/^\{\s*"type"\s*:\s*"resize"/.test(asText)) {
@@ -237,9 +297,8 @@ function handleConnection(ws: ObservabilityWebSocket, req: IncomingMessage): voi
       ws,
       Buffer.from(
         `\r\n\x1b[1mDevLabs Kubernetes lab\x1b[0m\r\n`
-          + `Home: \x1b[36m${labHome}\x1b[0m   Namespace: \x1b[32m${ns}\x1b[0m\r\n`
-          + `Use the Scratch pad tab to write YAML, then apply from here.\r\n`
-          + `Try: kubectl get pods\r\n\r\n`,
+          + `Home: \x1b[36m${displayHome}\x1b[0m   Namespace: \x1b[32m${ns}\x1b[0m\r\n`
+          + `Files saved in the Editor tab land here — try: ls, then kubectl apply -f <file>\r\n\r\n`,
       ),
     );
   })();

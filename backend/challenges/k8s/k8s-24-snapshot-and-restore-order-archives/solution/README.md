@@ -1,10 +1,10 @@
 # Solution — Snapshot and Restore Order Archives
 
-Take VolumeSnapshot `order-archive-snap` of `order-archive-pvc`, then restore into a new PVC `order-archive-pvc-restore` (optional check Pod mounts it at `/restore`).
+Take VolumeSnapshot `order-archive-snap` of `order-archive-pvc`, then restore into a new PVC `order-archive-pvc-restore` on **`gp2`**.
 
-Docs: [Volume Snapshots](https://kubernetes.io/docs/concepts/storage/volume-snapshots/)
+Docs: [DevSetu Blog — Volumes, PVs, PVCs, and StorageClasses](/play/devops-engineer/kubernetes/read/volumes-pvs-pvcs-storageclasses) · [Volume Snapshots](https://kubernetes.io/docs/concepts/storage/volume-snapshots/)
 
-## Solution YAML
+## Solution YAML (required)
 
 Save as `order-archive-snapshot-l24.yaml`:
 
@@ -27,12 +27,17 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 1Gi
+      storage: 500Mi
+  storageClassName: gp2
   dataSource:
     name: order-archive-snap
     kind: VolumeSnapshot
     apiGroup: snapshot.storage.k8s.io
----
+```
+
+## Optional check Pod (not graded)
+
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -59,4 +64,4 @@ kubectl get volumesnapshot order-archive-snap
 kubectl get pvc order-archive-pvc-restore
 ```
 
-Wait until the snapshot is ready and the restored PVC is **Bound** (when the snapshot CSI is available), then **Submit**. Do not delete the original archive claim.
+Confirm the snapshot and restore PVC objects match the SPEC, then **Submit**. Do not delete the original archive claim. The check Pod and Bound/readyToUse status are optional.

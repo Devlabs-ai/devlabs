@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. PRE RUN uses **`slow-order-processor:1.0`**: the process listens immediately, but `/health` returns **503 for ~25s**. Existing liveness (`3s` / `3s` / `failureThreshold=3`) kills it mid-warmup → CrashLoopBackOff. Add an HTTP **startup** probe on `/health` so liveness/readiness wait out the warmup. Keep the slow image and the existing live/ready probes.
 
-Docs: [Startup probe](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-startup-probes)
+Docs: [DevSetu Blog — Probes: Startup, Readiness, and Liveness](/play/devops-engineer/kubernetes/read/probes-liveness-readiness-startup) · [Startup probe](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-startup-probes)
 
 ## Optional: confirm the CrashLoop before you fix it
 
@@ -32,7 +32,7 @@ spec:
     spec:
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/slow-order-processor:1.0
+          image: devsetu/slow-order-processor:1.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8000

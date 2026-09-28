@@ -6,7 +6,7 @@ Docs: [Istio PeerAuthentication](https://istio.io/latest/docs/reference/config/s
 
 ## Solution YAML
 
-Save as `mesh-mtls-l35.yaml` (Istio). Enable injection on the namespace first (`istio-injection=enabled` or platform equivalent).
+Save as `mesh-mtls-l35.yaml` (Istio). Enable injection on the two workloads first by adding the pod-template label `sidecar.istio.io/inject: "true"` (the lab namespace itself is platform-managed, so label the workloads rather than the namespace).
 
 ```yaml
 apiVersion: security.istio.io/v1
@@ -36,9 +36,12 @@ If the platform uses Linkerd, use `Server` + `ServerAuthorization` requiring mTL
 ## Declarative
 
 ```bash
-kubectl label namespace "$LEARNER_NS" istio-injection=enabled --overwrite
+for d in order-processor-deploy payment-handler; do
+  kubectl patch deploy "$d" --type merge \
+    -p '{"spec":{"template":{"metadata":{"labels":{"sidecar.istio.io/inject":"true"}}}}}'
+done
 kubectl apply -f mesh-mtls-l35.yaml
-kubectl rollout restart deploy/order-processor-deploy deploy/payment-handler
+kubectl rollout status deploy/order-processor-deploy
 kubectl rollout status deploy/payment-handler
 kubectl get peerauthentication,destinationrule
 ```

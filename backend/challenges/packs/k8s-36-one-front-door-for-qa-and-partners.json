@@ -3,7 +3,7 @@
   "number": 236,
   "finalized": true,
   "title": "One Front Door for QA and Partners",
-  "description": "**SITUATION:**\n\nQA and partners should not memorize NodePorts for every app. They want **one hostname** where:\n- `/orders` goes to Order Processor  \n- `/notify` goes to Notification Service  \n\nThat edge router in Kubernetes is an **Ingress**.\n\nThis lab adds an **Ingress** as one front door (`/orders`, `/notify`) for QA and partners. Services can stay ClusterIP — Ingress is the HTTP router at the edge.\n**YOUR TASK:**\n\n1. Create an **Ingress** that routes the paths below to the right Services.\n2. Verify requests hit the correct backends (controller address / platform URL).\n\n**SPEC:**\n\n- Ingress name: `quickbyte-edge`\n- Ingress class: use platform default (e.g. `nginx` or `alb`) — set `ingressClassName` if required\n- Rules (host optional — use `qa.quickbyte.lab` if the platform provides DNS):\n  - path `/orders` (Prefix) → Service `order-processor-svc` port **8000**\n  - path `/notify` (Prefix) → Service `notification-service` port **8080**\n- Ready: Ingress has an address (or platform-documented equivalent); paths reach backends\n\n**CONSTRAINTS:**\n\n- Manifest: `quickbyte-ingress-l36.yaml`.\n- Do **not** expose each app with its own LoadBalancer Service for this lab.\n- Work only in your lab namespace (not `default`).\n",
+  "description": "**SITUATION:**\n\nQA and partners should not memorize NodePorts for every app. They want **one hostname** where:\n- `/orders` goes to Order Processor  \n- `/notify` goes to Notification Service  \n\nThat edge router in Kubernetes is an **Ingress**.\n\nThis lab adds an **Ingress** as one front door (`/orders`, `/notify`) for QA and partners. Services can stay ClusterIP — Ingress is the HTTP router at the edge.\n**YOUR TASK:**\n\n1. Create an **Ingress** that routes the paths below to the right Services.\n2. Verify requests hit the correct backends (controller address / platform URL).\n\n**SPEC:**\n\n- Ingress name: `quickbyte-edge`\n- Ingress class: use platform default (e.g. `nginx` or `alb`) — set `ingressClassName` if required\n- Rules (host optional — use `qa.quickbyte.lab` if the platform provides DNS):\n  - path `/orders` (Prefix) → Service `order-processor-svc` port **8000**\n  - path `/notify` (Prefix) → Service `notification-service` port **8080**\n- Ready: Ingress has an address (or platform-documented equivalent); paths reach backends\n\n**GOOD PRACTICES:**\n\n- Manifest: `quickbyte-ingress-l36.yaml`.\n- Do **not** expose each app with its own LoadBalancer Service for this lab.\n- Work only in your lab namespace (not `default`).\n",
   "difficulty": "L1",
   "tags": [
     "kubernetes",
@@ -42,5 +42,7 @@
       "script": "grade.sh",
       "timeoutSeconds": 90
     }
-  }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

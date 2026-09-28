@@ -3,7 +3,10 @@ import { Link } from 'react-router-dom';
 import ReadOnlyCodePane from './ReadOnlyCodePane';
 
 function inlineMarkdown(text: string): React.ReactNode[] {
-  const parts = text.split(/(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|`[^`]+`)/g);
+  // Bold (**) before italic (*) so **foo** is not treated as nested singles.
+  const parts = text.split(
+    /(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g,
+  );
   return parts.map((part, i) => {
     const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
     if (link) {
@@ -12,6 +15,14 @@ function inlineMarkdown(text: string): React.ReactNode[] {
       const safe =
         internal || href.startsWith('https://') || href.startsWith('http://');
       if (!safe) return label;
+      // Blog readings open beside the lab so an in-progress session is not left.
+      if (internal && href.includes('/read/')) {
+        return (
+          <a key={i} href={href} target="_blank" rel="noopener">
+            {label}
+          </a>
+        );
+      }
       if (internal) {
         return (
           <Link key={i} to={href}>
@@ -27,6 +38,14 @@ function inlineMarkdown(text: string): React.ReactNode[] {
     }
     if (part.startsWith('**') && part.endsWith('**')) {
       return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    if (
+      part.length >= 2
+      && part.startsWith('*')
+      && part.endsWith('*')
+      && !part.startsWith('**')
+    ) {
+      return <em key={i}>{part.slice(1, -1)}</em>;
     }
     if (part.startsWith('`') && part.endsWith('`')) {
       return <code key={i}>{part.slice(1, -1)}</code>;
@@ -93,6 +112,65 @@ function parseTable(
   );
 
   return { element, nextIndex: i - 1 };
+}
+
+function yamlScalar(value: string, key: string): React.ReactNode {
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  const lead = value.slice(0, value.indexOf(trimmed));
+  const tail = value.slice(lead.length + trimmed.length);
+  let cls = '';
+  if (/^(["']).*\1$/.test(trimmed)) cls = 'yaml-str';
+  else if (/^-?\d+(\.\d+)?$/.test(trimmed)) cls = 'yaml-num';
+  else if (/^(true|false|null|~)$/i.test(trimmed)) cls = 'yaml-bool';
+  else if (/^[|>][+-]?$/.test(trimmed) || /^[[\]{}]$/.test(trimmed)) cls = 'yaml-punct';
+  else cls = 'yaml-val';
+  return (
+    <React.Fragment key={key}>
+      {lead}
+      <span className={cls}>{trimmed}</span>
+      {tail}
+    </React.Fragment>
+  );
+}
+
+/** Lightweight YAML token colouring for read-only snippets (no Monaco per block). */
+function highlightYaml(content: string): React.ReactNode[] {
+  return content.split('\n').map((line, li) => {
+    const nodes: React.ReactNode[] = [];
+    let body = line;
+    let comment = '';
+    const hash = body.search(/(^|\s)#/);
+    if (hash >= 0 && !/^\s*["'][^"']*#/.test(body)) {
+      const at = body[hash] === '#' ? hash : hash + 1;
+      comment = body.slice(at);
+      body = body.slice(0, at);
+    }
+    if (/^---\s*$/.test(body)) {
+      nodes.push(<span key="doc" className="yaml-punct">{body}</span>);
+    } else {
+      const m = body.match(/^(\s*)(-\s+)?(?:([^\s:#][^:#]*?)(:)(?=\s|$))?(.*)$/);
+      if (m) {
+        const [, indent, dash, keyName, colon, rest] = m;
+        nodes.push(indent);
+        if (dash) nodes.push(<span key="dash" className="yaml-punct">{dash}</span>);
+        if (keyName) {
+          nodes.push(<span key="k" className="yaml-key">{keyName}</span>);
+          nodes.push(<span key="c" className="yaml-punct">{colon}</span>);
+        }
+        if (rest) nodes.push(yamlScalar(rest, 'v'));
+      } else {
+        nodes.push(body);
+      }
+    }
+    if (comment) nodes.push(<span key="cm" className="yaml-comment">{comment}</span>);
+    return (
+      <React.Fragment key={li}>
+        {nodes}
+        {'\n'}
+      </React.Fragment>
+    );
+  });
 }
 
 /** Normalize fence language tags to Monaco ids. */
@@ -208,8 +286,12 @@ function fenceLabel(lang: string): string {
   return lang;
 }
 
-function renderMarkdown(text: string): React.ReactNode[] | null {
+function renderMarkdown(
+  text: string,
+  opts?: { plainCode?: boolean },
+): React.ReactNode[] | null {
   if (!text) return null;
+  const plainCode = Boolean(opts?.plainCode);
   const lines = text.split('\n');
   const elements: React.ReactNode[] = [];
   let key = 0;
@@ -227,11 +309,18 @@ function renderMarkdown(text: string): React.ReactNode[] | null {
         i += 1;
       }
       const content = formatFenceContent(body.join('\n'), lang);
-      if (lang === 'plaintext') {
+      if (plainCode || lang === 'plaintext') {
         elements.push(
-          <pre key={key++} className="markdown-pre">
-            <code>{content}</code>
-          </pre>,
+          <div key={key++} className="markdown-code-block markdown-code-block--plain">
+            {lang !== 'plaintext' && (
+              <div className="markdown-code-toolbar">
+                <span className="markdown-code-lang">{fenceLabel(lang)}</span>
+              </div>
+            )}
+            <pre className="markdown-pre">
+              <code>{lang === 'yaml' ? highlightYaml(content) : content}</code>
+            </pre>
+          </div>,
         );
         continue;
       }
@@ -278,9 +367,43 @@ function renderMarkdown(text: string): React.ReactNode[] | null {
         i += 1;
       }
       i -= 1;
-      const paras = raw.join('\n').split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+
+      let calloutKind = 'quote';
+      let calloutTitle = '';
+      if (raw.length > 0) {
+        const alert = raw[0].match(
+          /^\[!(tip|idea|warn|check|scope|takeaway)\]\s*(.*)$/i,
+        );
+        if (alert) {
+          calloutKind = alert[1].toLowerCase();
+          calloutTitle = (alert[2] || '').trim();
+          raw.shift();
+        }
+      }
+
+      const paras = raw
+        .join('\n')
+        .split(/\n\s*\n/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      const defaultTitles: Record<string, string> = {
+        tip: 'Tip',
+        idea: 'Idea',
+        warn: 'Watch out',
+        check: 'Own this',
+        scope: 'Scope',
+        takeaway: 'Takeaway',
+      };
+      const label =
+        calloutTitle
+        || (calloutKind !== 'quote' ? defaultTitles[calloutKind] : '');
+
       elements.push(
-        <aside key={key++} className="markdown-callout">
+        <aside
+          key={key++}
+          className={`markdown-callout markdown-callout--${calloutKind}`}
+        >
+          {label ? <p className="markdown-callout-label">{label}</p> : null}
           {paras.map((para, pi) => (
             <p key={pi}>{inlineMarkdown(para.replace(/\n/g, ' '))}</p>
           ))}
@@ -333,10 +456,16 @@ function renderMarkdown(text: string): React.ReactNode[] | null {
 interface MarkdownProseProps {
   text: string | undefined | null;
   className?: string;
+  /** Prefer lightweight &lt;pre&gt; fences (no Monaco) — use for Solution / Description. */
+  plainCode?: boolean;
 }
 
-/** Renders challenge-style markdown (headings, lists, tables, fences, links, bold, inline code). */
-export default function MarkdownProse({ text, className = 'markdown-prose' }: MarkdownProseProps): JSX.Element | null {
+/** Renders challenge-style markdown (headings, lists, tables, fences, links, bold, italic, inline code). */
+export default function MarkdownProse({
+  text,
+  className = 'markdown-prose',
+  plainCode = false,
+}: MarkdownProseProps): JSX.Element | null {
   if (!text?.trim()) return null;
-  return <div className={className}>{renderMarkdown(text)}</div>;
+  return <div className={className}>{renderMarkdown(text, { plainCode })}</div>;
 }

@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Create Deployment `order-processor-deploy` with **3** replicas on image **v1.1** so Order Processor can roll forward without deleting a bare ReplicaSet by hand.
 
-Docs: [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+Docs: [DevSetu Blog — ReplicaSets and Deployments](/play/devops-engineer/kubernetes/read/controllers-replicasets-deployments) · [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
 
 ## Solution YAML
 
@@ -27,13 +27,9 @@ spec:
     spec:
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.1
+          image: devsetu/order-processor:v1.1
           ports:
             - containerPort: 8000
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
 ```
 
 Selector labels must match the Pod template labels (`app=order-processor`, `version=v1.1`).
@@ -50,4 +46,4 @@ kubectl get pods -l app=order-processor,version=v1.1 -o wide
 
 Wait until **3** Pods are `Running` and `READY` is `1/1` each, then **Submit**.
 
-Do not create a bare ReplicaSet — grade looks for a Deployment. Work only in your lab namespace (not `default`).
+Do not create a bare ReplicaSet — grade looks for a Deployment.

@@ -17,7 +17,7 @@ pass() {
 
 RS_NAME="order-processor-rs"
 WANT_REPLICAS="3"
-WANT_IMAGE="rithvikreddyalkanti/order-processor:v1.0"
+WANT_IMAGE="devsetu/order-processor:v1.0"
 WANT_CONTAINER="order-processor"
 WANT_PORT="8000"
 WANT_APP="order-processor"
@@ -50,9 +50,6 @@ TPL_VER="$(kubectl -n "$LEARNER_NS" get rs "$RS_NAME" -o jsonpath='{.spec.templa
 CONTAINER_NAME="$(kubectl -n "$LEARNER_NS" get rs "$RS_NAME" -o jsonpath='{.spec.template.spec.containers[0].name}' 2>/dev/null || true)"
 IMAGE="$(kubectl -n "$LEARNER_NS" get rs "$RS_NAME" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
 PORTS="$(kubectl -n "$LEARNER_NS" get rs "$RS_NAME" -o jsonpath='{.spec.template.spec.containers[0].ports[*].containerPort}' 2>/dev/null || true)"
-CPU_REQ="$(kubectl -n "$LEARNER_NS" get rs "$RS_NAME" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu}' 2>/dev/null || true)"
-MEM_REQ="$(kubectl -n "$LEARNER_NS" get rs "$RS_NAME" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.memory}' 2>/dev/null || true)"
-
 [[ "$CONTAINER_NAME" == "$WANT_CONTAINER" ]] || fail "container name must be ${WANT_CONTAINER} (got '${CONTAINER_NAME}')"
 [[ "$IMAGE" == "$WANT_IMAGE" ]] || fail "image must be ${WANT_IMAGE} (got '${IMAGE}')"
 
@@ -68,12 +65,6 @@ for p in $PORTS; do
 done
 [[ "$FOUND_PORT" -eq 1 ]] || fail "containerPort must include ${WANT_PORT} (got '${PORTS}')"
 
-case "$CPU_REQ" in
-  100m|0.1) ;;
-  *) fail "cpu request must be 100m (got '${CPU_REQ}')" ;;
-esac
-[[ "$MEM_REQ" == "128Mi" ]] || fail "memory request must be 128Mi (got '${MEM_REQ}')"
-
 READY_PODS=0
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
@@ -87,4 +78,4 @@ done < <(kubectl -n "$LEARNER_NS" get pods -l "app=${WANT_APP},version=${WANT_VE
 
 [[ "$READY_PODS" -ge "$WANT_REPLICAS" ]] || fail "need ${WANT_REPLICAS} Ready pods with app=${WANT_APP},version=${WANT_VERSION} (got ${READY_PODS})"
 
-pass "replicaset/${RS_NAME} has ${WANT_REPLICAS} Ready pods in ${LEARNER_NS} with required image, labels, port, and resources"
+pass "replicaset/${RS_NAME} has ${WANT_REPLICAS} Ready pods in ${LEARNER_NS} with required image, labels, and port"

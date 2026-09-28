@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Create ConfigMap `order-processor-config` with production settings, then Deploy Order Processor on **v1.2** with those keys injected as environment variables.
 
-Docs: [ConfigMaps](https://kubernetes.io/docs/concepts/configuration/configmap/)
+Docs: [DevSetu Blog — ConfigMaps and Secrets](/play/devops-engineer/kubernetes/read/configmaps-secrets) · [ConfigMaps](https://kubernetes.io/docs/concepts/configuration/configmap/)
 
 ## Solution YAML
 
@@ -40,13 +40,9 @@ spec:
     spec:
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.2
+          image: devsetu/order-processor:v1.2
           ports:
             - containerPort: 8000
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
           envFrom:
             - configMapRef:
                 name: order-processor-config

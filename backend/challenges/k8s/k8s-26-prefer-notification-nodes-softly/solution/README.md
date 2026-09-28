@@ -1,8 +1,8 @@
 # Solution — Prefer Notification Nodes Softly
 
-Update `notification-service` with preferred (soft) node affinity for `workload=notifications`. Do not add a required rule.
+Replace the baseline hard `nodeSelector` with preferred (soft) node affinity for `workload=notifications`. Do not add a required rule.
 
-Docs: [Node affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity)
+Docs: [DevSetu Blog — Where Pods Land: Selectors, Affinity, and Taints](/play/devops-engineer/kubernetes/read/scheduling-affinity-taints) · [Node affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity)
 
 ## Solution YAML
 
@@ -35,16 +35,18 @@ spec:
                       - notifications
       containers:
         - name: notification-service
-          image: rithvikreddyalkanti/notification-service:v1.0
+          image: devsetu/notification-service:v1.0
           ports:
             - containerPort: 8080
 ```
+
+(No `nodeSelector` in the Pod template.)
 
 ## Declarative
 
 ```bash
 kubectl apply -f notification-nodeaffinity-l26.yaml
-kubectl get deploy notification-service -o yaml | grep -A20 affinity
+kubectl get deploy notification-service -o yaml | grep -A30 affinity
 kubectl get pods -l app=notification-service -o wide
 ```
 

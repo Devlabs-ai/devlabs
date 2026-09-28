@@ -17,7 +17,7 @@ pass() {
 
 JOB="order-reconciliation-manual"
 CRON="order-reconciliation-nightly"
-WANT_IMAGE="rithvikreddyalkanti/order-reconciliation:v1.0"
+WANT_IMAGE="devsetu/order-reconciliation:v1.0"
 WANT_SCHEDULE="15 1 * * *"
 WANT_POLICY="Forbid"
 

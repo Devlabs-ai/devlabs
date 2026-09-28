@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Payment Handler Pods are already running with label `app=payment-handler`. Create ClusterIP Service `handler` so Order Processor can dial a stable DNS name instead of a Pod IP.
 
-Docs: [Services](https://kubernetes.io/docs/concepts/services-networking/service/)
+Docs: [DevSetu Blog — Services, DNS, and Endpoints](/play/devops-engineer/kubernetes/read/services) · [Services](https://kubernetes.io/docs/concepts/services-networking/service/)
 
 ## Solution YAML
 
@@ -34,4 +34,4 @@ kubectl get endpoints handler
 
 Wait until Endpoints show at least one ready address, then **Submit**.
 
-Do not expose the Service externally (no NodePort / LoadBalancer yet). Work only in your lab namespace (not `default`).
+Do not expose the Service externally (no NodePort / LoadBalancer yet).

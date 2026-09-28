@@ -3,7 +3,7 @@
   "number": 239,
   "finalized": true,
   "title": "Keep Enough Payments During Node Drains",
-  "description": "**SITUATION:**\n\nCluster upgrades drain nodes. Without a safety net, Kubernetes can evict almost every Payment Handler Pod at once — payments drop during maintenance. A **Pod Disruption Budget** tells the cluster: “never voluntarily evict so many that we go below N available.”\n\nThis lab adds a **PodDisruptionBudget** so node drains cannot evict all Payment Handler Pods at once. It limits voluntary disruption during maintenance — it does not replace probes or anti-affinity.\n**YOUR TASK:**\n\n1. Create a **PodDisruptionBudget** for Payment Handler.\n2. Verify it selects the payment Pods and enforces the availability floor (optional: observe a drain that respects the PDB).\n\n**SPEC:**\n\n- PDB name: `payment-handler-pdb`\n- Selector: `app=payment-handler`\n- `minAvailable`: **3**  (out of 5 replicas — at most 2 can be down from voluntary disruption)\n- Success: PDB exists; `ALLOWED disruptions` / status reflects the budget\n\n**CONSTRAINTS:**\n\n- Manifest: `payment-handler-pdb-l39.yaml`.\n- Use `minAvailable` (not `maxUnavailable`) for this lab.\n- PDB only limits **voluntary** disruptions (drains, evictions) — not node crashes.\n- Work only in your lab namespace (not `default`).\n",
+  "description": "**SITUATION:**\n\nCluster upgrades drain nodes. Without a safety net, Kubernetes can evict almost every Payment Handler Pod at once — payments drop during maintenance. A **Pod Disruption Budget** tells the cluster: “never voluntarily evict so many that we go below N available.”\n\nThis lab adds a **PodDisruptionBudget** so node drains cannot evict all Payment Handler Pods at once. It limits voluntary disruption during maintenance — it does not replace probes or anti-affinity.\n**YOUR TASK:**\n\n1. Create a **PodDisruptionBudget** for Payment Handler.\n2. Verify it selects the payment Pods and enforces the availability floor (optional: observe a drain that respects the PDB).\n\n**SPEC:**\n\n- PDB name: `payment-handler-pdb`\n- Selector: `app=payment-handler`\n- `minAvailable`: **3**  (out of 5 replicas — at most 2 can be down from voluntary disruption)\n- Success: PDB exists; `ALLOWED disruptions` / status reflects the budget\n\n**GOOD PRACTICES:**\n\n- Manifest: `payment-handler-pdb-l39.yaml`.\n- Use `minAvailable` (not `maxUnavailable`) for this lab.\n- PDB only limits **voluntary** disruptions (drains, evictions) — not node crashes.\n- Work only in your lab namespace (not `default`).\n",
   "difficulty": "L1",
   "tags": [
     "kubernetes",
@@ -42,5 +42,7 @@
       "script": "grade.sh",
       "timeoutSeconds": 90
     }
-  }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

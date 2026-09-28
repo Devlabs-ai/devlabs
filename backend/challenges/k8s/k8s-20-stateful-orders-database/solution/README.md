@@ -2,7 +2,7 @@
 
 Create StatefulSet `orders-db` with 2 Postgres replicas, stable identity via `serviceName: orders-db`, and per-replica disks from `volumeClaimTemplates`.
 
-Docs: [StatefulSets](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/)
+Docs: [DevSetu Blog — StatefulSets](/play/devops-engineer/kubernetes/read/statefulsets) · [StatefulSets](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/)
 
 ## Solution YAML
 
@@ -26,6 +26,8 @@ spec:
         app: orders-db
         tier: data
     spec:
+      securityContext:
+        fsGroup: 70
       containers:
         - name: postgres
           image: postgres:16-alpine
@@ -36,10 +38,15 @@ spec:
               value: quickbyte-lab
             - name: POSTGRES_DB
               value: orders
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           resources:
             requests:
               cpu: "100m"
-              memory: "256Mi"
+              memory: "512Mi"
+            limits:
+              cpu: "200m"
+              memory: "512Mi"
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
@@ -48,14 +55,24 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
+        storageClassName: gp2
         resources:
           requests:
-            storage: 1Gi
+            storage: 500Mi
 ```
+
+## Why `PGDATA` and `fsGroup`
+
+- Mount the PVC at `/var/lib/postgresql/data`, but set **`PGDATA`** to a subdirectory so Postgres does not treat the volume root (e.g. `lost+found`) as the data dir.
+- **`fsGroup: 70`** lets the alpine `postgres` user write the volume.
 
 ## Declarative
 
 ```bash
+# If a previous attempt CrashLoop'd, delete STS + PVCs so disks re-init cleanly:
+kubectl delete sts orders-db --ignore-not-found
+kubectl delete pvc -l app=orders-db --ignore-not-found
+
 kubectl apply -f orders-db-sts-l20.yaml
 kubectl get sts orders-db
 kubectl get pods -l app=orders-db -o wide

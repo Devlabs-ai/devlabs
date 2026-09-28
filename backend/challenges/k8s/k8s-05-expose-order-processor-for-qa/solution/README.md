@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Order Processor Pods (labels `app=order-processor`, `version=v1.1`) should already be running. Create NodePort Service `order-processor-svc` on node port **30080** so QA *can* reach the app via `NodeIP:30080` when the network allows it (no laptop holding `port-forward` for them).
 
-Docs: [Service NodePort](https://kubernetes.io/docs/concepts/services-networking/service/#type-nodeport)
+Docs: [DevSetu Blog — Services, DNS, and Endpoints](/play/devops-engineer/kubernetes/read/services) · [Service NodePort](https://kubernetes.io/docs/concepts/services-networking/service/#type-nodeport)
 
 ## Solution YAML
 

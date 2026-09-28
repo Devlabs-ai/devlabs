@@ -7,5 +7,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 1Gi
+      storage: 100Mi
   storageClassName: manual
+  # Platform PV for this lab: from `kubectl get pv`, the name ending with your namespace
+  volumeName: REPLACE_WITH_YOUR_PLATFORM_PV

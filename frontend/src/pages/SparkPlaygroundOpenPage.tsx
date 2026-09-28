@@ -1,21 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
+import { isAdminUser } from '../services/authApi';
 
 /** `/play/spark-playground/open` — starts a session (works for new-tab / middle-click). */
 export default function SparkPlaygroundOpenPage(): JSX.Element {
-  const { onOpenSparkPlayground, startError } = useAppState();
+  const { onOpenSparkPlayground, startError, currentUser } = useAppState();
+  const isAdmin = Boolean(currentUser?.admin) || isAdminUser(currentUser);
   const startedRef = useRef(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (startedRef.current || !onOpenSparkPlayground) return;
+    if (!isAdmin || startedRef.current || !onOpenSparkPlayground) return;
     startedRef.current = true;
     void onOpenSparkPlayground().catch((e: unknown) => {
       const err = e as { message?: string };
       setLocalError(err.message || 'Failed to open Spark Playground');
     });
-  }, [onOpenSparkPlayground]);
+  }, [onOpenSparkPlayground, isAdmin]);
+
+  if (!isAdmin) return <Navigate to="/play" replace />;
 
   const error = localError || startError;
 

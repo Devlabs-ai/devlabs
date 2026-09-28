@@ -1,25 +1,4 @@
 apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: payment-local-pv
-spec:
-  capacity:
-    storage: 5Gi
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: local-storage
-  local:
-    path: /mnt/local-ssd/payments
-  nodeAffinity:
-    required:
-      nodeSelectorTerms:
-        - matchExpressions:
-            - key: quickbyte.ai/local-ssd
-              operator: In
-              values:
-                - "true"
----
-apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: payment-local-pvc
@@ -28,8 +7,10 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 5Gi
+      storage: 500Mi
   storageClassName: local-storage
+  # Platform PV for this lab — name ends with your namespace ($LEARNER_NS)
+  volumeName: REPLACE_WITH_PLATFORM_PV_ENDING_IN_LEARNER_NS
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -47,7 +28,7 @@ spec:
     spec:
       containers:
         - name: payment-handler
-          image: rithvikreddyalkanti/payment-handler:v1.0
+          image: devsetu/payment-handler:v1.0
           ports:
             - containerPort: 8000
           volumeMounts:

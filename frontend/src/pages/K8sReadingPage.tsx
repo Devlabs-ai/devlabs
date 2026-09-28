@@ -5,22 +5,48 @@ import {
   getK8sReading,
   K8S_BLOG_STAMP_SRC,
   type K8sReadingCodeBlock,
+  type K8sReadingFlow,
   type K8sReadingSection,
   type K8sReadingTable,
 } from '../constants/k8sReadings';
 import ReadOnlyCodePane from '../components/ReadOnlyCodePane';
 
-/** Light inline **bold** and `code` for reading copy. */
+/** Light inline **bold**, *italic*, `code`, **`bold code`**, and *`italic code`* for reading copy. */
 function RichText({ text }: { text: string }): JSX.Element {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+  // Order matters: **`code`** / *`code`* before **bold** / *italic*, then `code`.
+  const parts = text
+    .split(/(\*\*`[^`]+`\*\*|\*`[^`]+`\*|\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g)
+    .filter(Boolean);
   return (
     <>
       {parts.map((part, i) => {
+        if (part.startsWith('**`') && part.endsWith('`**') && part.length >= 6) {
+          return (
+            <strong key={i}>
+              <code>{part.slice(3, -3)}</code>
+            </strong>
+          );
+        }
+        if (part.startsWith('*`') && part.endsWith('`*') && part.length >= 4) {
+          return (
+            <em key={i}>
+              <code>{part.slice(2, -2)}</code>
+            </em>
+          );
+        }
         if (part.startsWith('**') && part.endsWith('**')) {
           return <strong key={i}>{part.slice(2, -2)}</strong>;
         }
         if (part.startsWith('`') && part.endsWith('`')) {
           return <code key={i}>{part.slice(1, -1)}</code>;
+        }
+        if (
+          part.length >= 3 &&
+          part.startsWith('*') &&
+          part.endsWith('*') &&
+          !part.startsWith('**')
+        ) {
+          return <em key={i}>{part.slice(1, -1)}</em>;
         }
         return <React.Fragment key={i}>{part}</React.Fragment>;
       })}
@@ -55,6 +81,7 @@ function ReadingCodeBlock({ block }: { block: K8sReadingCodeBlock }): JSX.Elemen
         content={block.code.replace(/\n+$/g, '')}
         language={language}
         className="markdown-code-pane"
+        expand
       />
     </div>
   );
@@ -89,8 +116,36 @@ function ReadingTable({ table }: { table: K8sReadingTable }): JSX.Element {
   );
 }
 
+function ReadingFlow({ flow }: { flow: K8sReadingFlow }): JSX.Element {
+  return (
+    <div className="spark-primer-flow">
+      <p className="spark-primer-flow-title">{flow.title}</p>
+      <ol className="spark-primer-flow-steps">
+        {flow.steps.map((step, i) => (
+          <li key={`${flow.title}-${i}`} className="spark-primer-flow-step">
+            <span className="spark-primer-flow-chip">
+              <RichText text={step} />
+            </span>
+            {i < flow.steps.length - 1 ? (
+              <span className="spark-primer-flow-arrow" aria-hidden>
+                →
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function ReadingSection({ section }: { section: K8sReadingSection }): JSX.Element | null {
-  if (!section.title && section.body.length === 0 && !section.code && !section.codes?.length) {
+  if (
+    !section.title &&
+    section.body.length === 0 &&
+    !section.code &&
+    !section.codes?.length &&
+    !section.flows?.length
+  ) {
     return null;
   }
 
@@ -127,6 +182,9 @@ function ReadingSection({ section }: { section: K8sReadingSection }): JSX.Elemen
           <RichText text={section.quote} />
         </blockquote>
       ) : null}
+      {section.flows?.map((flow) => (
+        <ReadingFlow key={flow.title} flow={flow} />
+      ))}
       {section.codes?.map((block) => (
         <ReadingCodeBlock key={block.code.slice(0, 40)} block={block} />
       ))}
@@ -179,7 +237,7 @@ export default function K8sReadingPage(): JSX.Element {
           <img
             className="spark-primer-blog-stamp"
             src={K8S_BLOG_STAMP_SRC}
-            alt="The Devlabs Blog"
+            alt="The DevSetu Blog"
             width={88}
             height={88}
             decoding="async"
@@ -199,7 +257,9 @@ export default function K8sReadingPage(): JSX.Element {
             <p className="spark-primer-eyebrow">{reading.eyebrow}</p>
           ) : null}
           <h1 className="spark-primer-title">{reading.title}</h1>
-          <p className="spark-primer-lede">{reading.lede}</p>
+          <p className="spark-primer-lede">
+            <RichText text={reading.lede} />
+          </p>
         </header>
 
         <nav className="spark-primer-toc" aria-label="On this page">

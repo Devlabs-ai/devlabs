@@ -307,5 +307,7 @@
     "dir": "challenges/l1-enrich-auth-mcc",
     "script": "generate.py",
     "s3Prefix": "challenges/l1-enrich-auth-mcc"
-  }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

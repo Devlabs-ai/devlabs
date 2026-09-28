@@ -7,7 +7,7 @@ kind: Deployment
 metadata:
   name: notification-service
 spec:
-  replicas: 4
+  replicas: 3
   selector:
     matchLabels:
       app: notification-service
@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: notification-service
-          image: rithvikreddyalkanti/notification-service:v1.0
+          image: devsetu/notification-service:v1.0
           ports:
             - containerPort: 8080
 ---

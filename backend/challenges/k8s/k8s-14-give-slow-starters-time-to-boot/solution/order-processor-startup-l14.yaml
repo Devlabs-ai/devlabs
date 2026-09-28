@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/slow-order-processor:1.0
+          image: devsetu/slow-order-processor:1.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8000

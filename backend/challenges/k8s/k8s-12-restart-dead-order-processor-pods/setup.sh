@@ -23,7 +23,7 @@ spec:
           emptyDir: {}
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/zombie-order-processor:1.0
+          image: devsetu/zombie-order-processor:1.0
           ports:
             - containerPort: 8000
           resources:

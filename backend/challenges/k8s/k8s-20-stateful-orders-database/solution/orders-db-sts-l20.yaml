@@ -15,6 +15,8 @@ spec:
         app: orders-db
         tier: data
     spec:
+      securityContext:
+        fsGroup: 70
       containers:
         - name: postgres
           image: postgres:16-alpine
@@ -25,10 +27,16 @@ spec:
               value: quickbyte-lab
             - name: POSTGRES_DB
               value: orders
+            # Official image: do not use the volume root as PGDATA (lost+found / perms).
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           resources:
             requests:
               cpu: "100m"
-              memory: "256Mi"
+              memory: "512Mi"
+            limits:
+              cpu: "200m"
+              memory: "512Mi"
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
@@ -37,6 +45,7 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
+        storageClassName: gp2
         resources:
           requests:
-            storage: 1Gi
+            storage: 500Mi

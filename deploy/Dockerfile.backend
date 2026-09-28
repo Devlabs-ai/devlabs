@@ -1,28 +1,84 @@
-# Stage 1: install deps (node-pty needs full image / prebuilds; slim lacks gyp toolchain)
+# Build TypeScript backend, then ship a slim runtime with Docker CLI
+# (sandbox compose talks to the host via /var/run/docker.sock).
+#
+# Build (repo root):
+#   docker build -f deploy/Dockerfile.backend -t rithvikreddyalkanti/devlabs-backend:latest .
+
 FROM node:20-bookworm AS build
 WORKDIR /app
-COPY backend/package.json backend/package-lock.json ./
-RUN npm ci --omit=dev && npm run postinstall
 
-# Stage 2: lean runtime + Docker CLI for sandbox compose on the host socket
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci
+
+COPY backend/ ./
+
+# Compile TS → dist/, then copy non-TS runtime assets (packs, k8s labs, grade scripts).
+RUN npm run build \
+  && node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const root = process.cwd();
+const dist = path.join(root, 'dist');
+const skipDirs = new Set(['node_modules', 'dist', 'sandbox']);
+const copyExt = new Set([
+  '.json', '.md', '.py', '.yml', '.yaml', '.sh', '.txt', '.sql', '.html', '.css',
+]);
+
+function walk(dir, rel = '') {
+  for (const name of fs.readdirSync(dir)) {
+    if (!rel && skipDirs.has(name)) continue;
+    const abs = path.join(dir, name);
+    const childRel = rel ? path.join(rel, name) : name;
+    const st = fs.statSync(abs);
+    if (st.isDirectory()) {
+      walk(abs, childRel);
+      continue;
+    }
+    const ext = path.extname(name).toLowerCase();
+    if (!copyExt.has(ext)) continue;
+    const dest = path.join(dist, childRel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(abs, dest);
+  }
+}
+
+walk(root);
+NODE
+
+RUN npm prune --omit=dev \
+  && npm run postinstall
+
 FROM node:20-bookworm-slim
 
-# docker-compose-plugin is not in Debian bookworm apt; install the CLI plugin manually.
+# docker CLI (compose sandboxes), kubectl + awscli (EKS lab controller),
+# python (grading), vim-tiny (lab terminal: vi / kubectl edit).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl docker.io \
+  && apt-get install -y --no-install-recommends ca-certificates curl docker.io python3 unzip vim-tiny \
+  && ln -sf /usr/bin/vim.tiny /usr/bin/vi \
+  && ln -sf /usr/bin/vim.tiny /usr/bin/vim \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /usr/local/lib/docker/cli-plugins \
   && curl -fsSL "https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-linux-$(uname -m)" \
     -o /usr/local/lib/docker/cli-plugins/docker-compose \
-  && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+  && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose \
+  && KUBECTL_VERSION="$(curl -fsSL https://dl.k8s.io/release/stable.txt)" \
+  && curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')/kubectl" \
+    -o /usr/local/bin/kubectl \
+  && chmod +x /usr/local/bin/kubectl \
+  && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip \
+  && unzip -q /tmp/awscliv2.zip -d /tmp \
+  && /tmp/aws/install \
+  && rm -rf /tmp/aws /tmp/awscliv2.zip
 
 WORKDIR /app
 
+COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
-COPY backend/ ./
-COPY sandbox/verified/ /app/sandbox/verified/
+COPY --from=build /app/dist ./dist
 
 ENV NODE_ENV=production
+ENV DEVLABS_GRADE_PYTHON=python3
 EXPOSE 4000
 
-CMD ["node", "server.js"]
+CMD ["node", "dist/server.js"]

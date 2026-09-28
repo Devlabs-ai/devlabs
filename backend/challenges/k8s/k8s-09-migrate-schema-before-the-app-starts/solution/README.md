@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Postgres is already running as Deployment/Service **`orders-db`** (database `orders`, user `postgres`, password `quickbyte`). Update Deployment `order-processor-deploy` with Init Container **`schema-migrate`** that waits for Postgres, applies idempotent DDL, then exits `0` so Order Processor can start.
 
-Docs: [Init Containers](https://kubernetes.io/docs/concepts/workloads/pods/init-containers/)
+Docs: [DevSetu Blog — Multi-Container Pods](/play/devops-engineer/kubernetes/read/multi-container-pods) · [Init Containers](https://kubernetes.io/docs/concepts/workloads/pods/init-containers/)
 
 ## Solution YAML
 
@@ -54,19 +54,11 @@ spec:
                    item TEXT
                  );"
               echo "Migrations OK"
-          resources:
-            requests:
-              cpu: "50m"
-              memory: "64Mi"
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.2
+          image: devsetu/order-processor:v1.2
           ports:
             - containerPort: 8000
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
 ```
 
 ## Declarative

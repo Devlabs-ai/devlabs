@@ -1,4 +1,4 @@
 replicaCount: 3
 image:
-  repository: rithvikreddyalkanti/notification-service
+  repository: devsetu/notification-service
   tag: "v1.1"

@@ -83,6 +83,7 @@ export const PLAY_DOMAINS: PlayDomain[] = [
         // Beginner-first order: create → expose → speed → debug → config →
         // multi → probes → rollouts → net → storage → RBAC/schedule → capstones.
         challengeIds: [
+          'k8s-00-meet-kubectl',
           'l1-namespace-and-pod',
           'k8s-02-scale-out-with-a-replicaset',
           'k8s-03-roll-forward-with-a-deployment',

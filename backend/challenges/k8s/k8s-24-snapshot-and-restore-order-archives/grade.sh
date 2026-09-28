@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Grade k8s-24-snapshot-and-restore-order-archives — VolumeSnapshot restore.
+# Grade k8s-24-snapshot-and-restore-order-archives — VolumeSnapshot + restore PVC.
+# Does NOT require archive-restore-check Pod or live readyToUse/Bound (optional checks).
 set -euo pipefail
 
 : "${LEARNER_NS:?LEARNER_NS required}"
@@ -36,15 +37,23 @@ DS_NAME="$(kubectl -n "$LEARNER_NS" get pvc "$RST_PVC" -o jsonpath='{.spec.dataS
 DS_KIND="$(kubectl -n "$LEARNER_NS" get pvc "$RST_PVC" -o jsonpath='{.spec.dataSource.kind}' 2>/dev/null || true)"
 DS_API="$(kubectl -n "$LEARNER_NS" get pvc "$RST_PVC" -o jsonpath='{.spec.dataSource.apiGroup}' 2>/dev/null || true)"
 REQ="$(kubectl -n "$LEARNER_NS" get pvc "$RST_PVC" -o jsonpath='{.spec.resources.requests.storage}' 2>/dev/null || true)"
+RST_SC="$(kubectl -n "$LEARNER_NS" get pvc "$RST_PVC" -o jsonpath='{.spec.storageClassName}' 2>/dev/null || true)"
 [[ "$DS_NAME" == "$SNAP" ]] || fail "restored PVC dataSource.name must be ${SNAP} (got '${DS_NAME}')"
 [[ "$DS_KIND" == "VolumeSnapshot" ]] || fail "dataSource.kind must be VolumeSnapshot (got '${DS_KIND}')"
 [[ "$DS_API" == "snapshot.storage.k8s.io" ]] || fail "dataSource.apiGroup must be snapshot.storage.k8s.io (got '${DS_API}')"
-[[ "$REQ" == "1Gi" ]] || fail "restored PVC storage must be 1Gi (got '${REQ}')"
+[[ "$REQ" == "500Mi" ]] || fail "restored PVC storage must be 500Mi (got '${REQ}')"
+[[ "$RST_SC" == "gp2" ]] || fail "restored PVC storageClassName must be gp2 (got '${RST_SC}')"
 
+# Optional runtime checks — informational only (do not fail Submit)
 READY="$(kubectl -n "$LEARNER_NS" get volumesnapshot "$SNAP" -o jsonpath='{.status.readyToUse}' 2>/dev/null || true)"
 PHASE="$(kubectl -n "$LEARNER_NS" get pvc "$RST_PVC" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
-if [[ "$READY" == "true" && "$PHASE" == "Bound" ]]; then
-  pass "volumesnapshot/${SNAP} readyToUse and pvc/${RST_PVC} Bound"
+if kubectl -n "$LEARNER_NS" get pod archive-restore-check >/dev/null 2>&1; then
+  echo "INFO: optional pod/archive-restore-check present (not required)" >&2
 fi
-echo "WARN: snapshot readyToUse='${READY}' restore phase='${PHASE}' (CSI snapshot may be unavailable); structural checks passed" >&2
+if [[ "$READY" == "true" && "$PHASE" == "Bound" ]]; then
+  echo "INFO: snapshot readyToUse=true and restore pvc Bound (nice-to-have)" >&2
+else
+  echo "INFO: optional runtime check — readyToUse='${READY}' restore phase='${PHASE}' (not graded)" >&2
+fi
+
 pass "volumesnapshot/${SNAP} and restore pvc/${RST_PVC} configured from ${SRC_PVC}"

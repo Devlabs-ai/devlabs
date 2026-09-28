@@ -41,7 +41,7 @@ MOUNT="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{range .spec
 [[ "$PERIOD" == "10" ]] || fail "livenessProbe periodSeconds must be 10 (got '${PERIOD}')"
 [[ "$FAIL_T" == "3" ]] || fail "livenessProbe failureThreshold must be 3 (got '${FAIL_T}')"
 [[ "$IMAGE" == *zombie-order-processor:1.0* ]] \
-  || fail "image must remain rithvikreddyalkanti/zombie-order-processor:1.0 (got '${IMAGE}')"
+  || fail "image must remain devsetu/zombie-order-processor:1.0 (got '${IMAGE}')"
 # Mount is seeded lab plumbing (zombie marker); learners are not taught volumes yet.
 [[ "$MOUNT" == "/var/run/zombie" ]] || fail "do not remove seeded pod template mounts (got '${MOUNT}')"
 

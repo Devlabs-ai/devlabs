@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Keep one Notification Service chart; drive staging vs prod with values files. Install **staging** here.
 
-Docs: [Helm values files](https://helm.sh/docs/chart_template_guide/values_files/)
+Docs: [DevSetu Blog — Helm: Packaging Kubernetes Apps](/play/devops-engineer/kubernetes/read/helm-charts) · [Helm values files](https://helm.sh/docs/chart_template_guide/values_files/)
 
 ## Solution YAML
 
@@ -11,7 +11,7 @@ Docs: [Helm values files](https://helm.sh/docs/chart_template_guide/values_files
 ```yaml
 replicaCount: 1
 image:
-  repository: rithvikreddyalkanti/notification-service
+  repository: devsetu/notification-service
   tag: "v1.1-rc"
 ```
 
@@ -20,7 +20,7 @@ image:
 ```yaml
 replicaCount: 3
 image:
-  repository: rithvikreddyalkanti/notification-service
+  repository: devsetu/notification-service
   tag: "v1.1"
 ```
 

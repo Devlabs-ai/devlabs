@@ -37,7 +37,7 @@ spec:
     spec:
       containers:
         - name: notification-service
-          image: rithvikreddyalkanti/notification-service:v1.0
+          image: devsetu/notification-service:v1.0
           ports:
             - containerPort: 8080
           volumeMounts:

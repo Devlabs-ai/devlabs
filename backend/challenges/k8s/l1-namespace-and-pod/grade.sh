@@ -16,7 +16,7 @@ pass() {
 }
 
 POD_NAME="order-processor-pod"
-WANT_IMAGE="rithvikreddyalkanti/order-processor:v1.0"
+WANT_IMAGE="devsetu/order-processor:v1.0"
 WANT_CONTAINER="order-processor"
 WANT_PORT="8000"
 
@@ -29,9 +29,6 @@ IMAGE="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.spec.contai
 PHASE="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
 READY="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
 PORTS="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.spec.containers[0].ports[*].containerPort}' 2>/dev/null || true)"
-CPU_REQ="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.spec.containers[0].resources.requests.cpu}' 2>/dev/null || true)"
-MEM_REQ="$(kubectl -n "$LEARNER_NS" get pod "$POD_NAME" -o jsonpath='{.spec.containers[0].resources.requests.memory}' 2>/dev/null || true)"
-
 [[ "$CONTAINER_NAME" == "$WANT_CONTAINER" ]] || fail "container name must be ${WANT_CONTAINER} (got '${CONTAINER_NAME}')"
 [[ "$IMAGE" == "$WANT_IMAGE" ]] || fail "image must be ${WANT_IMAGE} (got '${IMAGE}')"
 [[ "$PHASE" == "Running" ]] || fail "pod phase must be Running (got '${PHASE}')"
@@ -49,12 +46,4 @@ for p in $PORTS; do
 done
 [[ "$FOUND_PORT" -eq 1 ]] || fail "containerPort must include ${WANT_PORT} (got '${PORTS}')"
 
-# Accept 100m or 0.1
-case "$CPU_REQ" in
-  100m|0.1) ;;
-  *) fail "cpu request must be 100m (got '${CPU_REQ}')" ;;
-esac
-
-[[ "$MEM_REQ" == "128Mi" ]] || fail "memory request must be 128Mi (got '${MEM_REQ}')"
-
-pass "pod/${POD_NAME} is Running and Ready in ${LEARNER_NS} with required image, port, and resources"
+pass "pod/${POD_NAME} is Running and Ready in ${LEARNER_NS} with required image and port"

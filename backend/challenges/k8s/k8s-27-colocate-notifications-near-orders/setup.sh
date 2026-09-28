@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
+# Baseline notification-service + order-processor for podAffinity. Node labels
+# come from the platform node pool — setup must not label or taint nodes.
 set -euo pipefail
 : "${LEARNER_NS:?}"
-NODE="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-if [[ -n "$NODE" ]]; then
-  kubectl label node "$NODE" workload=notifications --overwrite >/dev/null 2>&1 || true
-fi
+
 kubectl -n "$LEARNER_NS" apply -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -22,7 +21,7 @@ spec:
     spec:
       containers:
         - name: notification-service
-          image: rithvikreddyalkanti/notification-service:v1.0
+          image: devsetu/notification-service:v1.0
           ports:
             - containerPort: 8080
 EOF
@@ -44,7 +43,7 @@ spec:
     spec:
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.1
+          image: devsetu/order-processor:v1.1
           ports:
             - containerPort: 8000
 EOF

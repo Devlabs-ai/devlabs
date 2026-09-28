@@ -1,8 +1,8 @@
 # Solution — Audit Trail with a Sidecar
 
-Stay in your lab namespace. Update Deployment `order-processor-deploy` so each Pod runs **order-processor** plus a **log-shipper** sidecar sharing emptyDir `order-logs` at `/var/log/orders`. Set CPU **request and limit to `50m`** on both containers (keeps the lab inside a tight shared-cluster quota).
+Stay in your lab namespace. Update Deployment `order-processor-deploy` so each Pod runs **order-processor** plus a **log-shipper** sidecar sharing emptyDir `order-logs` at `/var/log/orders`. The `emptyDir` is declared once under `spec.volumes` and mounted into **both** containers via `volumeMounts`, so what `order-processor` writes, `log-shipper` can read.
 
-Docs: [Sidecar containers](https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/)
+Docs: [DevSetu Blog — Multi-Container Pods](/play/devops-engineer/kubernetes/read/multi-container-pods) · [Sidecar containers](https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/)
 
 ## Solution YAML
 
@@ -30,29 +30,15 @@ spec:
           emptyDir: {}
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.2
+          image: devsetu/order-processor:v1.2
           ports:
             - containerPort: 8000
-          resources:
-            requests:
-              cpu: "50m"
-              memory: "128Mi"
-            limits:
-              cpu: "50m"
-              memory: "128Mi"
           volumeMounts:
             - name: order-logs
               mountPath: /var/log/orders
         - name: log-shipper
           image: busybox:1.36
           command: ["/bin/sh", "-c", "tail -F /var/log/orders/orders.log 2>/dev/null || sleep 3600"]
-          resources:
-            requests:
-              cpu: "50m"
-              memory: "64Mi"
-            limits:
-              cpu: "50m"
-              memory: "64Mi"
           volumeMounts:
             - name: order-logs
               mountPath: /var/log/orders

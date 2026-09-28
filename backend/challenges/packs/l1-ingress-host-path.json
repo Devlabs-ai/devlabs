@@ -21,5 +21,13 @@
     "overview": "Ingress",
     "brief": "Route host/path traffic through Ingress to the correct Guestbook Service \u2014 wrong rewrite or backend fails."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1200m",
+      "memory": "1.5Gi"
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

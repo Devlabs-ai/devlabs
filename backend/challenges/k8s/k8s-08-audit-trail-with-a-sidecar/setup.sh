@@ -21,15 +21,8 @@ spec:
     spec:
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.2
+          image: devsetu/order-processor:v1.2
           ports:
             - containerPort: 8000
-          resources:
-            requests:
-              cpu: "50m"
-              memory: "128Mi"
-            limits:
-              cpu: "50m"
-              memory: "128Mi"
 EOF
 echo "setup ok: order-processor-deploy seeded in ${LEARNER_NS}"

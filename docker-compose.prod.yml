@@ -43,19 +43,46 @@ services:
 
   backend:
     image: rithvikreddyalkanti/devlabs-backend:${DEVLABS_BACKEND_TAG:-latest}
+    # Prefer building on the host until Hub :latest is rebuilt from this Dockerfile:
+    #   docker compose -f docker-compose.prod.yml build backend
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
     container_name: devlabs-backend
     restart: unless-stopped
     env_file:
       - .env
-    environment:
-      PGHOST: postgres
-      REDIS_HOST: redis
     volumes:
       # Challenge sandboxes and build artifacts live on the host Docker daemon.
       - /var/run/docker.sock:/var/run/docker.sock
       - devlabs_sandbox_sessions:/app/sandbox/sessions
       - devlabs_sandbox_builds:/app/sandbox/builds
+      # Optional compose-challenge templates (gitignored). Create empty dir if missing:
+      #   mkdir -p sandbox/verified
       - ./sandbox/verified:/app/sandbox/verified:ro
+      # EKS kubeconfig for kubernetes labs (host path → container).
+      - ./kube/k8s-lab.kubeconfig:/app/kube/k8s-lab.kubeconfig:ro
+      # Learner terminal homes (persist across backend rebuilds).
+      # Host: /opt/devlabs/kube/homes/<user>  →  container: /home/<user>
+      - ./kube/homes:/home
+      # K8s lab snapshots. Backend-only: never mount into lab shells, they are
+      # restored with controller rights.
+      - ./kube/snapshots:/app/kube/snapshots
+      # Minted namespace-scoped learner kubeconfigs (mounted read-only into lab shells).
+      - ./kube/learner:/app/kube/learner
+    environment:
+      PGHOST: postgres
+      REDIS_HOST: redis
+      K8S_LAB_KUBECONFIG: /app/kube/k8s-lab.kubeconfig
+      K8S_LAB_HOME_ROOT: /home
+      K8S_LAB_LEARNER_KUBE_ROOT: /app/kube/learner
+      K8S_LAB_SNAPSHOT_ROOT: /app/kube/snapshots
+      # Lab terminals run in isolated per-terminal containers (image: lab-shell below).
+      # Host paths must match the bind mounts above, since the host daemon mounts them.
+      K8S_LAB_SHELL_MODE: container
+      K8S_LAB_SHELL_IMAGE: devlabs-lab-shell:latest
+      K8S_LAB_HOST_HOME_ROOT: ${DEVLABS_ROOT:-/opt/devlabs}/kube/homes
+      K8S_LAB_HOST_KUBE_ROOT: ${DEVLABS_ROOT:-/opt/devlabs}/kube/learner
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,9 +90,17 @@ services:
         condition: service_healthy
     networks:
       - devlabs_internal
-    # Published challenge ports (6000–7999) bind on the EC2 host, not this mapping.
     ports:
       - "127.0.0.1:4000:4000"
+
+  # Build-only: image for isolated lab terminals, started on demand by the backend.
+  #   docker compose -f docker-compose.prod.yml build lab-shell
+  lab-shell:
+    image: devlabs-lab-shell:latest
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.labshell
+    profiles: ["build"]
 
   nginx:
     image: nginx:1.27-alpine
@@ -73,9 +108,12 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./frontend/dist:/usr/share/nginx/html:ro
       - ./deploy/nginx/devlabs.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
     depends_on:
       - backend
     networks:

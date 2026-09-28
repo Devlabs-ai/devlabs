@@ -19,7 +19,7 @@ DEP="payment-handler"
 
 kubectl -n "$LEARNER_NS" get deploy "$DEP" >/dev/null 2>&1 || fail "deployment/${DEP} not found"
 REPLICAS="$(kubectl -n "$LEARNER_NS" get deploy "$DEP" -o jsonpath='{.spec.replicas}' 2>/dev/null || true)"
-[[ "$REPLICAS" == "3" ]] || fail "replicas must be 3 (got '${REPLICAS}')"
+[[ "$REPLICAS" == "2" ]] || fail "replicas must be 2 (got '${REPLICAS}')"
 
 WEIGHT="$(kubectl -n "$LEARNER_NS" get deploy "$DEP" -o jsonpath='{.spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].weight}' 2>/dev/null || true)"
 TOPO="$(kubectl -n "$LEARNER_NS" get deploy "$DEP" -o jsonpath='{.spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.topologyKey}' 2>/dev/null || true)"
@@ -29,6 +29,6 @@ APP="$(kubectl -n "$LEARNER_NS" get deploy "$DEP" -o jsonpath='{.spec.template.s
 [[ "$APP" == "payment-handler" ]] || fail "anti-affinity must target app=payment-handler (got '${APP}')"
 
 READY="$(kubectl -n "$LEARNER_NS" get deploy "$DEP" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
-[[ "${READY:-0}" == "3" ]] || fail "readyReplicas must be 3 (got '${READY:-0}')"
+[[ "${READY:-0}" == "2" ]] || fail "readyReplicas must be 2 (got '${READY:-0}')"
 
-pass "deployment/${DEP} has preferred podAntiAffinity and 3/3 Ready"
+pass "deployment/${DEP} has preferred podAntiAffinity and 2/2 Ready"

@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Create NetworkPolicy `payment-handler-allow-orders` so only Pods labeled `app=order-processor` may reach Payment Handler on TCP **8000**.
 
-Docs: [NetworkPolicies](https://kubernetes.io/docs/concepts/services-networking/network-policies/)
+Docs: [DevSetu Blog — Pod Networking and NetworkPolicies](/play/devops-engineer/kubernetes/read/pod-networking-and-policies) · [NetworkPolicies](https://kubernetes.io/docs/concepts/services-networking/network-policies/)
 
 ## Solution YAML
 

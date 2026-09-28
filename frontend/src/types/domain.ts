@@ -4,8 +4,12 @@ export interface UserRecord {
   id: string;
   email: string;
   name?: string | null;
-  /** Authoring / content-edit access (admin login or ADMIN_EMAILS). */
+  /** Authoring / content-edit access (admin role or ADMIN_EMAILS). */
   admin?: boolean;
+  /** Platform role assigned by an admin. Defaults to learner. */
+  role?: 'admin' | 'reviewer' | 'learner';
+  /** Lab tracks a reviewer may review (play panel ids). Empty unless role is reviewer. */
+  reviewTracks?: string[];
 }
 
 export interface ValidationSpec {
@@ -23,6 +27,8 @@ export interface K8sPlatformSpec {
   quota?: { pods?: string; cpu?: string; memory?: string };
   setup?: { script?: string };
   grade?: { script?: string; timeoutSeconds?: number };
+  /** Hands-on only: no Submit, no grading, no tokens or leaderboard credit. */
+  practice?: boolean;
   [key: string]: unknown;
 }
 
@@ -150,8 +156,23 @@ export interface ChallengePublic {
   tags: string[];
   category: string;
   finalized: boolean;
+  /**
+   * Who may open this lab.
+   * - admin: admins only
+   * - reviewers: reviewers + admin
+   * - users: learners + reviewers + admin
+   */
+  visibleTo?: 'admin' | 'reviewers' | 'users';
+  /** Admin-only notes on the Visibility tab. */
+  visibilityNotes?: string;
+  /** Reward tokens earned when the lab is solved. */
+  tokens?: number;
   /** True when this user has ≥1 submit graded passed. */
   solved?: boolean;
+  /** Tokens this user actually earned (halved if the solution was opened before solving). */
+  earnedTokens?: number;
+  /** When this user first opened the solution (epoch ms), if ever. */
+  solutionViewedAt?: number | null;
   /** Distinct users who have submitted this challenge. */
   submitters?: number;
   sandboxType: SandboxType | string | null;
@@ -343,6 +364,11 @@ export interface ActiveSession {
   runtime?: SandboxType | string | null;
   /** Learner Namespace when runtime === kubernetes. */
   k8sNamespace?: string | null;
+  /**
+   * Kubernetes labs: false while namespace/snapshot provision is still running.
+   * Theory UI can show; terminal stays disabled until true.
+   */
+  labReady?: boolean;
 }
 
 export interface EndSessionResult {
@@ -364,6 +390,8 @@ export interface AppState {
   activeTab: WorkspaceTab;
   setActiveTab: (tab: WorkspaceTab) => void;
   ending: boolean;
+  /** Shown in the slim closing toast over the catalog. */
+  closingLabTitle?: string | null;
   onSelectChallenge: (challenge: ChallengePublic | ChallengeFull) => Promise<void>;
   /** Open freeform Spark Playground (Run-only; no default INPUT_PATH). */
   onOpenSparkPlayground?: () => Promise<void>;

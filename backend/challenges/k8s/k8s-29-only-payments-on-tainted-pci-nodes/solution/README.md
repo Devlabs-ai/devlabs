@@ -1,8 +1,8 @@
 # Solution — Only Payments on Tainted PCI Nodes
 
-Add a toleration on `payment-handler` for taint `pci=true:NoSchedule`. Do not add that toleration to Notification Service.
+**PCI** = Payment Card Industry. Protected payment workers are tainted so ordinary apps stay off; Payment Handler adds a toleration for `pci=true:NoSchedule`. Do not add that toleration to Notification Service.
 
-Docs: [Taints and Tolerations](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/)
+Docs: [DevSetu Blog — Where Pods Land: Selectors, Affinity, and Taints](/play/devops-engineer/kubernetes/read/scheduling-affinity-taints) · [Taints and Tolerations](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/)
 
 ## Solution YAML
 
@@ -30,7 +30,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: payment-handler
-          image: rithvikreddyalkanti/payment-handler:v1.0
+          image: devsetu/payment-handler:v1.0
           ports:
             - containerPort: 8000
 ```

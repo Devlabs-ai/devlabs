@@ -20,11 +20,11 @@ export default function K8sPrimerPage(): JSX.Element {
             <span aria-hidden> / </span>
             Start here
           </p>
-          <p className="spark-primer-eyebrow">Orientation · before Lab 1</p>
-          <h1 className="spark-primer-title">From one container to a cluster</h1>
+          <p className="spark-primer-eyebrow">Orientation</p>
+          <h1 className="spark-primer-title">Why Kubernetes exists</h1>
           <p className="spark-primer-lede">
-            A short walk from `docker run` on a lonely server to the same app kept alive across
-            nodes — enough intuition to start Lab 1 without drowning in every Kubernetes API.
+            A short brief on where Kubernetes came from, the problem it solves at scale, and how
+            real companies used it to grow — before you touch YAML in the labs.
           </p>
         </header>
 
@@ -62,10 +62,6 @@ export default function K8sPrimerPage(): JSX.Element {
                 )}
               </aside>
             )}
-            <figure className="spark-primer-figure">
-              <img src={section.image} alt={section.imageAlt} loading="lazy" />
-              <figcaption>{section.caption}</figcaption>
-            </figure>
           </section>
         ))}
 
@@ -73,9 +69,8 @@ export default function K8sPrimerPage(): JSX.Element {
           <p className="spark-primer-section-eyebrow">Next</p>
           <h2 className="spark-primer-section-title">Open a lab</h2>
           <p className="spark-primer-copy">
-            You do not need every Kubernetes resource first. Read Containers, Runtimes, and
-            Pods for the core entities, then practice on the track. Official docs if you want
-            more depth after a few labs.
+            When you are ready to practice desired state in a real namespace, open the labs. For
+            reference outside DevSetu, stick to the official docs and the CKAD curriculum.
           </p>
           <ul className="spark-primer-links">
             {K8S_PRIMER_NEXT_LINKS.map((link) => (
@@ -96,14 +91,6 @@ export default function K8sPrimerPage(): JSX.Element {
               Open Kubernetes labs
               <span aria-hidden> →</span>
             </Link>
-            <a
-              href="https://kubernetes.io/docs/concepts/"
-              className="spark-primer-cta spark-primer-cta--ghost"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Kubernetes concepts
-            </a>
           </div>
         </section>
       </article>

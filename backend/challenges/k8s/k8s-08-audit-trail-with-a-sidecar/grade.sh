@@ -19,7 +19,7 @@ DEPLOY="order-processor-deploy"
 WANT_REPLICAS="2"
 WANT_APP="order-processor"
 WANT_TIER="app"
-WANT_IMAGE="rithvikreddyalkanti/order-processor:v1.2"
+WANT_IMAGE="devsetu/order-processor:v1.2"
 WANT_SIDECAR_IMAGE="busybox:1.36"
 
 if ! kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" >/dev/null 2>&1; then
@@ -42,28 +42,16 @@ NCONT="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{range .spec
 # Find containers by name
 MAIN_IMG=""
 SIDE_IMG=""
-MAIN_CPU=""
-MAIN_MEM=""
-MAIN_LIM_CPU=""
-MAIN_LIM_MEM=""
-SIDE_CPU=""
-SIDE_MEM=""
-SIDE_LIM_CPU=""
-SIDE_LIM_MEM=""
 MAIN_MOUNT=""
 SIDE_MOUNT=""
 while IFS= read -r cname; do
   [[ -z "$cname" ]] && continue
   img="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath="{range .spec.template.spec.containers[?(@.name==\"$cname\")]}{.image}{end}" 2>/dev/null || true)"
-  cpu="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath="{range .spec.template.spec.containers[?(@.name==\"$cname\")]}{.resources.requests.cpu}{end}" 2>/dev/null || true)"
-  mem="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath="{range .spec.template.spec.containers[?(@.name==\"$cname\")]}{.resources.requests.memory}{end}" 2>/dev/null || true)"
-  lim_cpu="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath="{range .spec.template.spec.containers[?(@.name==\"$cname\")]}{.resources.limits.cpu}{end}" 2>/dev/null || true)"
-  lim_mem="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath="{range .spec.template.spec.containers[?(@.name==\"$cname\")]}{.resources.limits.memory}{end}" 2>/dev/null || true)"
   mnt="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath="{range .spec.template.spec.containers[?(@.name==\"$cname\")].volumeMounts[?(@.name==\"order-logs\")]}{.mountPath}{end}" 2>/dev/null || true)"
   if [[ "$cname" == "order-processor" ]]; then
-    MAIN_IMG="$img"; MAIN_CPU="$cpu"; MAIN_MEM="$mem"; MAIN_LIM_CPU="$lim_cpu"; MAIN_LIM_MEM="$lim_mem"; MAIN_MOUNT="$mnt"
+    MAIN_IMG="$img"; MAIN_MOUNT="$mnt"
   elif [[ "$cname" == "log-shipper" ]]; then
-    SIDE_IMG="$img"; SIDE_CPU="$cpu"; SIDE_MEM="$mem"; SIDE_LIM_CPU="$lim_cpu"; SIDE_LIM_MEM="$lim_mem"; SIDE_MOUNT="$mnt"
+    SIDE_IMG="$img"; SIDE_MOUNT="$mnt"
   fi
 done < <(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}' 2>/dev/null || true)
 
@@ -71,14 +59,6 @@ done < <(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{range .spec
 [[ -n "$SIDE_IMG" ]] || fail "container log-shipper not found"
 [[ "$MAIN_IMG" == "$WANT_IMAGE" ]] || fail "order-processor image must be ${WANT_IMAGE} (got '${MAIN_IMG}')"
 [[ "$SIDE_IMG" == "$WANT_SIDECAR_IMAGE" ]] || fail "log-shipper image must be ${WANT_SIDECAR_IMAGE} (got '${SIDE_IMG}')"
-case "$MAIN_CPU" in 50m|0.05) ;; *) fail "order-processor cpu request must be 50m (got '${MAIN_CPU}')" ;; esac
-case "$MAIN_LIM_CPU" in 50m|0.05) ;; *) fail "order-processor cpu limit must be 50m (got '${MAIN_LIM_CPU}')" ;; esac
-[[ "$MAIN_MEM" == "128Mi" ]] || fail "order-processor memory request must be 128Mi (got '${MAIN_MEM}')"
-[[ "$MAIN_LIM_MEM" == "128Mi" ]] || fail "order-processor memory limit must be 128Mi (got '${MAIN_LIM_MEM}')"
-case "$SIDE_CPU" in 50m|0.05) ;; *) fail "log-shipper cpu request must be 50m (got '${SIDE_CPU}')" ;; esac
-case "$SIDE_LIM_CPU" in 50m|0.05) ;; *) fail "log-shipper cpu limit must be 50m (got '${SIDE_LIM_CPU}')" ;; esac
-[[ "$SIDE_MEM" == "64Mi" ]] || fail "log-shipper memory request must be 64Mi (got '${SIDE_MEM}')"
-[[ "$SIDE_LIM_MEM" == "64Mi" ]] || fail "log-shipper memory limit must be 64Mi (got '${SIDE_LIM_MEM}')"
 [[ "$MAIN_MOUNT" == "/var/log/orders" ]] || fail "order-processor must mount order-logs at /var/log/orders (got '${MAIN_MOUNT}')"
 [[ "$SIDE_MOUNT" == "/var/log/orders" ]] || fail "log-shipper must mount order-logs at /var/log/orders (got '${SIDE_MOUNT}')"
 

@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Bring up a full **green** Payment Handler stack on `v1.1`, then flip Service `payment-handler` to `color=green`. Leave blue running for rollback.
 
-Docs: [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) · [Services](https://kubernetes.io/docs/concepts/services-networking/service/)
+Docs: [DevSetu Blog — Canary and Blue-Green Releases](/play/devops-engineer/kubernetes/read/canary-blue-green) · [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) · [Services](https://kubernetes.io/docs/concepts/services-networking/service/)
 
 ## Solution YAML
 
@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
         - name: payment-handler
-          image: rithvikreddyalkanti/payment-handler:v1.1
+          image: devsetu/payment-handler:v1.1
           ports:
             - containerPort: 8000
           resources:

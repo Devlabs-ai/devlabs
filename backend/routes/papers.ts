@@ -5,6 +5,8 @@
  * Public GET so Play tiles can open in a new tab without auth headers.
  */
 
+import type { NextFunction, Request, Response } from 'express';
+
 const express = require('express');
 const { getObjectStore, normalizeKey } = require('../workspace/objectStore');
 
@@ -18,7 +20,7 @@ const ALLOWED = new Set([
   'spark/mapreduce',
 ]);
 
-router.get('/:sectionId/:paperId', async (req, res, next) => {
+router.get('/:sectionId/:paperId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const sectionId = String(req.params.sectionId || '').trim();
     const paperId = String(req.params.paperId || '').trim().replace(/\.pdf$/i, '');

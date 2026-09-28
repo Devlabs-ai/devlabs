@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Create a dedicated ServiceAccount plus least-privilege Role/RoleBinding so settlement automation can only get/list Pods (no Job yet).
 
-Docs: [RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) · [ServiceAccounts](https://kubernetes.io/docs/concepts/security/service-accounts/)
+Docs: [DevSetu Blog — ServiceAccounts, Roles, and RoleBindings](/play/devops-engineer/kubernetes/read/serviceaccounts-rbac) · [RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) · [ServiceAccounts](https://kubernetes.io/docs/concepts/security/service-accounts/)
 
 ## Solution YAML
 

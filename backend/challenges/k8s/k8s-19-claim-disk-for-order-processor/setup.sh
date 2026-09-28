@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Platform: register a cluster-scoped PV for this lab namespace, plus a baseline
-# Order Processor Deployment (no volume yet). Learners only create PVC + mount.
+# Order Processor Deployment (no volume yet). Learners pin that PV via PVC
+# volumeName (order-archive-pv-$LEARNER_NS), then mount the claim.
 set -euo pipefail
 : "${LEARNER_NS:?}"
 
@@ -18,7 +19,7 @@ metadata:
     devlabs.ai/learner-ns: ${LEARNER_NS}
 spec:
   capacity:
-    storage: 1Gi
+    storage: 100Mi
   accessModes:
     - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
@@ -47,7 +48,7 @@ spec:
     spec:
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.1
+          image: devsetu/order-processor:v1.1
           ports:
             - containerPort: 8000
 EOF

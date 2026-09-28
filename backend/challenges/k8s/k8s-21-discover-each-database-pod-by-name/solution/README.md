@@ -1,8 +1,8 @@
 # Solution — Discover Each Database Pod by Name
 
-Create a headless Service `orders-db` (`clusterIP: None`) so each StatefulSet Pod gets a stable DNS name.
+Create Service `orders-db` with `clusterIP: None` so it matches the StatefulSet’s `serviceName` and publishes per-Pod DNS. See the **StatefulSets** reading for the headless vs ClusterIP story.
 
-Docs: [Headless Services](https://kubernetes.io/docs/concepts/services-networking/service/#headless-services)
+Docs: [DevSetu Blog — StatefulSets](/play/devops-engineer/kubernetes/read/statefulsets) · [Headless Services](https://kubernetes.io/docs/concepts/services-networking/service/#headless-services)
 
 ## Solution YAML
 

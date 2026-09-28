@@ -21,7 +21,7 @@ DB_SVC="orders-db"
 WANT_REPLICAS="2"
 WANT_APP="order-processor"
 WANT_TIER="app"
-WANT_IMAGE="rithvikreddyalkanti/order-processor:v1.2"
+WANT_IMAGE="devsetu/order-processor:v1.2"
 WANT_INIT_IMAGE="postgres:16-alpine"
 
 if ! kubectl -n "$LEARNER_NS" get deploy "$DB_DEPLOY" >/dev/null 2>&1; then
@@ -50,12 +50,8 @@ INIT_COUNT="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.
 
 INIT_NAME="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.initContainers[0].name}' 2>/dev/null || true)"
 INIT_IMG="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.initContainers[0].image}' 2>/dev/null || true)"
-INIT_CPU="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.initContainers[0].resources.requests.cpu}' 2>/dev/null || true)"
-INIT_MEM="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.initContainers[0].resources.requests.memory}' 2>/dev/null || true)"
 [[ "$INIT_NAME" == "schema-migrate" ]] || fail "init container name must be schema-migrate (got '${INIT_NAME}')"
 [[ "$INIT_IMG" == "$WANT_INIT_IMAGE" ]] || fail "init image must be ${WANT_INIT_IMAGE} (got '${INIT_IMG}')"
-case "$INIT_CPU" in 50m|0.05) ;; *) fail "init cpu request must be 50m (got '${INIT_CPU}')" ;; esac
-[[ "$INIT_MEM" == "64Mi" ]] || fail "init memory request must be 64Mi (got '${INIT_MEM}')"
 
 # Init must talk to Postgres (host + migrate tooling / DDL).
 INIT_CMD="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.initContainers[0].command[*]} {.spec.template.spec.initContainers[0].args[*]}' 2>/dev/null || true)"
@@ -64,13 +60,9 @@ echo "$INIT_CMD" | grep -Eqi 'psql|pg_isready|CREATE TABLE' || fail "init comman
 
 MAIN="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.containers[0].name}' 2>/dev/null || true)"
 MAIN_IMG="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
-CPU_REQ="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu}' 2>/dev/null || true)"
-MEM_REQ="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.memory}' 2>/dev/null || true)"
 PORTS="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.containers[0].ports[*].containerPort}' 2>/dev/null || true)"
 [[ "$MAIN" == "order-processor" ]] || fail "main container must be order-processor (got '${MAIN}')"
 [[ "$MAIN_IMG" == "$WANT_IMAGE" ]] || fail "image must be ${WANT_IMAGE} (got '${MAIN_IMG}')"
-case "$CPU_REQ" in 100m|0.1) ;; *) fail "cpu request must be 100m (got '${CPU_REQ}')" ;; esac
-[[ "$MEM_REQ" == "128Mi" ]] || fail "memory request must be 128Mi (got '${MEM_REQ}')"
 [[ "$PORTS" == *"8000"* ]] || fail "containerPort must include 8000"
 
 while IFS= read -r cname; do

@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: order-processor
-          image: rithvikreddyalkanti/order-processor:v1.2
+          image: devsetu/order-processor:v1.2
           ports:
             - containerPort: 8000
           resources:
@@ -43,7 +43,7 @@ spec:
     spec:
       containers:
         - name: payment-handler
-          image: rithvikreddyalkanti/payment-handler:v1.0
+          image: devsetu/payment-handler:v1.0
           ports:
             - containerPort: 8000
           resources:

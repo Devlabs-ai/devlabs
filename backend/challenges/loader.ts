@@ -8,6 +8,8 @@ const { publicBoardSpec, parseBoardSpec } = require('../workspace/boardGrade');
 const cache = new Map<string, ChallengeFull>();
 
 function publicFields(row: ChallengeRow): ChallengePublic {
+  const { parseVisibleTo } = require('./access');
+  const tokensRaw = Number(row.tokens ?? row.bounty);
   return {
     id: row.id,
     number: row.number ?? null,
@@ -18,6 +20,9 @@ function publicFields(row: ChallengeRow): ChallengePublic {
     category: row.category,
     finalized: !!row.finalized,
     sandboxType: row.sandbox_type || null,
+    visibleTo: parseVisibleTo(row.visible_to, 'admin'),
+    visibilityNotes: String(row.visibility_notes || ''),
+    tokens: Number.isFinite(tokensRaw) && tokensRaw >= 0 ? Math.trunc(tokensRaw) : 10,
   };
 }
 
@@ -84,6 +89,9 @@ function listPublicChallenges(): Record<string, unknown>[] {
     category: c.category,
     finalized: c.finalized,
     sandboxType: c.sandboxType,
+    visibleTo: c.visibleTo || 'admin',
+    visibilityNotes: c.visibilityNotes || '',
+    tokens: typeof c.tokens === 'number' ? c.tokens : 10,
     contentSource: contentSourceOf(c),
     problemStatement: c.problemStatement,
     sparkPlatform: c.sparkPlatform || null,
@@ -105,6 +113,9 @@ function getPublicChallenge(id: string): Record<string, unknown> | null {
     category: c.category,
     finalized: c.finalized,
     sandboxType: c.sandboxType,
+    visibleTo: c.visibleTo || 'admin',
+    visibilityNotes: c.visibilityNotes || '',
+    tokens: typeof c.tokens === 'number' ? c.tokens : 10,
     contentSource: contentSourceOf(c),
     verifiedDir: c.verifiedDir,
     problemStatement: c.problemStatement,
@@ -125,6 +136,66 @@ function cacheFromRow(row: ChallengeRow): ChallengeFull {
   return full;
 }
 
+function normalizeTokens(raw: unknown, fallback = 10): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.min(100000, Math.trunc(n));
+}
+
+async function setVisibleTo(
+  challengeId: string,
+  visibleTo: 'admin' | 'users' | 'reviewers',
+  visibilityNotes?: string | null,
+  tokens?: number | null,
+): Promise<ChallengeFull | null> {
+  const { parseVisibleTo } = require('./access');
+  const audience = parseVisibleTo(visibleTo, 'admin');
+  const notes = visibilityNotes != null ? String(visibilityNotes) : null;
+  const tokensValue = tokens != null ? normalizeTokens(tokens) : null;
+
+  let sql: string;
+  let params: unknown[];
+  if (notes != null && tokensValue != null) {
+    sql = `UPDATE challenges
+              SET visible_to = $1,
+                  visibility_notes = $2,
+                  tokens = $3,
+                  bounty = $3,
+                  updated_at = $4
+            WHERE id = $5
+            RETURNING *`;
+    params = [audience, notes, tokensValue, Date.now(), challengeId];
+  } else if (notes != null) {
+    sql = `UPDATE challenges
+              SET visible_to = $1,
+                  visibility_notes = $2,
+                  updated_at = $3
+            WHERE id = $4
+            RETURNING *`;
+    params = [audience, notes, Date.now(), challengeId];
+  } else if (tokensValue != null) {
+    sql = `UPDATE challenges
+              SET visible_to = $1,
+                  tokens = $2,
+                  bounty = $2,
+                  updated_at = $3
+            WHERE id = $4
+            RETURNING *`;
+    params = [audience, tokensValue, Date.now(), challengeId];
+  } else {
+    sql = `UPDATE challenges
+              SET visible_to = $1,
+                  updated_at = $2
+            WHERE id = $3
+            RETURNING *`;
+    params = [audience, Date.now(), challengeId];
+  }
+
+  const { rows } = await pool.query(sql, params);
+  if (!rows[0]) return null;
+  return cacheFromRow(rows[0]);
+}
+
 module.exports = {
   seedChallengesFromDisk,
   loadChallengesFromDB,
@@ -134,4 +205,5 @@ module.exports = {
   getPublicChallenge,
   putChallenge,
   cacheFromRow,
+  setVisibleTo,
 };

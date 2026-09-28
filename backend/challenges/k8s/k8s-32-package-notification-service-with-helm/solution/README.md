@@ -2,7 +2,7 @@
 
 Stay in your lab namespace. Package Notification Service as a Helm chart (Deployment + Service) and install release `notifications`.
 
-Docs: [Helm](https://helm.sh/docs/) · [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+Docs: [DevSetu Blog — Helm: Packaging Kubernetes Apps](/play/devops-engineer/kubernetes/read/helm-charts) · [Helm](https://helm.sh/docs/) · [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
 
 ## Solution YAML
 
@@ -24,7 +24,7 @@ appVersion: "1.0"
 ```yaml
 replicaCount: 2
 image:
-  repository: rithvikreddyalkanti/notification-service
+  repository: devsetu/notification-service
   tag: "v1.0"
 service:
   port: 8080

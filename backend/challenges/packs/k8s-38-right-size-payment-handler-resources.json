@@ -3,7 +3,7 @@
   "number": 238,
   "finalized": true,
   "title": "Right-Size Payment Handler Resources",
-  "description": "**SITUATION:**\n\nPayment Handler was given tiny CPU/memory guesses. Horizontal scaling adds more Pods; it does not fix **each Pod being too small**. Vertical autoscaling recommends (or applies) better requests/limits from observed usage.\n\nThis lab focuses on **right-sizing** Payment Handler requests/limits (vertical), not adding more replicas. HPA adds copies; undersized Pods stay undersized until you fix resources.\n**YOUR TASK:**\n\n1. Create a **VerticalPodAutoscaler** for Payment Handler in **recommendation** mode (safe for labs).\n2. Verify the VPA object exists and produces recommendations (or updates resources if platform uses auto mode — follow SPEC).\n\n**SPEC:**\n\n- VPA name: `payment-handler-vpa`\n- Target: Deployment `payment-handler`\n- `updateMode`: **`Off`** (recommend only — do not auto-evict in this lab unless platform says otherwise)\n- Success: `kubectl describe vpa payment-handler-vpa` (or platform UI) shows CPU/memory recommendations\n\n**CONSTRAINTS:**\n\n- Manifest: `payment-handler-vpa-l38.yaml`.\n- Do **not** run HPA CPU scaling and VPA auto-update on the same container metrics without platform guidance — this lab is VPA-only recommend mode.\n- Work only in your lab namespace (not `default`).\n",
+  "description": "**SITUATION:**\n\nPayment Handler was given tiny CPU/memory guesses. Horizontal scaling adds more Pods; it does not fix **each Pod being too small**. Vertical autoscaling recommends (or applies) better requests/limits from observed usage.\n\nThis lab focuses on **right-sizing** Payment Handler requests/limits (vertical), not adding more replicas. HPA adds copies; undersized Pods stay undersized until you fix resources.\n[DevSetu Blog — Requests, Limits, and Quotas](/play/devops-engineer/kubernetes/read/requests-limits-quotas)\n\n**YOUR TASK:**\n\n1. Create a **VerticalPodAutoscaler** for Payment Handler in **recommendation** mode (safe for labs).\n2. Verify the VPA object exists and produces recommendations (or updates resources if platform uses auto mode — follow SPEC).\n\n**SPEC:**\n\n- VPA name: `payment-handler-vpa`\n- Target: Deployment `payment-handler`\n- `updateMode`: **`Off`** (recommend only — do not auto-evict in this lab unless platform says otherwise)\n- Success: `kubectl describe vpa payment-handler-vpa` (or platform UI) shows CPU/memory recommendations\n\n**GOOD PRACTICES:**\n\n- Manifest: `payment-handler-vpa-l38.yaml`.\n- Do **not** run HPA CPU scaling and VPA auto-update on the same container metrics without platform guidance — this lab is VPA-only recommend mode.\n- Work only in your lab namespace (not `default`).\n",
   "difficulty": "L1",
   "tags": [
     "kubernetes",
@@ -42,5 +42,7 @@
       "script": "grade.sh",
       "timeoutSeconds": 90
     }
-  }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

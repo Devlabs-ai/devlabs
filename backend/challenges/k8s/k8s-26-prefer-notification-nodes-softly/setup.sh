@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
+# Baseline notification-service with a HARD nodeSelector for workload=notifications.
+# Learner replaces that with soft preferred nodeAffinity. Node labels come from the
+# platform node pool — setup must not label or taint nodes.
 set -euo pipefail
 : "${LEARNER_NS:?}"
-NODE="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-if [[ -n "$NODE" ]]; then
-  kubectl label node "$NODE" workload=notifications --overwrite >/dev/null 2>&1 || true
-fi
+
 kubectl -n "$LEARNER_NS" apply -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -20,10 +20,12 @@ spec:
       labels:
         app: notification-service
     spec:
+      nodeSelector:
+        workload: notifications
       containers:
         - name: notification-service
-          image: rithvikreddyalkanti/notification-service:v1.0
+          image: devsetu/notification-service:v1.0
           ports:
             - containerPort: 8080
 EOF
-echo "setup ok: ${CHALLENGE_ID:-lab} in ${LEARNER_NS}"
+echo "setup ok: ${CHALLENGE_ID:-lab} in ${LEARNER_NS} (baseline nodeSelector workload=notifications)"

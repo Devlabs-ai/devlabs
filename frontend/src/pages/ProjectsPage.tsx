@@ -1,7 +1,6 @@
 import React from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { PROJECTS, MAJORS_PATH, getProject, type ProjectEntry, type ProjectModule } from '../constants/projects';
-import { MINORS_PATH, minorsFor } from '../constants/minors';
 import { hasModuleContent } from '../fixtures/projectModules';
 
 function MilestoneRow({
@@ -49,8 +48,6 @@ function MilestoneRow({
 }
 
 function ProjectDetail({ project }: { project: ProjectEntry }): JSX.Element {
-  const relatedMinors = minorsFor(project.minors);
-
   return (
     <div className="app-page play-problems-page project-detail--list">
       <header className="project-detail-compact">
@@ -62,18 +59,6 @@ function ProjectDetail({ project }: { project: ProjectEntry }): JSX.Element {
         <h1 className="project-detail-compact-title">{project.name}</h1>
         <p className="project-detail-subtitle">{project.subtitle}</p>
       </header>
-
-      {relatedMinors.length > 0 && (
-        <ul className="project-minor-refs">
-          {relatedMinors.map((minor) => (
-            <li key={minor.id}>
-              <Link to={`${MINORS_PATH}/${minor.id}`} className="project-minor-chip">
-                {minor.name}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
 
       <div className="project-about">
         {project.about.map((paragraph) => (

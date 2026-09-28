@@ -19,7 +19,7 @@ CM="order-processor-config"
 SEC="order-processor-secrets"
 DEPLOY="order-processor-deploy"
 WANT_REPLICAS="3"
-WANT_IMAGE="rithvikreddyalkanti/order-processor:v1.2"
+WANT_IMAGE="devsetu/order-processor:v1.2"
 WANT_CONTAINER="order-processor"
 WANT_PORT="8000"
 WANT_APP="order-processor"
@@ -66,15 +66,11 @@ TPL_VER="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.tem
 CONTAINER_NAME="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.containers[0].name}' 2>/dev/null || true)"
 IMAGE="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
 PORTS="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.containers[0].ports[*].containerPort}' 2>/dev/null || true)"
-CPU_REQ="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu}' 2>/dev/null || true)"
-MEM_REQ="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.memory}' 2>/dev/null || true)"
 [[ "$CONTAINER_NAME" == "$WANT_CONTAINER" ]] || fail "container name must be ${WANT_CONTAINER} (got '${CONTAINER_NAME}')"
 [[ "$IMAGE" == "$WANT_IMAGE" ]] || fail "image must be ${WANT_IMAGE} (got '${IMAGE}')"
 FOUND_PORT=0
 for p in $PORTS; do [[ "$p" == "$WANT_PORT" ]] && FOUND_PORT=1; done
 [[ "$FOUND_PORT" -eq 1 ]] || fail "containerPort must include ${WANT_PORT}"
-case "$CPU_REQ" in 100m|0.1) ;; *) fail "cpu request must be 100m (got '${CPU_REQ}')" ;; esac
-[[ "$MEM_REQ" == "128Mi" ]] || fail "memory request must be 128Mi (got '${MEM_REQ}')"
 
 SPEC_JSON="$(kubectl -n "$LEARNER_NS" get deploy "$DEPLOY" -o json 2>/dev/null || true)"
 echo "$SPEC_JSON" | grep -q "order-processor-config" || fail "deployment must reference ConfigMap ${CM}"

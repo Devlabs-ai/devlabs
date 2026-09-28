@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: payment-handler
-          image: rithvikreddyalkanti/payment-handler:v1.1
+          image: devsetu/payment-handler:v1.1
           ports:
             - containerPort: 8000
           resources:

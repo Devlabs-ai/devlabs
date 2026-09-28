@@ -92,7 +92,7 @@ export const SPARK_PRIMER_SECTIONS: SparkPrimerSection[] = [
   {
     id: 'how-lab',
     eyebrow: 'Inside a lab',
-    title: 'What you will do in DevLabs',
+    title: 'What you will do in DevSetu',
     body: [
       'You write a transform, submit the job to the shared Spark platform, watch it run on the cluster, then open History UI to see stages and tasks.',
       'Labs grade the output of that path — not memorized trivia. When something fails or crawls, History UI is your first mirror: which stage, how many tasks, where time went.',
