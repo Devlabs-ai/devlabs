@@ -142,6 +142,12 @@ export default function K8sLabFileEditor({
   const [renaming, setRenaming] = useState<EntryRef | null>(null);
   const [menu, setMenu] = useState<(EntryRef & { x: number; y: number }) | null>(null);
   const [renameValue, setRenameValue] = useState('');
+
+  useEffect(() => {
+    if (active) return;
+    setExplorerOpen(false);
+    setMenu(null);
+  }, [active]);
   const renamingRef = useRef<string | null>(null);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const inFlightRef = useRef<Set<string>>(new Set());
