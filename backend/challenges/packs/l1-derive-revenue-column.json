@@ -296,6 +296,6 @@
     "jobYaml": "job.yaml",
     "s3Prefix": "challenges/l1-derive-revenue-column"
   },
-  "visibleTo": "users",
+  "visibleTo": "admin",
   "tokens": 10
 }

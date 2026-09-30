@@ -99,7 +99,7 @@ function AppLayoutInner(): React.JSX.Element {
     };
   }, [navOpen]);
 
-  const sectionLinks = (
+  const sectionLinks = showAdmin ? (
     <>
       <NavLink
         to={MAJORS_PATH}
@@ -122,17 +122,15 @@ function AppLayoutInner(): React.JSX.Element {
       >
         Papers
       </NavLink>
-      {showAdmin ? (
-        <NavLink
-          to={PLAYGROUNDS_PATH}
-          className={`topnav-pill topnav-action${playgroundsActive ? ' active' : ''}`}
-          onClick={() => setNavOpen(false)}
-        >
-          Playgrounds
-        </NavLink>
-      ) : null}
+      <NavLink
+        to={PLAYGROUNDS_PATH}
+        className={`topnav-pill topnav-action${playgroundsActive ? ' active' : ''}`}
+        onClick={() => setNavOpen(false)}
+      >
+        Playgrounds
+      </NavLink>
     </>
-  );
+  ) : null;
 
   const accountLinks = (
     <>
@@ -160,7 +158,7 @@ function AppLayoutInner(): React.JSX.Element {
             </NavLink>
 
             <div className="topbar-trailing">
-              {showNav && (
+              {showNav && sectionLinks && (
                 <nav className="topnav topnav--actions topnav--desktop" aria-label="Sections">
                   {sectionLinks}
                 </nav>
@@ -192,7 +190,7 @@ function AppLayoutInner(): React.JSX.Element {
               aria-label="Sections"
               aria-hidden={!navOpen}
             >
-              <div className="topnav-drawer-group">{sectionLinks}</div>
+              {sectionLinks ? <div className="topnav-drawer-group">{sectionLinks}</div> : null}
               <div className="topnav-drawer-group">{accountLinks}</div>
             </nav>
           ) : null}

@@ -5,8 +5,15 @@ import {
   SPARK_PRIMER_NEXT_LINKS,
   SPARK_PRIMER_SECTIONS,
 } from '../constants/sparkPrimer';
+import { useIsAdmin } from '../components/AdminOnlyRoute';
+
+const PAPERS_PATH = '/play/papers';
 
 export default function SparkPrimerPage(): JSX.Element {
+  const isAdmin = useIsAdmin();
+  const nextLinks = isAdmin
+    ? SPARK_PRIMER_NEXT_LINKS
+    : SPARK_PRIMER_NEXT_LINKS.filter((link) => !link.href.startsWith(PAPERS_PATH));
   return (
     <div className="app-page spark-primer-page">
       <article className="spark-primer-notebook">
@@ -78,7 +85,7 @@ export default function SparkPrimerPage(): JSX.Element {
             theory after a few runs.
           </p>
           <ul className="spark-primer-links">
-            {SPARK_PRIMER_NEXT_LINKS.map((link) => (
+            {nextLinks.map((link) => (
               <li key={link.href}>
                 {link.external ? (
                   <a href={link.href} target="_blank" rel="noreferrer">
@@ -96,9 +103,11 @@ export default function SparkPrimerPage(): JSX.Element {
               Open Spark labs
               <span aria-hidden> →</span>
             </Link>
-            <Link to="/play/papers/spark" className="spark-primer-cta spark-primer-cta--ghost">
-              Spark white papers
-            </Link>
+            {isAdmin ? (
+              <Link to={`${PAPERS_PATH}/spark`} className="spark-primer-cta spark-primer-cta--ghost">
+                Spark white papers
+              </Link>
+            ) : null}
           </div>
         </section>
       </article>

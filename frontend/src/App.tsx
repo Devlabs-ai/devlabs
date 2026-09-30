@@ -42,6 +42,7 @@ import {
   type LabConflict,
 } from './services/labTabLease';
 import ConfirmDialog from './components/ConfirmDialog';
+import AdminOnlyRoute from './components/AdminOnlyRoute';
 import { buildDailyProductSalesProject } from './fixtures/dailyProductSalesL1';
 import {
   buildSparkPlaygroundChallenge,
@@ -983,20 +984,23 @@ export default function App(): React.JSX.Element {
         <Route element={<AppLayout />}>
           <Route path="play" element={<PlayPage />} />
           <Route path="play/quiz/:quizId" element={<QuizPage />} />
-          <Route path="play/papers" element={<WhitePapersPage />} />
-          <Route path="play/papers/:sectionId" element={<WhitePapersPage />} />
+          <Route path="play/papers" element={<AdminOnlyRoute><WhitePapersPage /></AdminOnlyRoute>} />
+          <Route path="play/papers/:sectionId" element={<AdminOnlyRoute><WhitePapersPage /></AdminOnlyRoute>} />
           <Route path="play/whiteboard" element={<WhiteboardPage />} />
           <Route path="play/whiteboard/:sectionId" element={<WhiteboardPage />} />
           <Route path="play/quests" element={<SideQuestsPage />} />
           <Route path="play/quests/:topicId" element={<SideQuestsPage />} />
           <Route path="play/playgrounds" element={<PlaygroundsPage />} />
-          <Route path="play/majors" element={<ProjectsPage />} />
-          <Route path="play/majors/:projectId" element={<ProjectsPage />} />
-          <Route path="play/majors/:projectId/:moduleId" element={<ProjectModulePage />} />
+          <Route path="play/majors" element={<AdminOnlyRoute><ProjectsPage /></AdminOnlyRoute>} />
+          <Route path="play/majors/:projectId" element={<AdminOnlyRoute><ProjectsPage /></AdminOnlyRoute>} />
+          <Route
+            path="play/majors/:projectId/:moduleId"
+            element={<AdminOnlyRoute><ProjectModulePage /></AdminOnlyRoute>}
+          />
           <Route path="play/projects/*" element={<LegacyMajorsRedirect />} />
           <Route path="play/projects" element={<Navigate to="/play/majors" replace />} />
-          <Route path="play/minors" element={<MinorsPage />} />
-          <Route path="play/minors/:minorId" element={<MinorsPage />} />
+          <Route path="play/minors" element={<AdminOnlyRoute><MinorsPage /></AdminOnlyRoute>} />
+          <Route path="play/minors/:minorId" element={<AdminOnlyRoute><MinorsPage /></AdminOnlyRoute>} />
           <Route path="play/spark-playground/open" element={<SparkPlaygroundOpenPage />} />
           <Route path="play/spark-playground" element={<SparkPlaygroundPage />} />
           <Route path="play/data-engineer/spark/intro" element={<SparkPrimerPage />} />

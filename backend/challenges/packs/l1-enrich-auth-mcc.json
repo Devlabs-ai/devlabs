@@ -308,6 +308,6 @@
     "script": "generate.py",
     "s3Prefix": "challenges/l1-enrich-auth-mcc"
   },
-  "visibleTo": "users",
+  "visibleTo": "admin",
   "tokens": 10
 }

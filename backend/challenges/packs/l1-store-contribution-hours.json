@@ -225,6 +225,6 @@
       "Performance: not specified for this lab"
     ]
   },
-  "visibleTo": "users",
+  "visibleTo": "admin",
   "tokens": 10
 }

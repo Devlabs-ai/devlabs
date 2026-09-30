@@ -225,6 +225,6 @@
     "jobYaml": "job.yaml",
     "s3Prefix": "challenges/l1-distinct-store-list"
   },
-  "visibleTo": "users",
+  "visibleTo": "admin",
   "tokens": 10
 }
