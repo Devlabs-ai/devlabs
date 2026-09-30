@@ -1,4 +1,5 @@
 import type { SparkPlatformLimits } from '../types/domain';
+import { readMigrating, writeMigrating } from '../utils/storageMigrate';
 
 /** Selectable trail resources for Spark Playground experiment runs. */
 export interface PlaygroundTrailLimits extends SparkPlatformLimits {
@@ -83,7 +84,8 @@ export const PLAYGROUND_TRAIL_PRESETS: PlaygroundTrailPreset[] = [
 
 export const PLAYGROUND_DEFAULT_TRAIL = PLAYGROUND_TRAIL_PRESETS[1];
 
-const STORAGE_KEY = 'devlabs.sparkPlayground.trailLimits';
+const STORAGE_KEY = 'devsetu.sparkPlayground.trailLimits';
+const LEGACY_STORAGE_KEY = 'devlabs.sparkPlayground.trailLimits';
 
 export function formatTrailSummary(limits: PlaygroundTrailLimits): string {
   return `${limits.executors}×${limits.executorCores}core ${limits.executorMemory} · drv ${limits.driver}×${limits.driverMemory} · AQE ${limits.aqe ? 'on' : 'off'} · shuffle ${limits.shufflePartitions}`;
@@ -104,7 +106,7 @@ export function matchTrailPresetId(limits: PlaygroundTrailLimits): string {
 
 export function readStoredTrailLimits(): PlaygroundTrailLimits {
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
+    const raw = readMigrating(sessionStorage, STORAGE_KEY, LEGACY_STORAGE_KEY);
     if (!raw) return { ...PLAYGROUND_DEFAULT_TRAIL.limits };
     const parsed = JSON.parse(raw) as Partial<PlaygroundTrailLimits>;
     return normalizeTrailLimits(parsed);
@@ -115,7 +117,12 @@ export function readStoredTrailLimits(): PlaygroundTrailLimits {
 
 export function storeTrailLimits(limits: PlaygroundTrailLimits): void {
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeTrailLimits(limits)));
+    writeMigrating(
+      sessionStorage,
+      STORAGE_KEY,
+      LEGACY_STORAGE_KEY,
+      JSON.stringify(normalizeTrailLimits(limits)),
+    );
   } catch {
     /* ignore */
   }

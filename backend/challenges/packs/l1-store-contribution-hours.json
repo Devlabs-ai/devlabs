@@ -224,5 +224,7 @@
       "Functional: candidate Parquet matches expected store_id, total_contribution, ticket_count",
       "Performance: not specified for this lab"
     ]
-  }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

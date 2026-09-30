@@ -43,5 +43,7 @@
       "script": "grade.sh",
       "timeoutSeconds": 90
     }
-  }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

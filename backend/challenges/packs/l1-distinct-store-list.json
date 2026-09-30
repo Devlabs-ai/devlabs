@@ -224,5 +224,7 @@
     "runScript": "run.sh",
     "jobYaml": "job.yaml",
     "s3Prefix": "challenges/l1-distinct-store-list"
-  }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

@@ -24,6 +24,7 @@ const papersRoutes = require('./routes/papers');
 const quizzesRoutes = require('./routes/quizzes');
 const adminRoutes = require('./routes/admin');
 const devDbRoutes = require('./routes/devDb');
+const leaderboardRoutes = require('./routes/leaderboard');
 
 const terminalService = require('./observability/terminalService');
 const k8sTerminalService = require('./observability/k8sTerminalService');
@@ -48,6 +49,7 @@ app.use('/api/session', sessionRoutes);
 app.use('/api/papers', papersRoutes);
 app.use('/api/quizzes', quizzesRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/dev/db', devDbRoutes);
 
 app.use((err: Error & { status?: number }, _req: ExpressRequest, res: ExpressResponse, _next: ExpressNextFunction) => {
@@ -99,6 +101,31 @@ async function start(): Promise<void> {
 
   console.log('[boot] restoring active sessions from db...');
   await sessionStore.restoreFromDB();
+
+  try {
+    const sessionIdle = require('./workspace/sessionIdle');
+    sessionIdle.startIdleWatcher();
+  } catch (e: unknown) {
+    console.warn('[boot] session idle watcher skipped:', (e as Error).message);
+  }
+
+  try {
+    const labShell = require('./workspace/labShell');
+    if (labShell.enabled()) {
+      const sessionStore = require('./db/sessionStore');
+      await labShell.sweepShellContainers();
+      await labShell.ensureInfra();
+      setInterval(() => {
+        void labShell.sweepShellContainers((sid: string) => {
+          const s = sessionStore.get(sid);
+          return Boolean(s && s.status === 'active');
+        });
+      }, 5 * 60 * 1000).unref();
+      console.log('[boot] k8s lab shell isolation ready');
+    }
+  } catch (e: unknown) {
+    console.error('[boot] k8s lab shell isolation setup failed:', (e as Error).message);
+  }
 
   console.log('[boot] disk challenge seed (no-op under catalog v2)...');
   await seedChallengesFromDisk(VERIFIED_ROOT);

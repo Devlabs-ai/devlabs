@@ -13,15 +13,29 @@ const boardLifecycle = require('../workspace/boardLifecycle');
 const k8sLifecycle = require('../workspace/k8sLifecycle');
 const k8sGrade = require('../workspace/k8sGrade');
 const k8sCluster = require('../workspace/k8sCluster');
+const k8sLabFiles = require('../workspace/k8sLabFiles');
 const { publicBoardSpec } = require('../workspace/boardGrade');
 const workspaceStore = require('../workspace/workspaceStore');
 const sessionStore = require('../db/sessionStore');
 const loader = require('../challenges/loader');
 const { hydrateChallengeFromMinio, applyMoatPolicy } = require('../challenges/minioChallengeAssets');
+const { canViewChallenge } = require('../challenges/access');
 const terminalEventBus = require('../observability/terminalEventBus');
+const sessionIdle = require('../workspace/sessionIdle');
+const sessionExclusivity = require('../workspace/sessionExclusivity');
 const { handleBrowse, listBrowseServices } = require('../sandbox/sessionBrowseProxy');
 
 const router = express.Router();
+
+/** Any /:id session traffic counts as activity (keeps idle timer fresh). */
+router.param('id', (req: ExpressRequest, _res: ExpressResponse, next: ExpressNextFunction, id: string) => {
+  const p = String(req.path || '');
+  // Tab heartbeats prove the tab is open, not that the learner is active.
+  if (id && !p.endsWith('/end') && !p.endsWith('/heartbeat') && !p.endsWith('/lease/release')) {
+    sessionIdle.touch(id);
+  }
+  next();
+});
 
 /** Relative workspace path (no leading slash, no ..). */
 function safeWorkspacePath(p: unknown): string | null {
@@ -274,6 +288,55 @@ router.post('/start', requireSessionAccess, async (req: ExpressRequest, res: Exp
   }
 });
 
+function clientIdFrom(body: Record<string, unknown>): string | null {
+  const raw = typeof body.clientId === 'string' ? body.clientId.trim() : '';
+  return raw && raw.length <= 128 ? raw : null;
+}
+
+/** One active lab per user, one tab per lab; `force` ends the other lab / takes over the tab. */
+async function claimLabSlot(
+  req: ExpressRequest,
+  challengeId: string,
+  userId: string | null,
+): Promise<string | null> {
+  const body = (req.body as Record<string, unknown>) || {};
+  const clientId = clientIdFrom(body);
+  await sessionExclusivity.assertCanStart({
+    userId,
+    challengeId,
+    clientId,
+    force: body.force === true,
+    endSession: (sessionId: string) => sessionIdle.endSessionById(sessionId, 'replaced-by-new-lab'),
+  });
+  return clientId;
+}
+
+/** Conflicts carry a machine-readable code the client uses to offer "end it" / "use here". */
+function sendStartError(e: unknown, res: ExpressResponse, next: ExpressNextFunction): void {
+  const err = e as Error & { status?: number; code?: string; details?: Record<string, unknown> };
+  if (err && (err.status === 409 || err.status === 503) && err.code) {
+    res.status(err.status).json({ error: err.message, code: err.code, ...(err.details || {}) });
+    return;
+  }
+  next(e);
+}
+
+function assertChallengeAccess(req: ExpressRequest, challengeId: string | null | undefined): void {
+  if (!challengeId || challengeId === 'spark-playground') return;
+  const listed = loader.getChallenge(challengeId);
+  if (!listed) return;
+  if (!listed.finalized) {
+    const err = new Error('This lab is not open yet');
+    (err as Error & { status?: number }).status = 403;
+    throw err;
+  }
+  if (!canViewChallenge(req.user, listed.visibleTo)) {
+    const err = new Error('This lab is not available for your role');
+    (err as Error & { status?: number }).status = 403;
+    throw err;
+  }
+}
+
 // POST /api/session/spark/start  { challengeId, starterFiles?, entrypoint? }
 // Starter defaults to MinIO challenges/<id>/starter/ when starterFiles omitted.
 router.post('/spark/start', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
@@ -286,14 +349,8 @@ router.post('/spark/start', requireSessionAccess, async (req: ExpressRequest, re
       || (req.user as { sub?: string; id?: string } | undefined)?.id
       || null;
 
-    if (challengeId && challengeId !== 'spark-playground') {
-      const listed = loader.getChallenge(challengeId);
-      if (listed && !listed.finalized) {
-        const err = new Error('This lab is not open yet');
-        (err as Error & { status?: number }).status = 403;
-        throw err;
-      }
-    }
+    assertChallengeAccess(req, challengeId);
+    const clientId = await claimLabSlot(req, challengeId, userId);
 
     const { session, created } = await sparkLifecycle.startSparkSession({
       challengeId,
@@ -302,6 +359,7 @@ router.post('/spark/start', requireSessionAccess, async (req: ExpressRequest, re
       entrypoint,
       starterFiles,
     });
+    sessionExclusivity.heartbeat(session.id, clientId, true);
 
     const base = loader.getPublicChallenge(challengeId) || loader.getChallenge(challengeId);
     const challenge = await hydrateChallengeFromMinio(base);
@@ -317,7 +375,7 @@ router.post('/spark/start', requireSessionAccess, async (req: ExpressRequest, re
       challenge: pub.challenge,
     });
   } catch (e) {
-    next(e);
+    sendStartError(e, res, next);
   }
 });
 
@@ -330,20 +388,15 @@ router.post('/board/start', requireSessionAccess, async (req: ExpressRequest, re
       || (req.user as { sub?: string; id?: string } | undefined)?.id
       || null;
 
-    if (challengeId) {
-      const listed = loader.getChallenge(challengeId);
-      if (listed && !listed.finalized) {
-        const err = new Error('This lab is not open yet');
-        (err as Error & { status?: number }).status = 403;
-        throw err;
-      }
-    }
+    assertChallengeAccess(req, challengeId);
+    const clientId = await claimLabSlot(req, challengeId, userId);
 
     const { session, created } = await boardLifecycle.startBoardSession({
       challengeId,
       userId,
       candidateName: null,
     });
+    sessionExclusivity.heartbeat(session.id, clientId, true);
 
     const base = loader.getPublicChallenge(challengeId) || loader.getChallenge(challengeId);
     const challenge = await hydrateChallengeFromMinio(base);
@@ -357,7 +410,7 @@ router.post('/board/start', requireSessionAccess, async (req: ExpressRequest, re
       challenge: pub.challenge,
     });
   } catch (e) {
-    next(e);
+    sendStartError(e, res, next);
   }
 });
 
@@ -373,14 +426,8 @@ router.post('/k8s/start', requireSessionAccess, async (req: ExpressRequest, res:
       ? email.slice(0, email.indexOf('@'))
       : (email || null);
 
-    if (challengeId) {
-      const listed = loader.getChallenge(challengeId);
-      if (listed && !listed.finalized) {
-        const err = new Error('This lab is not open yet');
-        (err as Error & { status?: number }).status = 403;
-        throw err;
-      }
-    }
+    assertChallengeAccess(req, challengeId);
+    const clientId = await claimLabSlot(req, challengeId, userId);
 
     const { session, created, provisioned } = await k8sLifecycle.startK8sSession({
       challengeId,
@@ -388,6 +435,7 @@ router.post('/k8s/start', requireSessionAccess, async (req: ExpressRequest, res:
       candidateName: null,
       userName,
     });
+    sessionExclusivity.heartbeat(session.id, clientId, true);
 
     const base = loader.getPublicChallenge(challengeId) || loader.getChallenge(challengeId);
     const challenge = await hydrateChallengeFromMinio(base);
@@ -404,7 +452,7 @@ router.post('/k8s/start', requireSessionAccess, async (req: ExpressRequest, res:
       challenge: pub.challenge,
     });
   } catch (e) {
-    next(e);
+    sendStartError(e, res, next);
   }
 });
 
@@ -429,6 +477,9 @@ router.post('/:id/k8s/grade', requireSessionAccess, async (req: ExpressRequest, 
     if (!session) return;
     const ns = String(session.k8sNamespace || session.workspacePrefix);
     const challengeId = String(session.challengeId || '');
+    if (loader.getChallenge(challengeId)?.k8sPlatform?.practice) {
+      return res.status(400).json({ error: 'This is a practice lab: there is nothing to submit.' });
+    }
     const result = await k8sGrade.gradeK8sSession(ns, challengeId);
     const submission = await k8sGrade.recordK8sSubmission(session, result);
     res.json({
@@ -483,6 +534,77 @@ router.post('/:id/k8s/exec', requireSessionAccess, async (req: ExpressRequest, r
     next(e);
   }
 });
+
+function sendLabFileError(e: unknown, res: ExpressResponse, next: ExpressNextFunction): void {
+  if (e instanceof k8sLabFiles.LabFileError) {
+    res.status((e as { status: number }).status).json({ error: (e as Error).message });
+    return;
+  }
+  next(e);
+}
+
+// Editor files in the learner's lab home (the terminal's working directory).
+type LabFilesHandler = (ns: string, req: ExpressRequest) => unknown;
+
+function labFilesRoute(handler: LabFilesHandler, opts: { touch?: boolean } = {}) {
+  return (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction): void => {
+    try {
+      const session = getK8sSession(req.params.id, res);
+      if (!session) return;
+      if (opts.touch) sessionIdle.touch(session.id);
+      res.json(handler(String(session.k8sNamespace || session.workspacePrefix), req));
+    } catch (e) {
+      sendLabFileError(e, res, next);
+    }
+  };
+}
+
+function bodyOf(req: ExpressRequest): Record<string, unknown> {
+  return (req.body as Record<string, unknown>) || {};
+}
+
+router.get('/:id/k8s/files', requireSessionAccess, labFilesRoute(
+  (ns, req) => k8sLabFiles.listDir(ns, req.query.dir),
+));
+
+router.get('/:id/k8s/folders', requireSessionAccess, labFilesRoute(
+  (ns) => ({ folders: k8sLabFiles.listAllFolders(ns) }),
+));
+
+router.post('/:id/k8s/folders', requireSessionAccess, express.json({ limit: '16kb' }), labFilesRoute(
+  (ns, req) => ({ path: k8sLabFiles.createFolder(ns, bodyOf(req).path) }),
+  { touch: true },
+));
+
+router.get('/:id/k8s/file', requireSessionAccess, labFilesRoute(
+  (ns, req) => k8sLabFiles.readFile(ns, req.query.path),
+));
+
+router.put('/:id/k8s/file', requireSessionAccess, express.json({ limit: '512kb' }), labFilesRoute(
+  (ns, req) => ({ file: k8sLabFiles.writeFile(ns, bodyOf(req).path, bodyOf(req).content) }),
+  { touch: true },
+));
+
+router.post('/:id/k8s/files/rename', requireSessionAccess, express.json({ limit: '16kb' }), labFilesRoute(
+  (ns, req) => k8sLabFiles.renameEntry(ns, bodyOf(req).from, bodyOf(req).to),
+  { touch: true },
+));
+
+router.delete('/:id/k8s/folders', requireSessionAccess, labFilesRoute(
+  (ns, req) => {
+    k8sLabFiles.deleteFolder(ns, req.query.path);
+    return { ok: true };
+  },
+  { touch: true },
+));
+
+router.delete('/:id/k8s/file', requireSessionAccess, labFilesRoute(
+  (ns, req) => {
+    k8sLabFiles.deleteFile(ns, req.query.path);
+    return { ok: true };
+  },
+  { touch: true },
+));
 
 router.get('/:id/board', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
   try {
@@ -825,6 +947,36 @@ router.get('/:id/browse-services', (req: ExpressRequest, res: ExpressResponse) =
   res.json({ services: listBrowseServices(session.portMap) });
 });
 
+// POST /api/session/:id/heartbeat  { clientId, force? } — keeps this tab's claim on the lab.
+router.post('/:id/heartbeat', express.json({ limit: '4kb' }), (req: ExpressRequest, res: ExpressResponse) => {
+  const session: GameSession | null = sessionStore.get(req.params.id);
+  if (!session || session.status !== 'active') {
+    return res.status(410).json({ error: 'session is not active', code: 'SESSION_ENDED' });
+  }
+  const body = (req.body as Record<string, unknown>) || {};
+  const ok = sessionExclusivity.heartbeat(session.id, clientIdFrom(body), body.force === true);
+  if (!ok) {
+    return res.status(409).json({
+      error: 'This lab is open in another tab or window.',
+      code: 'LAB_OPEN_IN_OTHER_TAB',
+    });
+  }
+  res.json({ ok: true, leaseTtlMs: sessionExclusivity.LEASE_TTL_MS });
+});
+
+// POST /api/session/:id/lease/release  { clientId } — sent via sendBeacon on tab close/reload.
+router.post('/:id/lease/release', express.text({ type: '*/*', limit: '4kb' }), (req: ExpressRequest, res: ExpressResponse) => {
+  let body: Record<string, unknown> = {};
+  try {
+    body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : ((req.body as Record<string, unknown>) || {});
+  } catch {
+    body = {};
+  }
+  const clientId = clientIdFrom(body);
+  if (clientId) sessionExclusivity.release(req.params.id, clientId);
+  res.status(204).end();
+});
+
 router.get('/:id', async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
   try {
     const session: GameSession | null = sessionStore.get(req.params.id);
@@ -858,6 +1010,7 @@ router.post('/:id/end', async (req: ExpressRequest, res: ExpressResponse, next: 
     }
 
     terminalEventBus.emit('session_end', { sessionId });
+    sessionExclusivity.release(sessionId);
 
     res.json({
       sessionId,

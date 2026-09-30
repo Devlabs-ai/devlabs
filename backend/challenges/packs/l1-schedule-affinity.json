@@ -21,5 +21,13 @@
     "overview": "Affinity / tolerations",
     "brief": "Schedule Guestbook onto the correct node set with affinity and/or tolerations \u2014 wrong node fails."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1200m",
+      "memory": "1.5Gi"
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

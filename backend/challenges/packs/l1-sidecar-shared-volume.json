@@ -21,5 +21,13 @@
     "overview": "Sidecar pattern",
     "brief": "Run Guestbook with a sidecar sharing an emptyDir (log shipper or proxy) \u2014 both containers Ready."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1200m",
+      "memory": "1.5Gi"
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

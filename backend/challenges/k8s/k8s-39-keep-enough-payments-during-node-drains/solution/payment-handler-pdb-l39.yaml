@@ -1,0 +1,9 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payment-handler-pdb
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: payment-handler

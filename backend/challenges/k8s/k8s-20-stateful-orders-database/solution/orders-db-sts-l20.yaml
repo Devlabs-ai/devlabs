@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: orders-db
+spec:
+  serviceName: orders-db
+  replicas: 2
+  selector:
+    matchLabels:
+      app: orders-db
+      tier: data
+  template:
+    metadata:
+      labels:
+        app: orders-db
+        tier: data
+    spec:
+      securityContext:
+        fsGroup: 70
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_PASSWORD
+              value: quickbyte-lab
+            - name: POSTGRES_DB
+              value: orders
+            # Official image: do not use the volume root as PGDATA (lost+found / perms).
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "512Mi"
+            limits:
+              cpu: "200m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: gp2
+        resources:
+          requests:
+            storage: 500Mi

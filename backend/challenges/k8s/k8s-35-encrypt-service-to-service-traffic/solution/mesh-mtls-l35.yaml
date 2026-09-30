@@ -1,0 +1,20 @@
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: payment-handler-strict
+spec:
+  selector:
+    matchLabels:
+      app: payment-handler
+  mtls:
+    mode: STRICT
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: payment-handler-mtls
+spec:
+  host: handler
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import PlaygroundClusterPanel from '../components/PlaygroundClusterPanel';
 import {
   PLAYGROUND_CLUSTERS,
@@ -7,12 +7,16 @@ import {
 } from '../constants/playgroundDatasets';
 import { PLAYGROUNDS_PATH } from '../constants/playgrounds';
 import { useAppState } from '../context/AppStateContext';
+import { isAdminUser } from '../services/authApi';
 
 export const SPARK_PLAYGROUND_OPEN_PATH = '/play/spark-playground/open';
 
 export default function SparkPlaygroundPage(): JSX.Element {
-  const { startError } = useAppState();
+  const { startError, currentUser } = useAppState();
+  const isAdmin = Boolean(currentUser?.admin) || isAdminUser(currentUser);
   const [schemaId, setSchemaId] = useState<string | null>(null);
+
+  if (!isAdmin) return <Navigate to="/play" replace />;
 
   const schemaTable = getPlaygroundTable(schemaId);
 

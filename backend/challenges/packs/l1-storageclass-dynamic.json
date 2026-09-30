@@ -21,5 +21,13 @@
     "overview": "StorageClass",
     "brief": "Use a StorageClass so a PVC provisions dynamically and a pod mounts it \u2014 static PV cheating fails."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1200m",
+      "memory": "1.5Gi"
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

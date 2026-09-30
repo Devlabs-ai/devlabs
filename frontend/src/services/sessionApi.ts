@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type { ChallengePublic } from '../types/domain';
 import { getAuthHeader } from './authApi';
+import { labClientId } from './labTabLease';
 
 interface RawSessionPayload {
   terminalWsUrl?: string | null;
@@ -97,10 +98,13 @@ export async function endSession(id: string): Promise<unknown> {
   return data;
 }
 
-export async function startBoardSession(challengeId: string): Promise<SessionStartResult> {
+export async function startBoardSession(
+  challengeId: string,
+  opts: { force?: boolean } = {},
+): Promise<SessionStartResult> {
   const { data } = await axios.post(
     '/api/session/board/start',
-    { challengeId },
+    { challengeId, clientId: labClientId(), force: Boolean(opts.force) },
     { headers: getAuthHeader() },
   );
   return data as SessionStartResult;

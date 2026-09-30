@@ -174,5 +174,7 @@
         "trapIfPlaced": "Filter ≠ Distinct. This is an Aggregate, not a predicate."
       }
     ]
-  }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

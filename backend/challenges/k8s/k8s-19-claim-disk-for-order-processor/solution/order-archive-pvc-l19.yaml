@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: order-archive-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
+  storageClassName: manual
+  # Platform PV for this lab: from `kubectl get pv`, the name ending with your namespace
+  volumeName: REPLACE_WITH_YOUR_PLATFORM_PV

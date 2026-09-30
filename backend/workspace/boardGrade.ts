@@ -460,7 +460,7 @@ function publicBoardSpec(spec: BoardSpec | {
     || (p as { gold?: string }).gold === 'tray',
   );
   if (!hasGold) {
-    const shadow = spec.shadow;
+    const shadow = 'shadow' in spec ? spec.shadow : undefined;
     if (!shadow || !Array.isArray(shadow.slots) || shadow.slots.length === 0) return null;
     return {
       pieces: spec.pieces.map(strip),

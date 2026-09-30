@@ -229,5 +229,7 @@
       "Functional: candidate Parquet has detail + store subtotal + grand total rows with correct revenue",
       "Performance: not specified for this lab"
     ]
-  }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

@@ -1,6 +1,6 @@
 # Host requirements (Linux / EC2)
 
-Devlabs runs interview sandboxes with `docker compose` on the **same machine** as the backend. Some challenge images impose extra requirements on the **host OS**, not only on Docker.
+DevSetu runs interview sandboxes with `docker compose` on the **same machine** as the backend. Some challenge images impose extra requirements on the **host OS**, not only on Docker.
 
 This document explains **`vm.max_map_count`** — the most common host tuning step for production deploys.
 
@@ -21,7 +21,7 @@ Many programs use a small number of maps. **Elasticsearch** and **OpenSearch** (
 
 This is **not** extra RAM allocation. It only raises a **counter** of how many map regions are allowed.
 
-### Why Devlabs cares
+### Why DevSetu cares
 
 When an interviewer or candidate starts a session, the backend:
 

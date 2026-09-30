@@ -1,0 +1,9 @@
+#!/bin/sh
+# QuickByte order reconciliation batch (lab workload).
+set -eu
+MODE="${1:---mode=full}"
+echo "order-reconciliation: starting (${MODE})"
+echo "comparing paid orders vs gateway settlements..."
+sleep 1
+echo "order-reconciliation: complete"
+exit 0

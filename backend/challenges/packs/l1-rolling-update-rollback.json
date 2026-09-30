@@ -21,5 +21,13 @@
     "overview": "Rollout & rollback",
     "brief": "Roll a new Guestbook image, watch the rollout, then roll back \u2014 end state is the previous revision."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1200m",
+      "memory": "1.5Gi"
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

@@ -1,0 +1,14 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: settlement-export
+spec:
+  completions: 1
+  template:
+    spec:
+      serviceAccountName: settlement-exporter
+      restartPolicy: OnFailure
+      containers:
+        - name: exporter
+          image: bitnami/kubectl:latest
+          command: ["kubectl", "get", "pods", "-l", "app=payment-handler", "-o", "wide"]

@@ -1,5 +1,7 @@
 /** Problem-setter Spark knobs — declared per challenge in platformSpec.knobs. */
 
+import { readMigrating, writeMigrating } from '../utils/storageMigrate';
+
 export interface SparkKnobOption {
   value: string;
   label: string;
@@ -17,7 +19,8 @@ export interface SparkKnobDef {
 
 export type SparkKnobValues = Record<string, string>;
 
-const STORAGE_PREFIX = 'devlabs.sparkLab.knobs.';
+const STORAGE_PREFIX = 'devsetu.sparkLab.knobs.';
+const LEGACY_STORAGE_PREFIX = 'devlabs.sparkLab.knobs.';
 
 export function defaultsFromKnobDefs(defs: SparkKnobDef[] | null | undefined): SparkKnobValues {
   const out: SparkKnobValues = {};
@@ -74,7 +77,11 @@ export function readStoredKnobValues(
 ): SparkKnobValues {
   const fallback = defaultsFromKnobDefs(defs);
   try {
-    const raw = sessionStorage.getItem(STORAGE_PREFIX + challengeId);
+    const raw = readMigrating(
+      sessionStorage,
+      STORAGE_PREFIX + challengeId,
+      LEGACY_STORAGE_PREFIX + challengeId,
+    );
     if (!raw) return fallback;
     return normalizeKnobValues(JSON.parse(raw) as SparkKnobValues, defs);
   } catch {
@@ -84,7 +91,12 @@ export function readStoredKnobValues(
 
 export function storeKnobValues(challengeId: string, values: SparkKnobValues): void {
   try {
-    sessionStorage.setItem(STORAGE_PREFIX + challengeId, JSON.stringify(values));
+    writeMigrating(
+      sessionStorage,
+      STORAGE_PREFIX + challengeId,
+      LEGACY_STORAGE_PREFIX + challengeId,
+      JSON.stringify(values),
+    );
   } catch {
     /* ignore */
   }

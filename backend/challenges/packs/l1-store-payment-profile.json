@@ -46,41 +46,131 @@
           "env": "INPUT_PATH",
           "kind": "fact",
           "schema": [
-            {"column": "txn_id", "type": "STRING"},
-            {"column": "store_id", "type": "INT"},
-            {"column": "register_id", "type": "INT"},
-            {"column": "product_id", "type": "INT"},
-            {"column": "product_code", "type": "STRING"},
-            {"column": "customer_id", "type": "INT"},
-            {"column": "quantity", "type": "INT"},
-            {"column": "unit_price", "type": "DECIMAL(10,2)"},
-            {"column": "discount_pct", "type": "DECIMAL(5,2)"},
-            {"column": "currency", "type": "STRING"},
-            {"column": "status", "type": "STRING"},
-            {"column": "channel", "type": "STRING"},
-            {"column": "payment_method", "type": "STRING"},
-            {"column": "country_code", "type": "STRING"},
-            {"column": "event_ts", "type": "TIMESTAMP"}
+            {
+              "column": "txn_id",
+              "type": "STRING"
+            },
+            {
+              "column": "store_id",
+              "type": "INT"
+            },
+            {
+              "column": "register_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_code",
+              "type": "STRING"
+            },
+            {
+              "column": "customer_id",
+              "type": "INT"
+            },
+            {
+              "column": "quantity",
+              "type": "INT"
+            },
+            {
+              "column": "unit_price",
+              "type": "DECIMAL(10,2)"
+            },
+            {
+              "column": "discount_pct",
+              "type": "DECIMAL(5,2)"
+            },
+            {
+              "column": "currency",
+              "type": "STRING"
+            },
+            {
+              "column": "status",
+              "type": "STRING"
+            },
+            {
+              "column": "channel",
+              "type": "STRING"
+            },
+            {
+              "column": "payment_method",
+              "type": "STRING"
+            },
+            {
+              "column": "country_code",
+              "type": "STRING"
+            },
+            {
+              "column": "event_ts",
+              "type": "TIMESTAMP"
+            }
           ]
         }
       ]
     },
     "inputSchema": [
-      {"column": "txn_id", "type": "STRING"},
-      {"column": "store_id", "type": "INT"},
-      {"column": "register_id", "type": "INT"},
-      {"column": "product_id", "type": "INT"},
-      {"column": "product_code", "type": "STRING"},
-      {"column": "customer_id", "type": "INT"},
-      {"column": "quantity", "type": "INT"},
-      {"column": "unit_price", "type": "DECIMAL(10,2)"},
-      {"column": "discount_pct", "type": "DECIMAL(5,2)"},
-      {"column": "currency", "type": "STRING"},
-      {"column": "status", "type": "STRING"},
-      {"column": "channel", "type": "STRING"},
-      {"column": "payment_method", "type": "STRING"},
-      {"column": "country_code", "type": "STRING"},
-      {"column": "event_ts", "type": "TIMESTAMP"}
+      {
+        "column": "txn_id",
+        "type": "STRING"
+      },
+      {
+        "column": "store_id",
+        "type": "INT"
+      },
+      {
+        "column": "register_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_code",
+        "type": "STRING"
+      },
+      {
+        "column": "customer_id",
+        "type": "INT"
+      },
+      {
+        "column": "quantity",
+        "type": "INT"
+      },
+      {
+        "column": "unit_price",
+        "type": "DECIMAL(10,2)"
+      },
+      {
+        "column": "discount_pct",
+        "type": "DECIMAL(5,2)"
+      },
+      {
+        "column": "currency",
+        "type": "STRING"
+      },
+      {
+        "column": "status",
+        "type": "STRING"
+      },
+      {
+        "column": "channel",
+        "type": "STRING"
+      },
+      {
+        "column": "payment_method",
+        "type": "STRING"
+      },
+      {
+        "column": "country_code",
+        "type": "STRING"
+      },
+      {
+        "column": "event_ts",
+        "type": "TIMESTAMP"
+      }
     ],
     "expectedOutput": [
       {
@@ -109,12 +199,18 @@
   "platformSpec": {
     "contentSource": "minio",
     "testcasesPrefix": "s3a://devlabs-data/challenges/l1-store-payment-profile/testcases/",
-    "runCases": ["01-profile"],
-    "submitCases": ["02-profile"],
+    "runCases": [
+      "01-profile"
+    ],
+    "submitCases": [
+      "02-profile"
+    ],
     "inputPath": "s3a://devlabs-data/challenges/l1-store-payment-profile/testcases/",
     "evalSolutionPath": "s3a://devlabs-data/challenges/l1-store-payment-profile/testcases/",
     "outputFormat": "parquet",
-    "gradeKeys": ["store_id"],
+    "gradeKeys": [
+      "store_id"
+    ],
     "gradeScript": "s3a://devlabs-data/challenges/l1-store-payment-profile/grade/grade.py",
     "language": "python",
     "starterFileName": "src/main.py",
@@ -136,5 +232,7 @@
       "Functional: candidate Parquet has correct payment methods arrays and aggregations per store",
       "Performance: not specified for this lab"
     ]
-  }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

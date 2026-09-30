@@ -281,5 +281,7 @@
     "runScript": "run.sh",
     "jobYaml": "job.yaml",
     "s3Prefix": "challenges/l1-sample-qa-slice"
-  }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

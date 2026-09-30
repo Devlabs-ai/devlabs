@@ -42,9 +42,44 @@ const STATEMENTS: string[] = [
      last_login_at BIGINT
    )`,
   `CREATE INDEX IF NOT EXISTS idx_users_email ON users (email)`,
-  `ALTER TABLE users DROP COLUMN IF EXISTS role`,
   `ALTER TABLE users DROP COLUMN IF EXISTS company_id`,
   `DROP INDEX IF EXISTS idx_users_company_id`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'learner'`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS review_tracks JSONB NOT NULL DEFAULT '[]'::jsonb`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users (google_sub) WHERE google_sub IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_users_status ON users (status)`,
+  `CREATE INDEX IF NOT EXISTS idx_users_role ON users (role)`,
+  // Backfill: legacy is_admin → role admin (only when still the default learner).
+  `UPDATE users SET role = 'admin' WHERE is_admin = true AND role = 'learner'`,
+  // Keep is_admin in sync with role for older callers.
+  `UPDATE users SET is_admin = (role = 'admin')`,
+
+  // Challenge audience: admin | reviewers | users (default admin-only until opened up).
+  `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS visible_to TEXT NOT NULL DEFAULT 'admin'`,
+  `ALTER TABLE challenges ALTER COLUMN visible_to SET DEFAULT 'admin'`,
+  `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS visibility_notes TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS bounty INTEGER NOT NULL DEFAULT 10`,
+  `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS tokens INTEGER NOT NULL DEFAULT 10`,
+  // Prefer tokens; copy any legacy bounty values once.
+  `UPDATE challenges SET tokens = bounty WHERE tokens = 10 AND bounty IS DISTINCT FROM 10`,
+  `CREATE INDEX IF NOT EXISTS idx_challenges_visible_to ON challenges (visible_to)`,
+
+  `CREATE TABLE IF NOT EXISTS challenge_reviews (
+     id            TEXT PRIMARY KEY,
+     challenge_id  TEXT NOT NULL,
+     author_id     TEXT NOT NULL,
+     author_email  TEXT,
+     author_name   TEXT,
+     body          TEXT NOT NULL,
+     created_at    BIGINT NOT NULL,
+     updated_at    BIGINT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_challenge_reviews_challenge
+     ON challenge_reviews (challenge_id, created_at)`,
 
   `CREATE TABLE IF NOT EXISTS app_meta (
      key   TEXT PRIMARY KEY,
@@ -111,6 +146,15 @@ const STATEMENTS: string[] = [
 
   // Spark / platform metadata (paths, limits, gradeChecks, …).
   `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS platform_spec JSONB`,
+
+  // First time a learner opened a lab's solution; opening it before the first
+  // passed submit halves that lab's tokens (see challenges/solutionViews).
+  `CREATE TABLE IF NOT EXISTS solution_views (
+     user_id       TEXT NOT NULL,
+     challenge_id  TEXT NOT NULL,
+     viewed_at     BIGINT NOT NULL,
+     PRIMARY KEY (user_id, challenge_id)
+   )`,
 
   // Global catalog number across all platforms (1, 2, 3, …).
   `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS number INTEGER`,
@@ -262,6 +306,41 @@ async function dropAuthoringTables(): Promise<void> {
   console.log('[migrate] authoring/review tables dropped (drafts/reviews/lessons/catalogue)');
 }
 
+const REGISTRATION_OPEN_KEY = 'registration_open';
+const PLATFORM_ADMIN_EMAIL = 'rithvikalkanti@gmail.com';
+const PLATFORM_ADMIN_PASSWORD = 'ComingSoon2027';
+
+async function seedAuthDefaults(): Promise<void> {
+  await pool.query(
+    `INSERT INTO app_meta (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [REGISTRATION_OPEN_KEY, 'true'],
+  );
+
+  const bcrypt = require('bcryptjs');
+  const passwordHash = await bcrypt.hash(PLATFORM_ADMIN_PASSWORD, 10);
+  const now = Date.now();
+  const { v4: uuidv4 } = require('uuid');
+  await pool.query(
+    `INSERT INTO users (id, email, name, created_at, last_login_at, password_hash, status, is_admin, role, review_tracks)
+     VALUES ($1, $2, $3, $4, $4, $5, 'active', true, 'admin', '[]'::jsonb)
+     ON CONFLICT (email) DO UPDATE SET
+       is_admin = true,
+       role = 'admin',
+       status = 'active',
+       password_hash = COALESCE(users.password_hash, EXCLUDED.password_hash)`,
+    [uuidv4(), PLATFORM_ADMIN_EMAIL, 'Admin', now, passwordHash],
+  );
+  // Old seeded admin — keep row if present but no longer platform admin by email alone.
+  await pool.query(
+    `UPDATE users SET is_admin = false, role = 'learner'
+      WHERE email = 'admin@devlabs.app'
+        AND email <> $1`,
+    [PLATFORM_ADMIN_EMAIL],
+  );
+  console.log('[migrate] platform admin + registration_open seeded');
+}
+
 async function runMigrations(): Promise<void> {
   await renameGameSessionsToSessions();
   for (const sql of STATEMENTS) {
@@ -276,6 +355,7 @@ async function runMigrations(): Promise<void> {
   await dropChallengeLibraryColumns();
   await dropAuthoringTables();
   await clearSessionsTable();
+  await seedAuthDefaults();
 }
 
 module.exports = { runMigrations };

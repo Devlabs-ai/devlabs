@@ -21,5 +21,13 @@
     "overview": "Canary cutover",
     "brief": "Split traffic between stable and canary Guestbook Deployments, then cut over cleanly."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1200m",
+      "memory": "1.5Gi"
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

@@ -1,0 +1,50 @@
+{
+  "id": "k8s-23-local-disk-for-hot-payment-writes",
+  "number": 223,
+  "finalized": true,
+  "title": "Local Disk for Hot Payment Writes",
+  "description": "**SITUATION:**\n\nPayment Handler writes authorization logs constantly. Those writes need to be **fast**.\n\nEarlier labs used **network disks** (shared storage over the network). Those are fine for cold archives, but they add latency. For this hot path, the disk must be a **local SSD sitting on one worker node** — like a hard drive bolted into that one machine.\n\nBecause the disk lives on **one** node:\n- Kubernetes must know **which node** has it (platform already labeled nodes `quickbyte.ai/local-ssd=true` and registered a **local** PersistentVolume for your lab).\n- Payment Handler’s Pod must **run on that same node** (a local volume forces this).\n- You keep **1 replica only** — a second Pod on another node cannot see this disk.\n\nAs the app team, you do **not** create that PV — you **claim** it by name on a PVC, then mount the claim into Payment Handler.\n\nSetup already started a bare `payment-handler` Deployment (no volume yet).\n\n[DevSetu Blog — Volumes, PVs, PVCs, and StorageClasses](/play/devops-engineer/kubernetes/read/volumes-pvs-pvcs-storageclasses)\n\n**YOUR TASK:**\n\n1. Find the **PersistentVolume** already created for your lab — its name **ends with your namespace**.\n2. Create a **PersistentVolumeClaim (PVC)** that **selects that PV** with `spec.volumeName` (plus matching size, access mode, and storage class).\n3. **Update** Deployment `payment-handler` so it has **1** replica and mounts the PVC at `/var/log/payments`.\n4. Confirm the PVC is **Bound** and the Pod is **Ready** (it will land on the labeled local-SSD node).\n\n**SPEC:**\n\n- PVC name: `payment-local-pvc`\n- Access modes: `[\"ReadWriteOnce\"]`\n- Resources requests storage: `500Mi`\n- `storageClassName`: `local-storage`\n- `volumeName`: the platform PV for your lab (name ends with your namespace — pin it; do not rely on automatic matching alone)\n- Deployment `payment-handler`: **1** replica; mount PVC at `/var/log/payments`\n- Ready: PVC **Bound** to that PV; Deployment **1/1** Ready\n\n**GOOD PRACTICES:**\n\n- Put PVC + Deployment in one file: `payment-local-storage-l23.yaml`.\n- Do **not** create or edit a PersistentVolume — select the one the platform already offered via `volumeName`.\n- Do **not** use `hostPath` on the Pod — mount the PVC only.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "storage"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "List PVs and find the one whose name ends with your lab namespace — set that exact name on PVC spec.volumeName.",
+      "You do not create the PV — only claim and mount it.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Local Disk for Hot Payment Writes",
+    "brief": "Local Disk for Hot Payment Writes",
+    "solution": "# Solution — Local Disk for Hot Payment Writes\n\nPin the platform **local** PersistentVolume with `volumeName` on a PVC, then mount it into Payment Handler at `/var/log/payments`. Do **not** create or edit a PersistentVolume.\n\nDocs: [DevSetu Blog — Volumes, PVs, PVCs, and StorageClasses](/play/devops-engineer/kubernetes/read/volumes-pvs-pvcs-storageclasses) · [Local Volumes](https://kubernetes.io/docs/concepts/storage/volumes/#local) · [PersistentVolumeClaims](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims)\n\n## Discover the platform PV\n\n```bash\nkubectl get pv\n# pick the one whose name ends with your lab namespace ($LEARNER_NS)\n```\n\n## Solution YAML\n\nSave as `payment-local-storage-l23.yaml` (set `volumeName` to that PV):\n\n```yaml\napiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: payment-local-pvc\nspec:\n  accessModes:\n    - ReadWriteOnce\n  resources:\n    requests:\n      storage: 500Mi\n  storageClassName: local-storage\n  volumeName: <platform-pv-ending-with-your-namespace>\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payment-handler\nspec:\n  replicas: 1\n  selector:\n    matchLabels:\n      app: payment-handler\n  template:\n    metadata:\n      labels:\n        app: payment-handler\n    spec:\n      containers:\n        - name: payment-handler\n          image: devsetu/payment-handler:v1.0\n          ports:\n            - containerPort: 8000\n          volumeMounts:\n            - name: payment-logs\n              mountPath: /var/log/payments\n      volumes:\n        - name: payment-logs\n          persistentVolumeClaim:\n            claimName: payment-local-pvc\n```\n\n## Declarative\n\n```bash\nkubectl apply -f payment-local-storage-l23.yaml\nkubectl get pvc payment-local-pvc\nkubectl get deploy payment-handler\nkubectl get pods -l app=payment-handler -o wide\n```\n\nWait until the PVC is **Bound** to that PV and the Pod is **Ready** (local volumes force the Pod onto the labeled node), then **Submit**.\n\nDo **not** create or edit a PersistentVolume — select the platform one with `volumeName`, then mount the PVC. Keep **1** replica. Work only in your lab namespace (not `default`).\n",
+    "idLabel": "23",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "700m",
+      "memory": "768Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

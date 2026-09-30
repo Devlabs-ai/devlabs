@@ -21,5 +21,13 @@
     "overview": "ReplicaSets",
     "brief": "Stand up a ReplicaSet with matching selectors, then scale it once without rewriting the pod template."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1200m",
+      "memory": "1.5Gi"
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

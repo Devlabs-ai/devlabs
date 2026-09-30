@@ -165,7 +165,7 @@ function executionTimeDetail(score: GradeScore, spec: ExecutionTimeScoring): str
   const actual = score.executionMs as number;
   if (actual < spec.targetMs && (spec.bonusPerSecond || 0) > 0) {
     const secondsUnder = (spec.targetMs - actual) / 1000;
-    const bonus = Math.round(secondsUnder * spec.bonusPerSecond * 10) / 10;
+    const bonus = Math.round(secondsUnder * (spec.bonusPerSecond || 0) * 10) / 10;
     return `${dur} → ${pts} (${max} at ${target} + ${formatPoints(bonus)} for ${secondsUnder.toFixed(1)}s under)`;
   }
   if (actual > spec.targetMs) {

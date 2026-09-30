@@ -1,0 +1,49 @@
+{
+  "id": "k8s-29-only-payments-on-tainted-pci-nodes",
+  "number": 229,
+  "finalized": true,
+  "title": "Only Payments on Tainted PCI Nodes",
+  "description": "**SITUATION:**\n\nEarlier you **pinned** Payment Handler onto the payment pool with a `nodeSelector` (Pods choose labeled workers). That does **not** stop Order Processor or Notification from also landing on those machines if capacity exists.\n\n**PCI nodes (recap):** **PCI** = Payment Card Industry. QuickByte’s card-handling workers are a protected pool — tighter reviews, dedicated networking. Compliance wants **only** Payment Handler there; ordinary apps must stay off.\n\nPlatform now **taints** those machines (`pci=true:NoSchedule`) so the scheduler **repels** Pods that do not opt in. A **toleration** is Payment Handler’s VIP pass. Without it, Payment cannot schedule onto the protected pool either.\n\nThis lab teaches **taints and tolerations** — the node keeps the crowd out; Payment opts in. (Toleration *allows* the node; it does not by itself *attract* you there — combine with selector/affinity when you must land on the pool.)\n[DevSetu Blog — Where Pods Land: Selectors, Affinity, and Taints](/play/devops-engineer/kubernetes/read/scheduling-affinity-taints)\n\n**YOUR TASK:**\n\n1. **Update** `payment-handler` to **tolerate** the PCI taint.\n2. Optionally combine with `nodeSelector` / affinity if those nodes are also labeled `pci=true` — at minimum the toleration must be present.\n3. Verify Payment Pods can schedule; Notification still has **no** PCI toleration.\n\n**SPEC:**\n\n- Deployment name: `payment-handler` (do not rename)\n- Replicas: keep **`2`**\n- Toleration:\n  - key: `pci`\n  - operator: `Equal`\n  - value: `true`\n  - effect: `NoSchedule`\n- Ready: **2/2** Payment Pods Ready\n\n**GOOD PRACTICES:**\n\n- Manifest: `payment-toleration-l29.yaml`.\n- Do **not** add the PCI toleration to `notification-service`.\n- Do not remove the node taint — only tolerate it on Payment Handler.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "scheduling"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "PCI = Payment Card Industry — protected payment workers; this lab only adds a toleration for the pci taint.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Only Payments on Tainted PCI Nodes",
+    "brief": "Only Payments on Tainted PCI Nodes",
+    "solution": "# Solution — Only Payments on Tainted PCI Nodes\n\n**PCI** = Payment Card Industry. Protected payment workers are tainted so ordinary apps stay off; Payment Handler adds a toleration for `pci=true:NoSchedule`. Do not add that toleration to Notification Service.\n\nDocs: [DevSetu Blog — Where Pods Land: Selectors, Affinity, and Taints](/play/devops-engineer/kubernetes/read/scheduling-affinity-taints) · [Taints and Tolerations](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/)\n\n## Solution YAML\n\nSave as `payment-toleration-l29.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payment-handler\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: payment-handler\n  template:\n    metadata:\n      labels:\n        app: payment-handler\n    spec:\n      tolerations:\n        - key: pci\n          operator: Equal\n          value: \"true\"\n          effect: NoSchedule\n      containers:\n        - name: payment-handler\n          image: devsetu/payment-handler:v1.0\n          ports:\n            - containerPort: 8000\n```\n\n## Declarative\n\n```bash\nkubectl apply -f payment-toleration-l29.yaml\nkubectl get deploy payment-handler -o yaml | grep -A10 tolerations\nkubectl get pods -l app=payment-handler -o wide\n```\n\nWait until **2/2** Payment Pods are Ready, then **Submit**.\n",
+    "idLabel": "29",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "900m",
+      "memory": "1024Mi"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

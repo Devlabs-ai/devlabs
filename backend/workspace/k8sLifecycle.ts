@@ -25,17 +25,61 @@ export type StartK8sResult = {
 
 function platformSpecOf(challengeId: string): {
   quota?: { pods?: string; cpu?: string; memory?: string };
+  limitRange?: {
+    defaultRequest?: { cpu?: string; memory?: string };
+    default?: { cpu?: string; memory?: string };
+    max?: { cpu?: string; memory?: string };
+    min?: { cpu?: string; memory?: string };
+  };
   setup?: { script?: string };
   grade?: { script?: string; timeoutSeconds?: number };
 } {
   const c = loader.getChallenge(challengeId) as {
     k8sPlatform?: {
       quota?: { pods?: string; cpu?: string; memory?: string };
+      limitRange?: {
+        defaultRequest?: { cpu?: string; memory?: string };
+        default?: { cpu?: string; memory?: string };
+        max?: { cpu?: string; memory?: string };
+        min?: { cpu?: string; memory?: string };
+      };
       setup?: { script?: string };
       grade?: { script?: string; timeoutSeconds?: number };
     };
   } | null;
   return c?.k8sPlatform || {};
+}
+
+/**
+ * One learner namespace hosts every lab of that learner, so provision / reset /
+ * park for it run strictly one at a time, whichever lab they belong to. Otherwise
+ * an abandoned open's setup.sh or a closing lab's park can interleave with the
+ * next lab and leak objects into (or wipe) it.
+ */
+const nsLocks = new Map<string, Promise<unknown>>();
+
+function withNsLock<T>(ns: string, fn: () => Promise<T>): Promise<T> {
+  const prev = nsLocks.get(ns) || Promise.resolve();
+  const run = prev.catch(() => undefined).then(fn);
+  const tail = run.catch(() => undefined);
+  nsLocks.set(ns, tail);
+  void tail.then(() => {
+    if (nsLocks.get(ns) === tail) nsLocks.delete(ns);
+  });
+  return run;
+}
+
+/** ns → challenge whose park failed; its objects are still in the namespace. */
+const unparked = new Map<string, string>();
+
+async function park(ns: string, challengeId: string): Promise<void> {
+  try {
+    await k8s.parkChallengeNamespace(ns, challengeId);
+    if (unparked.get(ns) === challengeId) unparked.delete(ns);
+  } catch (err) {
+    unparked.set(ns, challengeId);
+    throw err;
+  }
 }
 
 async function findExistingK8sSession(
@@ -89,23 +133,81 @@ async function findExistingK8sSession(
   return session;
 }
 
-async function ensureProvisioned(
+const LAB_ENV_UNAVAILABLE_MSG =
+  'We could not prepare a clean lab environment right now. Something is down on our side. '
+  + 'Please contact the administrator.';
+
+function labEnvUnavailable(): Error {
+  return Object.assign(new Error(LAB_ENV_UNAVAILABLE_MSG), {
+    status: 503,
+    code: 'LAB_ENV_UNAVAILABLE',
+  });
+}
+
+function ensureProvisioned(ns: string, challengeId: string, forceSetup: boolean): Promise<boolean> {
+  return withNsLock(ns, () => provision(ns, challengeId, forceSetup));
+}
+
+/**
+ * A lab only ever starts on an empty namespace. Leftovers mean an earlier park
+ * or wipe failed; they are never silently deleted here (they may be unsaved
+ * work), so the open is refused until the retry succeeds or an admin clears it.
+ */
+async function ensureCleanSlate(
+  ns: string,
+  challengeId: string,
+  forceSetup: boolean,
+  spec: ReturnType<typeof platformSpecOf>,
+): Promise<void> {
+  try {
+    await k8s.ensureLearnerNamespace(ns, {
+      quota: spec.quota || {},
+      limitRange: spec.limitRange,
+      reconcileLimits: true,
+    });
+    const pending = unparked.get(ns);
+    if (pending) await park(ns, pending);
+    if (forceSetup) {
+      k8s.deleteChallengeSnapshot(ns, challengeId);
+      await k8s.wipeChallengeResources(ns, challengeId);
+    }
+    const left = await k8s.listLeftoverResources(ns);
+    if (left.length) {
+      throw new Error(`${left.length} leftover object(s): ${left.slice(0, 10).join(', ')}`);
+    }
+  } catch (err) {
+    console.error(
+      `[k8s] ${ns} is not a clean slate, refusing to open ${challengeId}: ${(err as Error).message || err}`,
+    );
+    throw labEnvUnavailable();
+  }
+}
+
+async function provision(
   ns: string,
   challengeId: string,
   forceSetup: boolean,
 ): Promise<boolean> {
   const spec = platformSpecOf(challengeId);
-  await k8s.ensureLearnerNamespace(ns, spec.quota || {});
+  await ensureCleanSlate(ns, challengeId, forceSetup, spec);
 
-  const already = await k8s.hasChallengeSetup(ns, challengeId);
-  if (already && !forceSetup) return false;
-
-  if (forceSetup) {
-    await k8s.wipeChallengeResources(ns, challengeId);
+  if (!forceSetup) {
+    // Resume: re-apply parked namespace state from last session end.
+    const restored = await k8s.restoreChallengeSnapshot(ns, challengeId);
+    if (restored) {
+      await k8s.markChallengeSetup(ns, challengeId);
+      return true;
+    }
+    // Do not skip setup just because the NS annotation is set — a prior open can
+    // mark setup complete while prerun workloads are missing (old script, wipe,
+    // or timed-out seed). setup.sh is idempotent (kubectl apply).
   }
 
   const script = spec.setup?.script || 'setup.sh';
-  const result = await k8s.runChallengeScript(ns, challengeId, script);
+  // Postgres image pulls (C9+) often exceed the old 90s default.
+  const result = await k8s.runChallengeScript(ns, challengeId, script, {
+    timeoutMs: 180_000,
+  });
   if (result.code !== 0) {
     const msg = (result.stderr || result.stdout || 'setup failed').trim();
     throw Object.assign(new Error(`Lab setup failed: ${msg}`), { status: 502 });
@@ -146,8 +248,18 @@ async function startK8sSession({
     existing.candidateName = candidateName || existing.candidateName;
     sessionStore.set(existing.id, existing);
 
-    const provisioned = await ensureProvisioned(ns, challengeId, false);
+    let provisioned: boolean;
+    try {
+      provisioned = await ensureProvisioned(ns, challengeId, false);
+    } catch (err) {
+      // Not via endK8sSession: parking now would snapshot whatever blocked the open.
+      existing.status = 'ended';
+      existing.endTime = Date.now();
+      await sessionStore.persistRow(existing).catch(() => {});
+      throw err;
+    }
     await sessionStore.persistRow(existing);
+    existing.lastActivityAt = Date.now();
     return { session: existing, created: false, provisioned };
   }
 
@@ -170,6 +282,7 @@ async function startK8sSession({
 
   sessionStore.set(sessionId, session);
   await sessionStore.persistRow(session);
+  session.lastActivityAt = Date.now();
 
   try {
     const provisioned = await ensureProvisioned(ns, challengeId, false);
@@ -202,14 +315,30 @@ async function resetK8sSession(sessionId: string): Promise<GameSession> {
 }
 
 async function endK8sSession(sessionId: string): Promise<GameSession> {
-  const session = sessionStore.get(sessionId);
+  const session = sessionStore.get(sessionId) as
+    | (GameSession & { k8sNamespace?: string })
+    | null;
   if (!session) {
     throw Object.assign(new Error('session not found'), { status: 404 });
   }
+  if (session.status === 'ended') {
+    return session;
+  }
+  const ns = session.k8sNamespace || session.workspacePrefix;
+  const challengeId = session.challengeId;
+
+  // Mark ended immediately so the client can leave; park/wipe runs in background.
   session.status = 'ended';
   session.endTime = Date.now();
   await sessionStore.persistRow(session);
-  // Keep namespace contents so unfinished labs can resume.
+
+  if (ns && challengeId) {
+    void withNsLock(ns, () => park(ns, challengeId)).catch((err: unknown) => {
+      console.warn(
+        `[k8s] background park failed for ${ns}/${challengeId}: ${(err as Error).message || err}`,
+      );
+    });
+  }
   return session;
 }
 

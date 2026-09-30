@@ -21,5 +21,13 @@
     "overview": "Container command / args",
     "brief": "Override the image entrypoint so Guestbook runs the required command and args \u2014 image default CMD must not win."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "cpu": "1200m",
+      "memory": "1.5Gi"
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

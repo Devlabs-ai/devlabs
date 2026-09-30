@@ -245,7 +245,7 @@ export default function BrowserTab({ sessionId, portMap }: BrowserTabProps): JSX
             <div className="browser-prompt-icon">⬡</div>
             <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
               {sessionId
-                ? 'Pick a service chip — web UIs load through the Devlabs proxy, not raw localhost ports.'
+                ? 'Pick a service chip — web UIs load through the DevSetu proxy, not raw localhost ports.'
                 : 'Start a sandbox session to browse services here.'}
             </p>
           </div>
@@ -260,7 +260,7 @@ export default function BrowserTab({ sessionId, portMap }: BrowserTabProps): JSX
             </code>
             {blockReason === 'mixed-content' && (
               <p className="dim" style={{ fontSize: 12 }}>
-                Devlabs is on HTTPS but a direct HTTP URL was used. Use the{' '}
+                DevSetu is on HTTPS but a direct HTTP URL was used. Use the{' '}
                 <strong>/api/session/…/browse/…</strong> proxy path.
               </p>
             )}

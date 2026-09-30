@@ -238,5 +238,7 @@
     "runScript": "run.sh",
     "jobYaml": "job.yaml",
     "s3Prefix": "challenges/l3-interchange-fee-settlement"
-  }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
 }

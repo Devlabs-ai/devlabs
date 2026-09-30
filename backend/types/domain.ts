@@ -2,6 +2,9 @@ export interface JwtPayload {
   sub?: string;
   userId?: string;
   email?: string;
+  admin?: boolean;
+  role?: 'admin' | 'reviewer' | 'learner';
+  reviewTracks?: string[];
   iat?: number;
   exp?: number;
 }
@@ -10,6 +13,10 @@ export interface UserRecord {
   id: string;
   email: string;
   name?: string | null;
+  status?: 'pending' | 'active' | 'rejected';
+  role?: 'admin' | 'reviewer' | 'learner';
+  reviewTracks?: string[];
+  isAdmin?: boolean;
 }
 
 export interface ChallengePublic {
@@ -23,6 +30,17 @@ export interface ChallengePublic {
   category: string;
   finalized: boolean;
   sandboxType: string | null;
+  /**
+   * Who may open this lab.
+   * - admin: admins only
+   * - reviewers: reviewers + admin
+   * - users: learners + reviewers + admin
+   */
+  visibleTo?: 'admin' | 'reviewers' | 'users';
+  /** Admin-only notes on the Visibility tab. */
+  visibilityNotes?: string;
+  /** Reward tokens earned when the lab is solved. */
+  tokens?: number;
 }
 
 export interface SparkPlatformSpec {
@@ -109,11 +127,24 @@ export interface SparkPlatformSpec {
   [key: string]: unknown;
 }
 
+/** Per-container LimitRange knobs (merged over platform defaults). */
+export interface K8sLimitRangeSpec {
+  defaultRequest?: { cpu?: string; memory?: string };
+  default?: { cpu?: string; memory?: string };
+  max?: { cpu?: string; memory?: string };
+  min?: { cpu?: string; memory?: string };
+}
+
 /** Namespaced Kubernetes lab (per-user Namespace + setup/grade scripts). */
 export interface K8sPlatformSpec {
+  /** Namespace ResourceQuota hard caps (requests + limits). */
   quota?: { pods?: string; cpu?: string; memory?: string };
+  /** Optional LimitRange overrides (defaults applied when omitted). */
+  limitRange?: K8sLimitRangeSpec;
   setup?: { script?: string };
   grade?: { script?: string; timeoutSeconds?: number };
+  /** Hands-on only: no Submit, no grading, no tokens or leaderboard credit. */
+  practice?: boolean;
   [key: string]: unknown;
 }
 
@@ -246,6 +277,10 @@ export interface ChallengeRow {
   problem_statement?: Record<string, unknown> | string | null;
   validation_spec?: ValidationSpec | null;
   platform_spec?: Record<string, unknown> | SparkPlatformSpec | null;
+  visible_to?: string | null;
+  visibility_notes?: string | null;
+  bounty?: number | null;
+  tokens?: number | null;
 }
 
 export type SessionStatus = 'pending' | 'active' | 'ended';
@@ -278,6 +313,8 @@ export interface GameSession {
   entrypoint?: string | null;
   workspaceUpdatedAt?: number | null;
   boardState?: BoardState | null;
+  /** Last user activity (API / terminal). Used for idle timeout. */
+  lastActivityAt?: number | null;
 }
 
 export type PortMap = Record<string, string | number>;
