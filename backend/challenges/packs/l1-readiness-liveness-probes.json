@@ -23,9 +23,15 @@
   },
   "platformSpec": {
     "quota": {
-      "pods": "10",
-      "cpu": "1200m",
-      "memory": "1.5Gi"
+      "pods": "7",
+      "requests": {
+        "cpu": "140m",
+        "memory": "224Mi"
+      },
+      "limits": {
+        "cpu": "280m",
+        "memory": "448Mi"
+      }
     }
   },
   "visibleTo": "admin",

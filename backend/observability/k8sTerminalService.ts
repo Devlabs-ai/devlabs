@@ -19,18 +19,32 @@ const sessionStore = require('../db/sessionStore');
 const k8sCluster = require('../workspace/k8sCluster');
 const labShell = require('../workspace/labShell');
 const sessionIdle = require('../workspace/sessionIdle');
+const sessionExclusivity = require('../workspace/sessionExclusivity');
 const terminalEventBus = require('./terminalEventBus');
 
-/** sessionId → close callbacks of its open terminals. */
-const openTerminals = new Map<string, Set<() => void>>();
+type OpenTerminal = { clientId: string | null; close: (notice?: string) => void };
+
+/** sessionId → its open terminals and the tab that opened each. */
+const openTerminals = new Map<string, Set<OpenTerminal>>();
+
+const MOVED_NOTICE = 'This lab was opened in another tab, so this terminal was disconnected.';
 
 // A finished lab is parked and its namespace handed to the next lab, so a shell
 // left open must not keep writing into it.
 terminalEventBus.on('session_end', ({ sessionId }: { sessionId?: string }) => {
-  const closers = sessionId ? openTerminals.get(sessionId) : undefined;
-  if (!closers) return;
+  const terms = sessionId ? openTerminals.get(sessionId) : undefined;
+  if (!terms) return;
   openTerminals.delete(sessionId!);
-  for (const close of closers) close();
+  for (const t of terms) t.close();
+});
+
+// Only the tab holding the lease may drive the lab.
+sessionExclusivity.onLeaseMoved((sessionId: string, clientId: string) => {
+  const terms = openTerminals.get(sessionId);
+  if (!terms) return;
+  for (const t of [...terms]) {
+    if (t.clientId !== clientId) t.close(MOVED_NOTICE);
+  }
 });
 
 function parseQuery(req: IncomingMessage): URLSearchParams {
@@ -53,6 +67,10 @@ function send(ws: ObservabilityWebSocket, data: string | Buffer | Uint8Array): v
 
 function sendJson(ws: ObservabilityWebSocket, obj: unknown): void {
   send(ws, JSON.stringify(obj));
+}
+
+function sendNotice(ws: ObservabilityWebSocket, message: string): void {
+  send(ws, Buffer.from(`\r\n\x1b[33m${message}\x1b[0m\r\n`, 'utf8'));
 }
 
 /** Per-learner lab home: /Users/<user-name> (or K8S_LAB_HOME_ROOT / Linux /home). */
@@ -134,6 +152,13 @@ function handleConnection(ws: ObservabilityWebSocket, req: IncomingMessage): voi
   }
   if (session.status !== 'active') {
     sendJson(ws, { type: 'error', message: 'session is not active' });
+    ws.close();
+    return;
+  }
+
+  const clientId = (q.get('clientId') || '').trim().slice(0, 128) || null;
+  if (!sessionExclusivity.isLeaseHolder(sessionId, clientId)) {
+    sendNotice(ws, MOVED_NOTICE);
     ws.close();
     return;
   }
@@ -232,10 +257,11 @@ function handleConnection(ws: ObservabilityWebSocket, req: IncomingMessage): voi
     sessionIdle.touch(sessionId);
 
     let closed = false;
-    const closeAll = () => {
+    const closeAll = (notice?: string) => {
       if (closed) return;
       closed = true;
-      openTerminals.get(sessionId)?.delete(closeAll);
+      openTerminals.get(sessionId)?.delete(entry);
+      if (notice) sendNotice(ws, notice);
       try {
         child.kill('SIGTERM');
       } catch (_e) {
@@ -245,11 +271,16 @@ function handleConnection(ws: ObservabilityWebSocket, req: IncomingMessage): voi
       k8sCluster.removeLearnerKubeconfig(kubeconfigPath);
       if (ws.readyState === ws.OPEN) ws.close();
     };
+    const entry: OpenTerminal = { clientId, close: closeAll };
     if (!openTerminals.has(sessionId)) openTerminals.set(sessionId, new Set());
-    openTerminals.get(sessionId)!.add(closeAll);
-    // The lab may have ended while the shell was starting.
+    openTerminals.get(sessionId)!.add(entry);
+    // The lab may have ended, or moved to another tab, while the shell was starting.
     if (sessionStore.get(sessionId)?.status !== 'active') {
       closeAll();
+      return;
+    }
+    if (!sessionExclusivity.isLeaseHolder(sessionId, clientId)) {
+      closeAll(MOVED_NOTICE);
       return;
     }
 
@@ -290,8 +321,8 @@ function handleConnection(ws: ObservabilityWebSocket, req: IncomingMessage): voi
       closeAll();
     });
 
-    ws.on('close', closeAll);
-    ws.on('error', closeAll);
+    ws.on('close', () => closeAll());
+    ws.on('error', () => closeAll());
 
     send(
       ws,

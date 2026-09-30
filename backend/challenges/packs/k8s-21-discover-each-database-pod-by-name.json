@@ -35,9 +35,15 @@
   },
   "platformSpec": {
     "quota": {
-      "pods": "10",
-      "cpu": "700m",
-      "memory": "1536Mi"
+      "pods": "5",
+      "requests": {
+        "cpu": "100m",
+        "memory": "224Mi"
+      },
+      "limits": {
+        "cpu": "320m",
+        "memory": "448Mi"
+      }
     },
     "setup": {
       "script": "setup.sh"
@@ -45,16 +51,6 @@
     "grade": {
       "script": "grade.sh",
       "timeoutSeconds": 180
-    },
-    "limitRange": {
-      "defaultRequest": {
-        "cpu": "25m",
-        "memory": "32Mi"
-      },
-      "default": {
-        "cpu": "200m",
-        "memory": "512Mi"
-      }
     }
   },
   "visibleTo": "admin",

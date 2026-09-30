@@ -42,29 +42,46 @@ const PROVISION_CACHE_TTL_MS = Number(process.env.K8S_LAB_PROVISION_CACHE_MS || 
 /** Refresh learner token this long before expiry. */
 const LEARNER_TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1000;
 
-/** Fallback when a pack omits platformSpec.quota (prefer per-challenge values). */
+/**
+ * Fallback when a pack omits platformSpec.quota (prefer per-challenge values).
+ * Sized as N default containers: requests N×20m/32Mi, limits N×40m/64Mi.
+ */
 const DEFAULT_QUOTA = {
-  pods: '20',
-  cpu: '1500m',
-  memory: '2Gi',
+  pods: '6',
+  requests: { cpu: '120m', memory: '192Mi' },
+  limits: { cpu: '240m', memory: '384Mi' },
 };
 
-/** Fallback LimitRange when a pack omits platformSpec.limitRange. */
+/**
+ * Fallback LimitRange when a pack omits platformSpec.limitRange. `max` caps any
+ * single container (Postgres runs at 100m/128Mi), so one pod cannot eat the node.
+ */
 const DEFAULT_LIMIT_RANGE = {
-  defaultRequest: { cpu: '25m', memory: '32Mi' },
-  default: { cpu: '100m', memory: '128Mi' },
+  defaultRequest: { cpu: '20m', memory: '32Mi' },
+  default: { cpu: '40m', memory: '64Mi' },
+  max: { cpu: '100m', memory: '128Mi' },
 };
 
-type LabQuota = { pods: string; cpu: string; memory: string };
+type Resources = { cpu: string; memory: string };
+type LabQuota = { pods: string; requests: Resources; limits: Resources };
 type LabLimitRange = {
-  defaultRequest: { cpu: string; memory: string };
-  default: { cpu: string; memory: string };
+  defaultRequest: Resources;
+  default: Resources;
   max?: { cpu?: string; memory?: string };
   min?: { cpu?: string; memory?: string };
 };
 
+/** Pack quota. Legacy cpu/memory set requests and limits to the same value. */
+export type LabQuotaSpec = {
+  pods?: string;
+  cpu?: string;
+  memory?: string;
+  requests?: { cpu?: string; memory?: string };
+  limits?: { cpu?: string; memory?: string };
+};
+
 export type EnsureLearnerNamespaceOpts = {
-  quota?: { pods?: string; cpu?: string; memory?: string };
+  quota?: LabQuotaSpec;
   limitRange?: {
     defaultRequest?: { cpu?: string; memory?: string };
     default?: { cpu?: string; memory?: string };
@@ -230,8 +247,9 @@ function readEksExecHintFromKubeconfig(): { cluster: string; region: string } | 
   try {
     const raw = fs.readFileSync(cfgPath, 'utf8');
     // aws eks update-kubeconfig writes: args: [..., "eks", "get-token", "--cluster-name", NAME, ...]
-    const clusterMatch = /--cluster-name[=\s]+([^\s"']+)/.exec(raw);
-    const regionMatch = /--region[=\s]+([^\s"']+)/.exec(raw);
+    // Matches `--flag value`, `--flag=value`, YAML list items on separate lines, and JSON arrays.
+    const clusterMatch = /--cluster-name["']?(?:=|[\s,]+(?:-\s+)?)["']?([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(raw);
+    const regionMatch = /--region["']?(?:=|[\s,]+(?:-\s+)?)["']?([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(raw);
     const cluster = envCluster || clusterMatch?.[1] || null;
     const region = envRegion || regionMatch?.[1] || null;
     eksExecHint = cluster && region ? { cluster, region } : null;
@@ -290,6 +308,15 @@ async function getControllerIamToken(): Promise<string | null> {
   } finally {
     controllerIamTokenInflight = null;
   }
+}
+
+let controllerTokenWarned = false;
+
+/** Without a cached token every kubectl call execs `aws eks get-token` (~1s each). */
+function warnControllerTokenOnce(err: Error): void {
+  if (controllerTokenWarned) return;
+  controllerTokenWarned = true;
+  console.warn(`[k8s] cached EKS token unavailable, falling back to kubeconfig exec auth: ${err.message}`);
 }
 
 /** Default lab namespace: ns-<user-name> (DNS-1123, max 63). */
@@ -354,7 +381,10 @@ function runKubectl(
       env = { ...process.env };
       delete env.KUBECONFIG;
     } else {
-      const token = await getControllerIamToken().catch(() => null);
+      const token = await getControllerIamToken().catch((err: Error) => {
+        warnControllerTokenOnce(err);
+        return null;
+      });
       fullArgs = [
         ...kubectlBaseArgs(),
         ...(token ? ['--token', token] : []),
@@ -560,12 +590,21 @@ async function learnerPlatformReady(ns: string): Promise<boolean> {
   return r.code === 0;
 }
 
-function mergeQuota(partial?: { pods?: string; cpu?: string; memory?: string }): LabQuota {
+function mergeQuota(partial?: LabQuotaSpec): LabQuota {
+  const pick = (kind: 'requests' | 'limits', r: 'cpu' | 'memory'): string =>
+    partial?.[kind]?.[r] || partial?.[r] || DEFAULT_QUOTA[kind][r];
   return {
     pods: partial?.pods || DEFAULT_QUOTA.pods,
-    cpu: partial?.cpu || DEFAULT_QUOTA.cpu,
-    memory: partial?.memory || DEFAULT_QUOTA.memory,
+    requests: { cpu: pick('requests', 'cpu'), memory: pick('requests', 'memory') },
+    limits: { cpu: pick('limits', 'cpu'), memory: pick('limits', 'memory') },
   };
+}
+
+function stripEmpty(r?: { cpu?: string; memory?: string }): { cpu?: string; memory?: string } {
+  const out: { cpu?: string; memory?: string } = {};
+  if (r?.cpu) out.cpu = r.cpu;
+  if (r?.memory) out.memory = r.memory;
+  return out;
 }
 
 function mergeLimitRange(
@@ -580,10 +619,8 @@ function mergeLimitRange(
       cpu: partial?.default?.cpu || DEFAULT_LIMIT_RANGE.default.cpu,
       memory: partial?.default?.memory || DEFAULT_LIMIT_RANGE.default.memory,
     },
+    max: { ...DEFAULT_LIMIT_RANGE.max, ...stripEmpty(partial?.max) },
   };
-  if (partial?.max && (partial.max.cpu || partial.max.memory)) {
-    lr.max = { ...partial.max };
-  }
   if (partial?.min && (partial.min.cpu || partial.min.memory)) {
     lr.min = { ...partial.min };
   }
@@ -625,10 +662,10 @@ metadata:
 spec:
   hard:
     pods: "${q.pods}"
-    requests.cpu: "${q.cpu}"
-    requests.memory: "${q.memory}"
-    limits.cpu: "${q.cpu}"
-    limits.memory: "${q.memory}"
+    requests.cpu: "${q.requests.cpu}"
+    requests.memory: "${q.requests.memory}"
+    limits.cpu: "${q.limits.cpu}"
+    limits.memory: "${q.limits.memory}"
 ---
 apiVersion: v1
 kind: LimitRange
@@ -661,13 +698,13 @@ async function ensureNamespaceExists(ns: string): Promise<void> {
  */
 async function ensureLearnerNamespace(
   ns: string,
-  opts: EnsureLearnerNamespaceOpts | { pods?: string; cpu?: string; memory?: string } = {},
+  opts: EnsureLearnerNamespaceOpts | LabQuotaSpec = {},
 ): Promise<void> {
   // Back-compat: callers that passed a bare quota object still work.
   const normalized: EnsureLearnerNamespaceOpts =
     opts && ('quota' in opts || 'limitRange' in opts || 'reconcileLimits' in opts)
       ? (opts as EnsureLearnerNamespaceOpts)
-      : { quota: opts as { pods?: string; cpu?: string; memory?: string } };
+      : { quota: opts as LabQuotaSpec };
 
   const reconcileLimits = normalized.reconcileLimits !== false;
 
@@ -789,8 +826,9 @@ async function createLearnerKubeconfig(ns: string): Promise<string> {
     }
   }
 
-  // Ensure SA exists without resetting challenge ResourceQuota / LimitRange.
-  await ensureLearnerNamespace(ns, { reconcileLimits: false });
+  // Ensure SA exists without resetting challenge ResourceQuota / LimitRange. Skipped
+  // right after a full reconcile (same RBAC); revokeLearnerAccess clears that cache.
+  if (!isProvisionCached(ns)) await ensureLearnerNamespace(ns, { reconcileLimits: false });
 
   // Mint SA token and resolve cluster endpoint in parallel (endpoint is process-cached after first).
   const [tokenResult, cluster] = await Promise.all([
@@ -1110,16 +1148,30 @@ function sanitizeForReapply(obj: K8sObject, ns: string): K8sObject | null {
   return copy;
 }
 
-async function listLabeledClusterObjects(ns: string, resource: 'pv' | 'storageclass'): Promise<K8sObject[]> {
+/** PVs and StorageClasses labeled for the namespace, in one API round-trip. */
+async function listLabeledClusterStorage(ns: string): Promise<{ pvs: K8sObject[]; storageClasses: K8sObject[] }> {
   const r = await runKubectl(
-    ['get', resource, '-l', `${LEARNER_NS_PV_LABEL}=${ns}`, '-o', 'json'],
+    ['get', 'pv,storageclass', '-l', `${LEARNER_NS_PV_LABEL}=${ns}`, '-o', 'json'],
     { timeoutMs: 45_000 },
   );
   if (r.code !== 0) {
-    throw Object.assign(new Error(`listing ${resource} for ${ns} failed: ${(r.stderr || r.stdout).trim()}`), { status: 502 });
+    throw Object.assign(new Error(`listing pv,storageclass for ${ns} failed: ${(r.stderr || r.stdout).trim()}`), { status: 502 });
   }
   const doc = JSON.parse(r.stdout) as { items?: K8sObject[] };
-  return Array.isArray(doc.items) ? doc.items : [];
+  const items = Array.isArray(doc.items) ? doc.items : [];
+  const pvs: K8sObject[] = [];
+  const storageClasses: K8sObject[] = [];
+  for (const obj of items) {
+    if (obj.kind === 'StorageClass') {
+      if (!obj.apiVersion) obj.apiVersion = 'storage.k8s.io/v1';
+      storageClasses.push(obj);
+    } else {
+      if (!obj.kind) obj.kind = 'PersistentVolume';
+      if (!obj.apiVersion) obj.apiVersion = 'v1';
+      pvs.push(obj);
+    }
+  }
+  return { pvs, storageClasses };
 }
 
 /** Every learner-manageable object in the namespace. Throws rather than returning a partial list. */
@@ -1143,19 +1195,8 @@ async function listLearnerObjects(ns: string): Promise<K8sObject[]> {
  */
 async function snapshotChallengeNamespace(ns: string, challengeId: string): Promise<string> {
   const items: K8sObject[] = [];
-  for (const raw of await listLearnerObjects(ns)) {
-    const clean = sanitizeForReapply(raw, ns);
-    if (clean) items.push(clean);
-  }
-  for (const raw of await listLabeledClusterObjects(ns, 'pv')) {
-    if (!raw.kind) raw.kind = 'PersistentVolume';
-    if (!raw.apiVersion) raw.apiVersion = 'v1';
-    const clean = sanitizeForReapply(raw, ns);
-    if (clean) items.push(clean);
-  }
-  for (const raw of await listLabeledClusterObjects(ns, 'storageclass')) {
-    if (!raw.kind) raw.kind = 'StorageClass';
-    if (!raw.apiVersion) raw.apiVersion = 'storage.k8s.io/v1';
+  const [objects, storage] = await Promise.all([listLearnerObjects(ns), listLabeledClusterStorage(ns)]);
+  for (const raw of [...objects, ...storage.pvs, ...storage.storageClasses]) {
     const clean = sanitizeForReapply(raw, ns);
     if (clean) items.push(clean);
   }
@@ -1362,14 +1403,18 @@ async function learnerObjectRefs(ns: string): Promise<string[]> {
  * StorageClasses labeled for the namespace that still exist. Empty means the
  * namespace is a clean slate. Throws if the cluster cannot be read.
  */
+async function leftoverState(ns: string): Promise<{ refs: string[]; clusterRefs: string[] }> {
+  const [refs, storage] = await Promise.all([learnerObjectRefs(ns), listLabeledClusterStorage(ns)]);
+  const clusterRefs = [
+    ...storage.pvs.map((o) => `pv/${o.metadata?.name || '?'}`),
+    ...storage.storageClasses.map((o) => `storageclass/${o.metadata?.name || '?'}`),
+  ];
+  return { refs, clusterRefs };
+}
+
 async function listLeftoverResources(ns: string): Promise<string[]> {
-  const left = await learnerObjectRefs(ns);
-  for (const resource of ['pv', 'storageclass'] as const) {
-    for (const obj of await listLabeledClusterObjects(ns, resource)) {
-      left.push(`${resource}/${obj.metadata?.name || '?'}`);
-    }
-  }
-  return left;
+  const { refs, clusterRefs } = await leftoverState(ns);
+  return [...refs, ...clusterRefs];
 }
 
 /**
@@ -1379,12 +1424,14 @@ async function listLeftoverResources(ns: string): Promise<string[]> {
  * so a following lab never starts on top of another lab's objects.
  */
 async function wipeChallengeResources(ns: string, challengeId: string | null): Promise<void> {
+  let verifiedClean = false;
   for (let pass = 0; pass < WIPE_PASSES; pass += 1) {
-    const refs = await learnerObjectRefs(ns);
-    const clusterLeft =
-      (await listLabeledClusterObjects(ns, 'pv')).length
-      + (await listLabeledClusterObjects(ns, 'storageclass')).length;
-    if (!refs.length && !clusterLeft) break;
+    const { refs, clusterRefs } = await leftoverState(ns);
+    const clusterLeft = clusterRefs.length;
+    if (!refs.length && !clusterLeft) {
+      verifiedClean = true;
+      break;
+    }
     for (let i = 0; i < refs.length; i += WIPE_CHUNK) {
       const r = await runKubectl([
         'delete',
@@ -1412,7 +1459,7 @@ async function wipeChallengeResources(ns: string, challengeId: string | null): P
       ], { timeoutMs: 150_000 });
     }
   }
-  const left = await listLeftoverResources(ns);
+  const left = verifiedClean ? [] : await listLeftoverResources(ns);
   if (left.length) {
     throw Object.assign(
       new Error(`wipe of ${ns} left ${left.length} object(s): ${left.slice(0, 10).join(', ')}`),
@@ -1434,6 +1481,50 @@ async function revokeLearnerAccess(ns: string): Promise<void> {
   });
 }
 
+const CONTROLLER_KUBE_DIR = path.join(os.tmpdir(), 'dl-k8s-controller');
+let controllerKubeconfigToken: string | null = null;
+
+/**
+ * Admin kubeconfig carrying the cached EKS token, for challenge scripts (their
+ * kubectl calls would otherwise exec `aws eks get-token` each time). Backend-only:
+ * never mount this directory into lab shells. Null when no cached token applies.
+ */
+async function controllerTokenKubeconfig(): Promise<string | null> {
+  if (process.env.K8S_LAB_CONTEXT) return null;
+  const token = await getControllerIamToken();
+  if (!token) return null;
+  const dest = path.join(CONTROLLER_KUBE_DIR, 'config');
+  if (controllerKubeconfigToken === token && fs.existsSync(dest)) return dest;
+
+  const cluster = await resolveClusterEndpoint();
+  const clusterBlock = cluster.skipTls || !cluster.caData
+    ? `    server: ${cluster.server}\n    insecure-skip-tls-verify: true`
+    : `    server: ${cluster.server}\n    certificate-authority-data: ${cluster.caData}`;
+  const kubeconfig = `apiVersion: v1
+kind: Config
+clusters:
+- name: devlabs-lab
+  cluster:
+${clusterBlock}
+users:
+- name: controller
+  user:
+    token: ${token}
+contexts:
+- name: controller
+  context:
+    cluster: devlabs-lab
+    user: controller
+current-context: controller
+`;
+  fs.mkdirSync(CONTROLLER_KUBE_DIR, { recursive: true, mode: 0o700 });
+  const tmp = `${dest}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, kubeconfig, { mode: 0o600 });
+  fs.renameSync(tmp, dest);
+  controllerKubeconfigToken = token;
+  return dest;
+}
+
 function scriptsDir(challengeId: string): string {
   return path.join(__dirname, '..', 'challenges', 'k8s', challengeId);
 }
@@ -1446,8 +1537,13 @@ async function runChallengeScript(
 ): Promise<KubectlResult> {
   const scriptPath = path.join(scriptsDir(challengeId), scriptName);
   const timeoutMs = opts.timeoutMs ?? 90_000;
+  const tokenKubeconfig = await controllerTokenKubeconfig().catch((err: Error) => {
+    warnControllerTokenOnce(err);
+    return null;
+  });
   const env = {
     ...kubectlEnv(),
+    ...(tokenKubeconfig ? { KUBECONFIG: tokenKubeconfig } : {}),
     LEARNER_NS: ns,
     CHALLENGE_ID: challengeId,
     CHALLENGE_LABEL,

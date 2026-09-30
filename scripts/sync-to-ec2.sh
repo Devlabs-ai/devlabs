@@ -62,6 +62,8 @@ rsync -avz --delete \
   --exclude 'frontend/dist/' \
   --exclude '.env' \
   --exclude '.env.*' \
+  --exclude '.env copy*' \
+  --exclude '*.kubeconfig' \
   --exclude 'sandbox/sessions/' \
   --exclude 'sandbox/builds/' \
   --exclude '**/.DS_Store' \

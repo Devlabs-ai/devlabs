@@ -109,6 +109,10 @@ async function start(): Promise<void> {
     console.warn('[boot] session idle watcher skipped:', (e as Error).message);
   }
 
+  if (process.env.K8S_LAB_KUBECONFIG || process.env.KUBECONFIG) {
+    require('./workspace/k8sCapacity').start();
+  }
+
   try {
     const labShell = require('./workspace/labShell');
     if (labShell.enabled()) {

@@ -240,6 +240,25 @@ export async function startK8sSession(
   };
 }
 
+export interface K8sCapacityWait {
+  pod: string;
+  waitingSeconds: number;
+}
+
+export interface K8sCapacityState {
+  /** Learner pods waiting for a node. */
+  waiting: K8sCapacityWait[];
+  /** Seconds the lab open has been held for its reserved capacity, or null. */
+  reservingSeconds: number | null;
+}
+
+/** Capacity waits for the learner's lab (works before the lab has a session id). */
+export async function fetchK8sCapacity(): Promise<K8sCapacityState> {
+  const { data } = await axios.get('/api/session/k8s/capacity', { headers: getAuthHeader() });
+  const d = data as Partial<K8sCapacityState>;
+  return { waiting: d.waiting || [], reservingSeconds: d.reservingSeconds ?? null };
+}
+
 export async function execK8sCommand(
   sessionId: string,
   command: string,

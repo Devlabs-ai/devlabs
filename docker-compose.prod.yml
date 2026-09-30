@@ -74,6 +74,8 @@ services:
       PGHOST: postgres
       REDIS_HOST: redis
       K8S_LAB_KUBECONFIG: /app/kube/k8s-lab.kubeconfig
+      # The only backend allowed to scale dl-system/dl-balloon-reserved.
+      K8S_CAPACITY_MANAGER: "1"
       K8S_LAB_HOME_ROOT: /home
       K8S_LAB_LEARNER_KUBE_ROOT: /app/kube/learner
       K8S_LAB_SNAPSHOT_ROOT: /app/kube/snapshots

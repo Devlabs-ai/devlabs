@@ -32,8 +32,11 @@ spec:
             - containerPort: 8000
           resources:
             requests:
-              cpu: "100m"
-              memory: "128Mi"
+              cpu: "20m"
+              memory: "32Mi"
+            limits:
+              cpu: "40m"
+              memory: "64Mi"
 ```
 
 Save as `payment-handler-svc-l31.yaml` (cutover — selector points at green):

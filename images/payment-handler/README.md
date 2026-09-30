@@ -7,19 +7,9 @@ Minimal Flask service for Kubernetes CKAD labs.
 - Listens on **8000**
 - Runs as UID **1000** (SecurityContext labs)
 
-## Build & push (linux/amd64 for EKS)
+## Build & push (multi-arch: arm64 learner nodes + amd64)
 
 ```bash
-cd images/payment-handler
-
-docker build --platform linux/amd64 \
-  --build-arg APP_VERSION=v1.0 \
-  -t devsetu/payment-handler:v1.0 .
-docker push devsetu/payment-handler:v1.0
-
-# Blue-green / canary labs need a distinct v1.1 tag
-docker build --platform linux/amd64 \
-  --build-arg APP_VERSION=v1.1 \
-  -t devsetu/payment-handler:v1.1 .
-docker push devsetu/payment-handler:v1.1
+# v1.0, plus v1.1 for the blue-green / canary labs
+./images/build-all.sh payment-handler
 ```

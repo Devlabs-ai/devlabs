@@ -25,15 +25,21 @@
     ],
     "overview": "Rescue CrashLooping Notifications",
     "brief": "Rescue CrashLooping Notifications",
-    "solution": "# Solution — Rescue CrashLooping Notifications\n\nStay in your lab namespace. Inspect the broken Notification Service Deployment, fix the fault (image / command / env / probe), and restore **2/2** Ready.\n\nDocs: [Debug running pods](https://kubernetes.io/docs/tasks/debug/debug-application/debug-running-pod/) · [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)\n\n## Solution YAML\n\nTypical fix — restore a healthy Deployment (apply as `notification-service-fix-l41.yaml`):\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notification-service\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: notification-service\n  template:\n    metadata:\n      labels:\n        app: notification-service\n    spec:\n      containers:\n        - name: notification-service\n          image: devsetu/notification-service:v1.0\n          ports:\n            - containerPort: 8080\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n```\n\nStart with `kubectl describe` / `kubectl logs` on the CrashLooping Pods — the actual break may be a bad image tag, wrong command, or a failing probe. Prefer patching the existing Deployment over creating a second one.\n\n## Declarative\n\n```bash\nkubectl get pods -l app=notification-service\nkubectl describe deploy/notification-service\nkubectl logs -l app=notification-service --tail=50\nkubectl apply -f notification-service-fix-l41.yaml\nkubectl rollout status deploy/notification-service\n```\n\nWait until **2/2** Ready with no CrashLoopBackOff / ImagePullBackOff, then **Submit**.\n",
+    "solution": "# Solution — Rescue CrashLooping Notifications\n\nStay in your lab namespace. Inspect the broken Notification Service Deployment, fix the fault (image / command / env / probe), and restore **2/2** Ready.\n\nDocs: [Debug running pods](https://kubernetes.io/docs/tasks/debug/debug-application/debug-running-pod/) · [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)\n\n## Solution YAML\n\nTypical fix — restore a healthy Deployment (apply as `notification-service-fix-l41.yaml`):\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notification-service\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: notification-service\n  template:\n    metadata:\n      labels:\n        app: notification-service\n    spec:\n      containers:\n        - name: notification-service\n          image: devsetu/notification-service:v1.0\n          ports:\n            - containerPort: 8080\n          resources:\n            requests:\n              cpu: \"20m\"\n              memory: \"32Mi\"\n            limits:\n              cpu: \"40m\"\n              memory: \"64Mi\"\n```\n\nStart with `kubectl describe` / `kubectl logs` on the CrashLooping Pods — the actual break may be a bad image tag, wrong command, or a failing probe. Prefer patching the existing Deployment over creating a second one.\n\n## Declarative\n\n```bash\nkubectl get pods -l app=notification-service\nkubectl describe deploy/notification-service\nkubectl logs -l app=notification-service --tail=50\nkubectl apply -f notification-service-fix-l41.yaml\nkubectl rollout status deploy/notification-service\n```\n\nWait until **2/2** Ready with no CrashLoopBackOff / ImagePullBackOff, then **Submit**.\n",
     "idLabel": "41",
     "theory": ""
   },
   "platformSpec": {
     "quota": {
-      "pods": "10",
-      "cpu": "800m",
-      "memory": "896Mi"
+      "pods": "6",
+      "requests": {
+        "cpu": "120m",
+        "memory": "192Mi"
+      },
+      "limits": {
+        "cpu": "240m",
+        "memory": "384Mi"
+      }
     },
     "setup": {
       "script": "setup.sh"

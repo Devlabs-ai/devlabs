@@ -22,6 +22,7 @@ spec:
       containers:
         - name: postgres
           image: postgres:16-alpine
+          args: ["-c", "shared_buffers=16MB"]
           ports:
             - containerPort: 5432
           env:
@@ -31,6 +32,13 @@ spec:
               value: quickbyte
             - name: POSTGRES_DB
               value: orders
+          resources:
+            requests:
+              cpu: "20m"
+              memory: "64Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
 ---
 apiVersion: v1
 kind: Service

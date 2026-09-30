@@ -36,6 +36,9 @@ import { startSession, startBoardSession, endSession, restoreSession } from './s
 import { startSparkSession, startK8sSession } from './services/workspaceApi';
 import {
   LAB_HEARTBEAT_MS,
+  LAB_LEASE_RECLAIMED_EVENT,
+  LAB_LEASE_TAKEN_EVENT,
+  LAB_SESSION_ENDED_EVENT,
   labConflictFromError,
   releaseLabLease,
   sendLabHeartbeat,
@@ -51,8 +54,7 @@ import { isSparkPlatformChallenge } from './components/SparkPlatformWorkspace';
 import { isBoardChallenge } from './components/BoardWorkspace';
 import { isKubernetesChallenge } from './components/K8sLabWorkspace';
 import { SPARK_PLAYGROUND_CHALLENGE_ID } from './constants/playgroundDatasets';
-import { catalogPathForChallenge, isPlayDomainId, looksLikePlaySessionId } from './constants/playCatalog';
-import type {
+import { catalogPathForChallenge, isPlayDomainId, looksLikePlaySessionId } from './constants/playCatalog';import type {
   AuthMode,
   PlayState,
   WorkspaceTab,
@@ -818,8 +820,7 @@ export default function App(): React.JSX.Element {
   };
 
   const handleBackToLibrary = (): void => {
-    const dest = catalogPathForChallenge(activeChallenge?.id, activeChallenge?.sandboxType, activeChallenge?.tags);
-    // A lab still opening keeps the catalog URL, so navigating there alone never
+    const dest = catalogPathForChallenge(activeChallenge?.id, activeChallenge?.sandboxType, activeChallenge?.tags);    // A lab still opening keeps the catalog URL, so navigating there alone never
     // invalidates the start; it would finish and pull the user back into the lab.
     if (pendingStartRef.current || activeSession?.id.startsWith('pending-k8s-')) {
       abandonPendingStart();
@@ -864,13 +865,31 @@ export default function App(): React.JSX.Element {
     void beat();
     const timer = window.setInterval(() => void beat(), LAB_HEARTBEAT_MS);
     const onPageHide = (): void => releaseLabLease(leaseSessionId);
+    // Switching back to this tab should reveal a takeover at once, not at the next beat.
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') void beat();
+    };
     window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
       window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [leaseSessionId, labLeaseLost, heartbeatEpoch]);
+
+  useEffect(() => {
+    if (!leaseSessionId) return undefined;
+    const onTaken = (): void => setLabLeaseLost((prev) => prev || 'taken');
+    const onEnded = (): void => setLabLeaseLost('ended');
+    window.addEventListener(LAB_LEASE_TAKEN_EVENT, onTaken);
+    window.addEventListener(LAB_SESSION_ENDED_EVENT, onEnded);
+    return () => {
+      window.removeEventListener(LAB_LEASE_TAKEN_EVENT, onTaken);
+      window.removeEventListener(LAB_SESSION_ENDED_EVENT, onEnded);
+    };
+  }, [leaseSessionId]);
 
   const handleUseLabHere = async (): Promise<void> => {
     if (!leaseSessionId) return;
@@ -880,6 +899,7 @@ export default function App(): React.JSX.Element {
     if (result === 'ok') {
       setLabLeaseLost(null);
       setHeartbeatEpoch((n) => n + 1);
+      window.dispatchEvent(new Event(LAB_LEASE_RECLAIMED_EVENT));
     } else if (result === 'ended') {
       setLabLeaseLost('ended');
     }

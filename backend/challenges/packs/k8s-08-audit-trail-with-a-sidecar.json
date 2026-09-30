@@ -31,9 +31,15 @@
   },
   "platformSpec": {
     "quota": {
-      "pods": "10",
-      "cpu": "800m",
-      "memory": "1088Mi"
+      "pods": "6",
+      "requests": {
+        "cpu": "180m",
+        "memory": "288Mi"
+      },
+      "limits": {
+        "cpu": "360m",
+        "memory": "576Mi"
+      }
     },
     "setup": {
       "script": "setup.sh"
@@ -41,20 +47,6 @@
     "grade": {
       "script": "grade.sh",
       "timeoutSeconds": 90
-    },
-    "limitRange": {
-      "defaultRequest": {
-        "cpu": "25m",
-        "memory": "32Mi"
-      },
-      "default": {
-        "cpu": "50m",
-        "memory": "128Mi"
-      },
-      "max": {
-        "cpu": "100m",
-        "memory": "256Mi"
-      }
     }
   },
   "visibleTo": "reviewers",

@@ -40,13 +40,14 @@ spec:
               value: orders
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+          args: ["-c", "shared_buffers=16MB"]
           resources:
             requests:
-              cpu: "100m"
-              memory: "512Mi"
+              cpu: "20m"
+              memory: "64Mi"
             limits:
-              cpu: "200m"
-              memory: "512Mi"
+              cpu: "100m"
+              memory: "128Mi"
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data

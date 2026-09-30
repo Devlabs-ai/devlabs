@@ -25,15 +25,21 @@
     ],
     "overview": "Ship Notification Templates as Files",
     "brief": "Ship Notification Templates as Files",
-    "solution": "# Solution — Ship Notification Templates as Files\n\nStay in your lab namespace. Create ConfigMap `notification-templates` and mount it as files at `/etc/notification/templates` on Notification Service.\n\nDocs: [ConfigMap as files](https://kubernetes.io/docs/concepts/configuration/configmap/#using-configmaps-as-files-from-a-pod)\n\n## Solution YAML\n\nSave as `notification-templates-l42.yaml`:\n\n```yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: notification-templates\ndata:\n  order-confirm.txt: \"Your QuickByte order is confirmed.\"\n  payment-ok.txt: \"Payment received. Thank you.\"\n```\n\nSave as `notification-templates-deploy-l42.yaml` (Deployment update):\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notification-service\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: notification-service\n  template:\n    metadata:\n      labels:\n        app: notification-service\n    spec:\n      containers:\n        - name: notification-service\n          image: devsetu/notification-service:v1.0\n          ports:\n            - containerPort: 8080\n          volumeMounts:\n            - name: templates\n              mountPath: /etc/notification/templates\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n      volumes:\n        - name: templates\n          configMap:\n            name: notification-templates\n```\n\n## Declarative\n\n```bash\nkubectl apply -f notification-templates-l42.yaml\nkubectl apply -f notification-templates-deploy-l42.yaml\nkubectl rollout status deploy/notification-service\nPOD=$(kubectl -n \"$LEARNER_NS\" get pod -l app=notification-service -o jsonpath='{.items[0].metadata.name}')\nkubectl exec \"$POD\" -- ls /etc/notification/templates\n```\n\nConfirm both template files exist in the mount and Deployment is **2/2** Ready, then **Submit**. Mount as a volume — not only `env` / `envFrom`.\n",
+    "solution": "# Solution — Ship Notification Templates as Files\n\nStay in your lab namespace. Create ConfigMap `notification-templates` and mount it as files at `/etc/notification/templates` on Notification Service.\n\nDocs: [ConfigMap as files](https://kubernetes.io/docs/concepts/configuration/configmap/#using-configmaps-as-files-from-a-pod)\n\n## Solution YAML\n\nSave as `notification-templates-l42.yaml`:\n\n```yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: notification-templates\ndata:\n  order-confirm.txt: \"Your QuickByte order is confirmed.\"\n  payment-ok.txt: \"Payment received. Thank you.\"\n```\n\nSave as `notification-templates-deploy-l42.yaml` (Deployment update):\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: notification-service\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: notification-service\n  template:\n    metadata:\n      labels:\n        app: notification-service\n    spec:\n      containers:\n        - name: notification-service\n          image: devsetu/notification-service:v1.0\n          ports:\n            - containerPort: 8080\n          volumeMounts:\n            - name: templates\n              mountPath: /etc/notification/templates\n          resources:\n            requests:\n              cpu: \"20m\"\n              memory: \"32Mi\"\n            limits:\n              cpu: \"40m\"\n              memory: \"64Mi\"\n      volumes:\n        - name: templates\n          configMap:\n            name: notification-templates\n```\n\n## Declarative\n\n```bash\nkubectl apply -f notification-templates-l42.yaml\nkubectl apply -f notification-templates-deploy-l42.yaml\nkubectl rollout status deploy/notification-service\nPOD=$(kubectl -n \"$LEARNER_NS\" get pod -l app=notification-service -o jsonpath='{.items[0].metadata.name}')\nkubectl exec \"$POD\" -- ls /etc/notification/templates\n```\n\nConfirm both template files exist in the mount and Deployment is **2/2** Ready, then **Submit**. Mount as a volume — not only `env` / `envFrom`.\n",
     "idLabel": "42",
     "theory": ""
   },
   "platformSpec": {
     "quota": {
-      "pods": "10",
-      "cpu": "800m",
-      "memory": "896Mi"
+      "pods": "6",
+      "requests": {
+        "cpu": "120m",
+        "memory": "192Mi"
+      },
+      "limits": {
+        "cpu": "240m",
+        "memory": "384Mi"
+      }
     },
     "setup": {
       "script": "setup.sh"

@@ -32,9 +32,15 @@
   },
   "platformSpec": {
     "quota": {
-      "pods": "10",
-      "cpu": "1000m",
-      "memory": "1152Mi"
+      "pods": "7",
+      "requests": {
+        "cpu": "140m",
+        "memory": "256Mi"
+      },
+      "limits": {
+        "cpu": "340m",
+        "memory": "512Mi"
+      }
     },
     "setup": {
       "script": "setup.sh"

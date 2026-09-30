@@ -21,16 +21,49 @@ export EKS_EBS_CSI_SA="${EKS_EBS_CSI_SA:-ebs-csi-controller-sa}"
 export EKS_APP_USER_ARN="${EKS_APP_USER_ARN:-arn:aws:iam::204098850303:user/devlabs-app-s3}"
 export EKS_APP_USER_NAME="${EKS_APP_USER_NAME:-devlabs-app-s3}"
 
-# Comma-separated managed node groups
-export EKS_NODEGROUPS="${EKS_NODEGROUPS:-system-k8s,workload-v2}"
-# Which groups to wake by default (workload stays 0 until you need more capacity)
-export EKS_WAKE_NODEGROUPS="${EKS_WAKE_NODEGROUPS:-system-k8s}"
-export EKS_WAKE_DESIRED="${EKS_WAKE_DESIRED:-1}"
-export EKS_WAKE_MIN="${EKS_WAKE_MIN:-0}"
-export EKS_WAKE_MAX="${EKS_WAKE_MAX:-2}"
+# Comma-separated managed node groups (both Graviton / arm64)
+#   system-k8s — add-ons / platform; tainted so learner pods stay off
+#   labs-k8s   — learner workloads, always-on base (lab images are multi-arch)
+export EKS_NODEGROUPS="${EKS_NODEGROUPS:-system-k8s,labs-k8s}"
+# Which groups to wake by default
+export EKS_WAKE_NODEGROUPS="${EKS_WAKE_NODEGROUPS:-system-k8s,labs-k8s}"
+# Overrides every group's desired/min/max when set (otherwise per-group values below)
+export EKS_WAKE_DESIRED="${EKS_WAKE_DESIRED:-}"
+export EKS_WAKE_MIN="${EKS_WAKE_MIN:-}"
+export EKS_WAKE_MAX="${EKS_WAKE_MAX:-}"
 
-export EKS_NODE_INSTANCE_TYPE="${EKS_NODE_INSTANCE_TYPE:-t3.medium}"
+export EKS_SYSTEM_INSTANCE_TYPE="${EKS_SYSTEM_INSTANCE_TYPE:-t4g.medium}"
+export EKS_SYSTEM_AMI_TYPE="${EKS_SYSTEM_AMI_TYPE:-AL2023_ARM_64_STANDARD}"
+export EKS_SYSTEM_DESIRED="${EKS_SYSTEM_DESIRED:-1}"
+export EKS_SYSTEM_MAX="${EKS_SYSTEM_MAX:-2}"
+
+# One always-on base node; Karpenter adds the rest (same type, karpenter/nodepool.yaml).
+# Must stay an arm64 / Graviton type.
+export EKS_LABS_INSTANCE_TYPE="${EKS_LABS_INSTANCE_TYPE:-t4g.medium}"
+export EKS_LABS_AMI_TYPE="${EKS_LABS_AMI_TYPE:-AL2023_ARM_64_STANDARD}"
+export EKS_LABS_DESIRED="${EKS_LABS_DESIRED:-1}"
+export EKS_LABS_MAX="${EKS_LABS_MAX:-1}"
+# Learner node density (VPC CNI prefix delegation). Keep in sync with
+# karpenter/nodepool.yaml. kube-reserved memory = 11 × maxPods + 255 Mi.
+# 42 pods on t4g.medium = 4 DaemonSets + 38 learner slots (each 40m / 64Mi at limit).
+export EKS_LABS_MAX_PODS="${EKS_LABS_MAX_PODS:-42}"
+export EKS_LABS_KUBE_RESERVED_MEMORY="${EKS_LABS_KUBE_RESERVED_MEMORY:-$(( 11 * EKS_LABS_MAX_PODS + 255 ))Mi}"
+export EKS_LABS_LAUNCH_TEMPLATE="${EKS_LABS_LAUNCH_TEMPLATE:-${EKS_CLUSTER_NAME:-devlabs}-labs-k8s}"
+
+# VPC CNI add-on configuration (prefix delegation: /28 per ENI slot).
+# MINIMUM_IP_TARGET=80 keeps 5 prefixes per node: 42 pods plus the IPs of just-deleted pods,
+# which stay unusable for IP_COOLDOWN_PERIOD (30 s). With only one spare prefix, bursts of
+# pod churn (balloons replaced by learner pods) waited ~40 s for an IP.
+_default_vpc_cni_config='{"env":{"ENABLE_PREFIX_DELEGATION":"true","MINIMUM_IP_TARGET":"80","WARM_IP_TARGET":"16"}}'
+export EKS_VPC_CNI_CONFIG="${EKS_VPC_CNI_CONFIG:-$_default_vpc_cni_config}"
+unset _default_vpc_cni_config
+
 export EKS_NODE_DISK_GB="${EKS_NODE_DISK_GB:-25}"
+
+# Karpenter (elastic learner nodes on top of labs-k8s); see eks-karpenter.sh
+export KARPENTER_VERSION="${KARPENTER_VERSION:-1.14.1}"
+# Kyverno (injects karpenter.sh/do-not-disrupt on learner pods); see eks-kyverno.sh
+export KYVERNO_CHART_VERSION="${KYVERNO_CHART_VERSION:-3.9.1}"
 
 # Where to write kubeconfig (EC2 host path used by compose)
 export EKS_KUBECONFIG_OUT="${EKS_KUBECONFIG_OUT:-./kube/k8s-lab.kubeconfig}"
@@ -45,6 +78,30 @@ eks_need_aws() {
 eks_csv_to_lines() {
   local csv="$1"
   echo "$csv" | tr ',' '\n' | sed '/^[[:space:]]*$/d'
+}
+
+# Per-node-group settings: eks_ng <field> <nodegroup>
+# fields: instance-type | ami-type | labels | taints | desired | min | max
+eks_ng() {
+  local field="$1" ng="$2" prefix
+  case "$ng" in
+    system-k8s) prefix=SYSTEM ;;
+    labs-k8s) prefix=LABS ;;
+    *) echo "unknown nodegroup: $ng (add it to eks_ng in env.sh)" >&2; return 1 ;;
+  esac
+  local var
+  case "$field" in
+    instance-type) var="EKS_${prefix}_INSTANCE_TYPE"; echo "${!var}" ;;
+    ami-type) var="EKS_${prefix}_AMI_TYPE"; echo "${!var}" ;;
+    labels) [[ "$ng" == labs-k8s ]] && echo "devlabs.io/pool=labs" || echo "devlabs.io/pool=system" ;;
+    # Learner pods carry no tolerations, so this keeps them off system nodes.
+    # EKS add-ons (coredns, ebs-csi, metrics-server, snapshot-controller) tolerate it.
+    taints) [[ "$ng" == system-k8s ]] && echo "key=CriticalAddonsOnly,value=true,effect=NO_SCHEDULE" || echo "" ;;
+    desired) var="EKS_${prefix}_DESIRED"; echo "${EKS_WAKE_DESIRED:-${!var}}" ;;
+    min) var="EKS_${prefix}_DESIRED"; echo "${EKS_WAKE_MIN:-${!var}}" ;;
+    max) var="EKS_${prefix}_MAX"; echo "${EKS_WAKE_MAX:-${!var}}" ;;
+    *) echo "unknown field: $field" >&2; return 1 ;;
+  esac
 }
 
 eks_cluster_exists() {

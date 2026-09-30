@@ -108,12 +108,35 @@ async function assertCanStart({
   }
 }
 
+type LeaseMovedListener = (sessionId: string, clientId: string) => void;
+const leaseMovedListeners = new Set<LeaseMovedListener>();
+
+/** Called when a different tab takes a session's lease (forced or after the old one lapsed). */
+function onLeaseMoved(listener: LeaseMovedListener): void {
+  leaseMovedListeners.add(listener);
+}
+
 /** Claim / refresh this tab's lease. Returns false when another live tab holds it. */
 function heartbeat(sessionId: string, clientId: string | null, force = false): boolean {
   if (!clientId) return true;
   if (!force && leaseHeldByOther(sessionId, clientId)) return false;
+  const prev = leases.get(sessionId);
   leases.set(sessionId, { clientId, seenAt: Date.now() });
+  if (prev && prev.clientId !== clientId) {
+    for (const listener of leaseMovedListeners) {
+      try {
+        listener(sessionId, clientId);
+      } catch (err: unknown) {
+        console.warn(`[session-exclusivity] lease-moved listener failed: ${(err as Error).message}`);
+      }
+    }
+  }
   return true;
+}
+
+/** False only when another live tab holds the lease; unknown clients are let through. */
+function isLeaseHolder(sessionId: string, clientId: string | null): boolean {
+  return !leaseHeldByOther(sessionId, clientId);
 }
 
 function release(sessionId: string, clientId?: string | null): void {
@@ -127,5 +150,7 @@ module.exports = {
   LEASE_TTL_MS,
   assertCanStart,
   heartbeat,
+  isLeaseHolder,
+  onLeaseMoved,
   release,
 };

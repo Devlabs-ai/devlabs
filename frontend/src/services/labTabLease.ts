@@ -1,16 +1,63 @@
 import axios from 'axios';
 import { getAuthHeader } from './authApi';
 
+type LeaseGlobals = {
+  __devlabsLabClientId?: string;
+  __devlabsLabInterceptors?: { request: number; response: number };
+};
+const leaseGlobals: LeaseGlobals = typeof window !== 'undefined' ? (window as LeaseGlobals) : {};
+
 /**
  * Per page-load id (not sessionStorage: a duplicated tab copies sessionStorage,
  * which would let two tabs share one lease). Reloads release via sendBeacon.
+ * Kept on window so a hot module reload does not give the same tab a second id.
  */
-const CLIENT_ID: string =
-  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const CLIENT_ID: string = leaseGlobals.__devlabsLabClientId
+  || (leaseGlobals.__devlabsLabClientId =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
 export const LAB_HEARTBEAT_MS = 15_000;
+
+/** Fired when the backend rejects this tab because another tab now holds the lab. */
+export const LAB_LEASE_TAKEN_EVENT = 'devlabs:lab-lease-taken';
+/** Fired when this tab learns its lab session was ended elsewhere. */
+export const LAB_SESSION_ENDED_EVENT = 'devlabs:lab-session-ended';
+/** Fired after this tab takes the lab back, so the workspace can reconnect its terminal. */
+export const LAB_LEASE_RECLAIMED_EVENT = 'devlabs:lab-lease-reclaimed';
+
+const SESSION_API = /^\/api\/session\//;
+const LEASE_EXEMPT = /\/(start|heartbeat|lease\/release)$/;
+
+if (leaseGlobals.__devlabsLabInterceptors) {
+  axios.interceptors.request.eject(leaseGlobals.__devlabsLabInterceptors.request);
+  axios.interceptors.response.eject(leaseGlobals.__devlabsLabInterceptors.response);
+}
+
+// Lets the backend refuse lab changes from a tab that no longer holds the lab.
+const requestInterceptor = axios.interceptors.request.use((config) => {
+  if (config.url && SESSION_API.test(config.url)) {
+    config.headers.set('X-Lab-Client', CLIENT_ID);
+  }
+  return config;
+});
+
+const responseInterceptor = axios.interceptors.response.use(undefined, (error) => {
+  const url: string = error?.config?.url || '';
+  if (
+    error?.response?.status === 409
+    && error.response.data?.code === 'LAB_OPEN_IN_OTHER_TAB'
+    && SESSION_API.test(url)
+    && !LEASE_EXEMPT.test(url)
+    && typeof window !== 'undefined'
+  ) {
+    window.dispatchEvent(new Event(LAB_LEASE_TAKEN_EVENT));
+  }
+  return Promise.reject(error);
+});
+
+leaseGlobals.__devlabsLabInterceptors = { request: requestInterceptor, response: responseInterceptor };
 
 export type LabConflictCode = 'ACTIVE_LAB_ELSEWHERE' | 'LAB_OPEN_IN_OTHER_TAB';
 
@@ -22,6 +69,10 @@ export interface LabConflict {
 
 export function labClientId(): string {
   return CLIENT_ID;
+}
+
+export function withLabClientId(url: string): string {
+  return `${url}${url.includes('?') ? '&' : '?'}clientId=${encodeURIComponent(CLIENT_ID)}`;
 }
 
 /** Recognise a 409 from a lab start call. */

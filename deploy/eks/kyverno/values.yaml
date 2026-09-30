@@ -1,0 +1,32 @@
+# Kyverno is only used to mutate learner pods on admission (learner-do-not-disrupt.yaml),
+# so everything except the admission controller is off. Runs on system-k8s.
+global:
+  nodeSelector:
+    kubernetes.io/os: linux
+    devlabs.io/pool: system
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+
+# Lets MutatingPolicy compile to a native MutatingAdmissionPolicy (GA in K8s 1.36),
+# enforced by the API server itself even while the Kyverno pod is down.
+features:
+  generateMutatingAdmissionPolicy:
+    enabled: true
+  # Reports are off with the reports controller; don't generate them for admission.
+  admissionReports:
+    enabled: false
+  policyReports:
+    enabled: false
+
+admissionController:
+  replicas: 1
+
+backgroundController:
+  enabled: false
+
+cleanupController:
+  enabled: false
+
+reportsController:
+  enabled: false

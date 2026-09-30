@@ -9,15 +9,25 @@ import SolutionGateModal, { hasAcknowledgedSolution } from './SolutionGateModal'
 import ConfirmDialog from './ConfirmDialog';
 import BriefBackButton from './BriefBackButton';
 import WorkspaceMobileSwitcher, { type WorkspaceMobilePane } from './WorkspaceMobileSwitcher';
+import DesktopOnlyNotice from './DesktopOnlyNotice';
 import { IconPen, IconSubmit } from './ChromeIcons';
 import { useIsNarrowUi } from '../hooks/useMediaQuery';
 import { fetchChallenge, fetchChallengeSolution } from '../services/challengeApi';
 import { isAdminUser, isReviewStaff, getCurrentUser } from '../services/authApi';
 import { readMigrating, writeMigrating } from '../utils/storageMigrate';
 import {
+  LAB_LEASE_RECLAIMED_EVENT,
+  LAB_LEASE_TAKEN_EVENT,
+  LAB_SESSION_ENDED_EVENT,
+  sendLabHeartbeat,
+  withLabClientId,
+} from '../services/labTabLease';
+import {
+  fetchK8sCapacity,
   fetchK8sSubmissions,
   gradeK8sSession,
   resetK8sSession,
+  type K8sCapacityState,
   type K8sSubmissionRecord,
 } from '../services/workspaceApi';
 import type { ActiveSession, ChallengeFull, ChallengePublic } from '../types/domain';
@@ -61,6 +71,39 @@ type EvalResult = {
   stderr: string;
   at: number;
 };
+
+const CAPACITY_POLL_MS = 3000;
+/** Typical Karpenter node boot, shown to learners as the expected wait. */
+const NODE_BOOT_SECONDS = 40;
+
+/** Poll capacity waits (lab open held, pods waiting for a node) while the lab is open. */
+function useCapacity(): K8sCapacityState {
+  const [state, setState] = useState<K8sCapacityState>({ waiting: [], reservingSeconds: null });
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async (): Promise<void> => {
+      try {
+        const next = await fetchK8sCapacity();
+        if (!cancelled) setState(next);
+      } catch {
+        /* keep the last value; the notice is best-effort */
+      }
+      if (!cancelled) timer = window.setTimeout(() => void poll(), CAPACITY_POLL_MS);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
+  return state;
+}
+
+function capacityEta(waitedSeconds: number): string {
+  const left = NODE_BOOT_SECONDS - waitedSeconds;
+  return left > 5 ? `about ${left} s` : 'a few more seconds';
+}
 
 const RESULTS_DRAWER_DEFAULT = 280;
 const RESULTS_DRAWER_MIN = 140;
@@ -113,12 +156,33 @@ export default function K8sLabWorkspace({
   const [busy, setBusy] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [evalResult, setEvalResult] = useState<EvalResult | null>(null);
+  const capacity = useCapacity();
+  const capacityWaits = capacity.waiting;
+  const capacityWaitedSeconds = Math.max(
+    capacity.reservingSeconds ?? 0,
+    ...capacityWaits.map((w) => w.waitingSeconds),
+  );
+  const openingHeldForCapacity = capacity.reservingSeconds !== null || capacityWaits.length > 0;
 
   const wsUrl = useMemo(() => {
     if (!labReady || !session.id || session.id.startsWith('pending-k8s-')) return '';
-    const base = session.terminalWsUrl || k8sTerminalWsUrl(session.id);
-    return `${base}${base.includes('?') ? '&' : '?'}v=${termEpoch}`;
+    const base = withLabClientId(session.terminalWsUrl || k8sTerminalWsUrl(session.id));
+    return `${base}&v=${termEpoch}`;
   }, [labReady, session.terminalWsUrl, session.id, termEpoch]);
+
+  useEffect(() => {
+    const onReclaimed = (): void => setTermEpoch((n) => n + 1);
+    window.addEventListener(LAB_LEASE_RECLAIMED_EVENT, onReclaimed);
+    return () => window.removeEventListener(LAB_LEASE_RECLAIMED_EVENT, onReclaimed);
+  }, []);
+
+  const onTerminalDisconnect = (): void => {
+    if (!session.id || session.id.startsWith('pending-k8s-')) return;
+    void sendLabHeartbeat(session.id).then((result) => {
+      if (result === 'taken') window.dispatchEvent(new Event(LAB_LEASE_TAKEN_EVENT));
+      if (result === 'ended') window.dispatchEvent(new Event(LAB_SESSION_ENDED_EVENT));
+    });
+  };
 
   const prevLabReady = useRef(labReady);
   useEffect(() => {
@@ -573,7 +637,10 @@ export default function K8sLabWorkspace({
         </button>
       )}
 
-      {showWorkspace && (
+      {showWorkspace && isNarrow && (
+        <DesktopOnlyNotice tools="terminal and editor" onShowBrief={() => setMobilePane('brief')} />
+      )}
+      {showWorkspace && !isNarrow && (
       <div className="col col-main">
         <div className="panel spark-ide-panel" style={{ flex: 1 }}>
           <div className="spark-ide-actionbar">
@@ -669,14 +736,44 @@ export default function K8sLabWorkspace({
                 <div className="k8s-lab-terminal-warming" role="status" aria-live="polite">
                   <span className="spinner" />
                   <div>
-                    <strong>Preparing your cluster terminal…</strong>
-                    <p>
-                      Keep drafting in the Editor — the shell opens here as soon as your namespace is ready.
-                    </p>
+                    {openingHeldForCapacity ? (
+                      <>
+                        <strong>Adding cluster capacity for your lab…</strong>
+                        <p>
+                          The cluster is busy, so a node is starting for your lab&apos;s pods
+                          ({capacityEta(capacityWaitedSeconds)}). The shell opens here as soon as they are placed.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <strong>Preparing your cluster terminal…</strong>
+                        <p>
+                          Keep drafting in the Editor — the shell opens here as soon as your namespace is ready.
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
               ) : (
-                <TerminalPanel wsUrl={wsUrl} isActive={mainTab === 'terminal'} resizeProtocol />
+                <>
+                  {capacityWaits.length > 0 && (
+                    <div className="k8s-lab-capacity-notice" role="status" aria-live="polite">
+                      <span className="spinner" />
+                      <span>
+                        Starting extra capacity for{' '}
+                        <code>{capacityWaits.map((w) => w.pod).join(', ')}</code>
+                        {' '}— {capacityEta(capacityWaitedSeconds)}. Your lab&apos;s reserved pods are in use;
+                        this starts automatically and your other pods are unaffected.
+                      </span>
+                    </div>
+                  )}
+                  <TerminalPanel
+                    wsUrl={wsUrl}
+                    isActive={mainTab === 'terminal'}
+                    resizeProtocol
+                    onDisconnect={onTerminalDisconnect}
+                  />
+                </>
               )}
             </div>
             <div

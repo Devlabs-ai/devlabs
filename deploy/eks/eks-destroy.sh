@@ -32,6 +32,28 @@ if [[ "$YES" -ne 1 ]]; then
   fi
 fi
 
+# Karpenter nodes are plain EC2 instances outside the node groups, so the cluster
+# delete would orphan them. Remove balloons (else draining nodes make them Pending and
+# Karpenter buys a node mid-destroy), then NodePools (Karpenter terminates its nodes),
+# then the controller.
+export KUBECONFIG="${KUBECONFIG:-$EKS_KUBECONFIG_OUT}"
+if kubectl get crd nodepools.karpenter.sh >/dev/null 2>&1; then
+  echo "==> removing Karpenter capacity (balloons, NodePools, NodeClaims)"
+  kubectl -n dl-system delete deploy dl-balloon dl-balloon-reserved --ignore-not-found --wait=true
+  kubectl delete nodepools --all --wait=true --timeout=10m
+  kubectl wait --for=delete nodeclaims --all --timeout=10m 2>/dev/null || true
+  helm uninstall karpenter -n kube-system --wait 2>/dev/null || true
+fi
+KARPENTER_IDS="$(aws ec2 describe-instances --region "$AWS_REGION" \
+  --filters "Name=tag-key,Values=karpenter.sh/nodepool" "Name=tag-key,Values=kubernetes.io/cluster/${EKS_CLUSTER_NAME}" \
+            "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+  --query 'Reservations[].Instances[].InstanceId' --output text)"
+if [[ -n "$KARPENTER_IDS" ]]; then
+  echo "==> terminating leftover Karpenter instances: $KARPENTER_IDS"
+  # shellcheck disable=SC2086
+  aws ec2 terminate-instances --region "$AWS_REGION" --instance-ids $KARPENTER_IDS >/dev/null
+fi
+
 echo "==> deleting node groups"
 while IFS= read -r ng; do
   [[ -z "$ng" ]] && continue
@@ -70,4 +92,8 @@ echo "==> waiting for cluster delete"
 aws eks wait cluster-deleted --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION" 2>/dev/null || true
 
 echo "==> destroyed"
-echo "    Recreate later with: ./deploy/eks/eks-recreate.sh && ./deploy/eks/eks-wake.sh"
+echo "    Recreate later, in order:"
+echo "      ./deploy/eks/eks-recreate.sh && ./deploy/eks/eks-wake.sh"
+echo "      ./deploy/eks/eks-addon-placement.sh && ./deploy/eks/eks-karpenter.sh"
+echo "      ./deploy/eks/eks-kyverno.sh && ./deploy/eks/eks-admission.sh"
+echo "    Then copy the new kubeconfig to the App EC2 and restart the backend."

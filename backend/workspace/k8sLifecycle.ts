@@ -1,6 +1,6 @@
 'use strict';
 
-import type { GameSession } from '../types/domain';
+import type { GameSession, K8sPlatformSpec } from '../types/domain';
 
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../db/pool');
@@ -8,6 +8,7 @@ const sessionStore = require('../db/sessionStore');
 const workspaceStore = require('./workspaceStore');
 const loader = require('../challenges/loader');
 const k8s = require('./k8sCluster');
+const capacity = require('./k8sCapacity');
 
 interface StartK8sOpts {
   challengeId: string;
@@ -23,30 +24,8 @@ export type StartK8sResult = {
   provisioned: boolean;
 };
 
-function platformSpecOf(challengeId: string): {
-  quota?: { pods?: string; cpu?: string; memory?: string };
-  limitRange?: {
-    defaultRequest?: { cpu?: string; memory?: string };
-    default?: { cpu?: string; memory?: string };
-    max?: { cpu?: string; memory?: string };
-    min?: { cpu?: string; memory?: string };
-  };
-  setup?: { script?: string };
-  grade?: { script?: string; timeoutSeconds?: number };
-} {
-  const c = loader.getChallenge(challengeId) as {
-    k8sPlatform?: {
-      quota?: { pods?: string; cpu?: string; memory?: string };
-      limitRange?: {
-        defaultRequest?: { cpu?: string; memory?: string };
-        default?: { cpu?: string; memory?: string };
-        max?: { cpu?: string; memory?: string };
-        min?: { cpu?: string; memory?: string };
-      };
-      setup?: { script?: string };
-      grade?: { script?: string; timeoutSeconds?: number };
-    };
-  } | null;
+function platformSpecOf(challengeId: string): K8sPlatformSpec {
+  const c = loader.getChallenge(challengeId) as { k8sPlatform?: K8sPlatformSpec } | null;
   return c?.k8sPlatform || {};
 }
 
@@ -190,12 +169,15 @@ async function provision(
 ): Promise<boolean> {
   const spec = platformSpecOf(challengeId);
   await ensureCleanSlate(ns, challengeId, forceSetup, spec);
+  // The session is already active, so this reserves the lab's slots before setup runs.
+  await capacity.waitForReservation(ns);
 
   if (!forceSetup) {
     // Resume: re-apply parked namespace state from last session end.
     const restored = await k8s.restoreChallengeSnapshot(ns, challengeId);
     if (restored) {
       await k8s.markChallengeSetup(ns, challengeId);
+      await capacity.waitForPodsScheduled(ns);
       return true;
     }
     // Do not skip setup just because the NS annotation is set — a prior open can
@@ -213,7 +195,15 @@ async function provision(
     throw Object.assign(new Error(`Lab setup failed: ${msg}`), { status: 502 });
   }
   await k8s.markChallengeSetup(ns, challengeId);
+  // The start response (and so the terminal) waits until setup pods have a node.
+  await capacity.waitForPodsScheduled(ns);
   return true;
+}
+
+/** The learner's namespace, as startK8sSession derives it. */
+function namespaceFor(userId: string | null, userName: string | null): string {
+  const owner = workspaceStore.sanitizeOwner(userId || 'anonymous');
+  return k8s.learnerNamespace(userName || owner);
 }
 
 async function startK8sSession({
@@ -235,9 +225,19 @@ async function startK8sSession({
   }
 
   const owner = workspaceStore.sanitizeOwner(userId || candidateName || 'anonymous');
-  const ns = k8s.learnerNamespace(userName || candidateName || owner);
+  const ns = namespaceFor(userId || candidateName, userName || candidateName);
 
   const existing = await findExistingK8sSession(challengeId, owner);
+  if (existing && existing.status === 'active') {
+    // Still live (another tab, a reload, or leaving without ending): its objects
+    // are in the namespace and not parked, so resume as-is. Waiting on the lock
+    // lets an open that is still provisioning finish first.
+    await withNsLock(ns, async () => undefined);
+    if (existing.status === 'active') {
+      existing.lastActivityAt = Date.now();
+      return { session: existing, created: false, provisioned: false };
+    }
+  }
   if (existing) {
     existing.status = 'active';
     existing.endTime = null;
@@ -331,6 +331,7 @@ async function endK8sSession(sessionId: string): Promise<GameSession> {
   session.status = 'ended';
   session.endTime = Date.now();
   await sessionStore.persistRow(session);
+  void capacity.nudge();
 
   if (ns && challengeId) {
     void withNsLock(ns, () => park(ns, challengeId)).catch((err: unknown) => {
@@ -343,6 +344,7 @@ async function endK8sSession(sessionId: string): Promise<GameSession> {
 }
 
 module.exports = {
+  namespaceFor,
   startK8sSession,
   resetK8sSession,
   endK8sSession,

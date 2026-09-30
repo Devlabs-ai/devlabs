@@ -31,9 +31,15 @@
   },
   "platformSpec": {
     "quota": {
-      "pods": "10",
-      "cpu": "1250m",
-      "memory": "1280Mi"
+      "pods": "7",
+      "requests": {
+        "cpu": "460m",
+        "memory": "608Mi"
+      },
+      "limits": {
+        "cpu": "1300m",
+        "memory": "1408Mi"
+      }
     },
     "setup": {
       "script": "setup.sh"
@@ -44,7 +50,7 @@
     },
     "limitRange": {
       "defaultRequest": {
-        "cpu": "25m",
+        "cpu": "20m",
         "memory": "32Mi"
       },
       "default": {
@@ -55,7 +61,8 @@
         "cpu": "500m",
         "memory": "512Mi"
       }
-    }
+    },
+    "slotsPerPod": 3
   },
   "visibleTo": "reviewers",
   "tokens": 15

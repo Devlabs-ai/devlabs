@@ -11,6 +11,7 @@ const sparkLifecycle = require('../workspace/sparkLifecycle');
 const sparkJobs = require('../workspace/sparkJobs');
 const boardLifecycle = require('../workspace/boardLifecycle');
 const k8sLifecycle = require('../workspace/k8sLifecycle');
+const k8sCapacity = require('../workspace/k8sCapacity');
 const k8sGrade = require('../workspace/k8sGrade');
 const k8sCluster = require('../workspace/k8sCluster');
 const k8sLabFiles = require('../workspace/k8sLabFiles');
@@ -28,10 +29,22 @@ const { handleBrowse, listBrowseServices } = require('../sandbox/sessionBrowsePr
 const router = express.Router();
 
 /** Any /:id session traffic counts as activity (keeps idle timer fresh). */
-router.param('id', (req: ExpressRequest, _res: ExpressResponse, next: ExpressNextFunction, id: string) => {
+router.param('id', (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction, id: string) => {
   const p = String(req.path || '');
+  const leaseRoute = p.endsWith('/heartbeat') || p.endsWith('/lease/release');
+  // A tab that lost the lab to another tab may still read, but not change it.
+  if (id && !leaseRoute && req.method !== 'GET' && req.method !== 'HEAD') {
+    const header = req.headers['x-lab-client'];
+    const clientId = typeof header === 'string' && header.trim() ? header.trim().slice(0, 128) : null;
+    if (!sessionExclusivity.isLeaseHolder(id, clientId)) {
+      return res.status(409).json({
+        error: 'This lab is open in another tab or window.',
+        code: 'LAB_OPEN_IN_OTHER_TAB',
+      });
+    }
+  }
   // Tab heartbeats prove the tab is open, not that the learner is active.
-  if (id && !p.endsWith('/end') && !p.endsWith('/heartbeat') && !p.endsWith('/lease/release')) {
+  if (id && !p.endsWith('/end') && !leaseRoute) {
     sessionIdle.touch(id);
   }
   next();
@@ -454,6 +467,16 @@ router.post('/k8s/start', requireSessionAccess, async (req: ExpressRequest, res:
   } catch (e) {
     sendStartError(e, res, next);
   }
+});
+
+// GET /api/session/k8s/capacity — the learner's pods waiting for a node (also while
+// /k8s/start is still in flight, before the client has a session id).
+router.get('/k8s/capacity', requireSessionAccess, (req: ExpressRequest, res: ExpressResponse) => {
+  const user = req.user as { sub?: string; id?: string; email?: string } | undefined;
+  const email = String(user?.email || '').trim().toLowerCase();
+  const userName = email.includes('@') ? email.slice(0, email.indexOf('@')) : (email || null);
+  const ns = k8sLifecycle.namespaceFor(user?.sub || user?.id || null, userName);
+  res.json({ waiting: k8sCapacity.waitingPods(ns), reservingSeconds: k8sCapacity.reservingSeconds(ns) });
 });
 
 router.post('/:id/k8s/reset', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {

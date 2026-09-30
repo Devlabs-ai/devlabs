@@ -1,0 +1,37 @@
+# Karpenter never evicts a pod annotated karpenter.sh/do-not-disrupt and never removes a
+# node running one, so consolidation (WhenEmptyOrUnderutilized) can still repack
+# unannotated pods (e.g. balloons) without restarting a learner's lab mid-session.
+# Learners create pods themselves, so the annotation is injected here.
+apiVersion: policies.kyverno.io/v1
+kind: MutatingPolicy
+metadata:
+  name: learner-pods-do-not-disrupt
+spec:
+  # Pods admitted while enforcement is unavailable just lack the annotation;
+  # never block learners from creating pods.
+  failurePolicy: Ignore
+  autogen:
+    # Mutate Pods only; don't rewrite learners' Deployment / Job templates.
+    podControllers:
+      controllers: []
+    # Compile to a native MutatingAdmissionPolicy (API server enforces it, no webhook hop).
+    mutatingAdmissionPolicy:
+      enabled: true
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  matchConditions:
+    - name: learner-namespace
+      expression: "request.namespace.startsWith('ns-')"
+  mutations:
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{
+            metadata: Object.metadata{
+              annotations: {"karpenter.sh/do-not-disrupt": "true"}
+            }
+          }
