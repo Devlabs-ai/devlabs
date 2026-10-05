@@ -44,6 +44,26 @@ function isAbandoned(sub: SubscriptionRow, now: number): boolean {
   return sub.status === 'created' && now - sub.createdAt > REUSE_CREATED_MS;
 }
 
+/**
+ * An unpaid checkout is only reusable if Razorpay still knows it under the
+ * current key and it is still unpaid; otherwise retire it so a fresh one is made.
+ */
+async function stillReusable(row: SubscriptionRow): Promise<boolean> {
+  try {
+    if (row.razorpayOrderId) {
+      const order: RazorpayOrder = await razorpay.fetchOrder(row.razorpayOrderId);
+      if (order.status === 'created') return true;
+    } else if (row.razorpaySubscriptionId) {
+      const sub: RazorpaySubscription = await razorpay.fetchSubscription(row.razorpaySubscriptionId);
+      if (sub.status === 'created') return true;
+    }
+  } catch (_e) {
+    // Unknown to this key (test vs live) or otherwise unreachable.
+  }
+  await store.markAbandoned(row.id);
+  return false;
+}
+
 function publicSubscription(sub: SubscriptionRow): Record<string, unknown> {
   return {
     id: sub.id,
@@ -135,9 +155,10 @@ router.post(
 
       const now = Date.now();
       const existing: SubscriptionRow[] = await store.listForUser(uid);
-      const reusable = existing.find(
+      let reusable = existing.find(
         (s) => s.planId === plan.id && s.status === 'created' && !isAbandoned(s, now),
       );
+      if (reusable && !(await stillReusable(reusable))) reusable = undefined;
 
       let sub: SubscriptionRow = reusable as SubscriptionRow;
       if (!sub) {
@@ -252,6 +273,7 @@ router.post('/orders', requireInterviewer, async (req: ExpressRequest, res: Expr
     let pass: SubscriptionRow | undefined = existing.find(
       (s) => s.kind === 'one_time' && s.planId === plan.id && s.status === 'created' && !isAbandoned(s, now),
     );
+    if (pass && !(await stillReusable(pass))) pass = undefined;
     if (!pass) {
       const offer = plans.launchOffer();
       const offerPercent = offer && !(await store.hasPaidBefore(uid, plan.id)) ? offer.percentOff : 0;

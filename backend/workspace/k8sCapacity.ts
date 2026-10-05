@@ -220,8 +220,10 @@ function nudge(): Promise<void> {
         lastError = '';
       } catch (err) {
         const msg = (err as Error).message || String(err);
-        if (msg !== lastError) console.warn(`[k8s-capacity] reconcile failed: ${msg}`);
-        lastError = msg;
+        // kubectl prefixes each line with a timestamp and pid; compare without them.
+        const key = msg.replace(/^[EWIF]\d{4} [\d:.]+\s+\d+ /gm, '');
+        if (key !== lastError) console.warn(`[k8s-capacity] reconcile failed: ${msg}`);
+        lastError = key;
       }
     } while (again);
   })().finally(() => {

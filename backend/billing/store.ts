@@ -226,6 +226,14 @@ async function extendPaidUntil(subscriptionId: string, untilMs: number | null): 
   );
 }
 
+/** Unpaid checkout that can't be reused (e.g. created under a different Razorpay key). */
+async function markAbandoned(id: string): Promise<void> {
+  await pool.query(
+    `UPDATE subscriptions SET status = 'abandoned', updated_at = $2 WHERE id = $1 AND status = 'created'`,
+    [id, Date.now()],
+  );
+}
+
 async function markCancelRequested(subscriptionId: string): Promise<void> {
   await pool.query(
     `UPDATE subscriptions SET cancel_requested = true, updated_at = $2 WHERE id = $1`,
@@ -322,6 +330,7 @@ module.exports = {
   hasPaidBefore,
   syncFromRazorpay,
   extendPaidUntil,
+  markAbandoned,
   markCancelRequested,
   recordPayment,
   listPaymentsForUser,

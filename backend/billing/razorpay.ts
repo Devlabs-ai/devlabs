@@ -122,6 +122,10 @@ export interface RazorpayOrder {
   status: string;
 }
 
+function fetchOrder(id: string): Promise<RazorpayOrder> {
+  return request<RazorpayOrder>('GET', `/orders/${encodeURIComponent(id)}`);
+}
+
 function createOrder(params: {
   amountPaise: number;
   receipt: string;
@@ -193,6 +197,7 @@ module.exports = {
   cancelSubscription,
   fetchPayment,
   capturePayment,
+  fetchOrder,
   createOrder,
   createPlan,
   verifyCheckoutSignature,
