@@ -2,8 +2,8 @@
 
 import { PLAYGROUND_CLUSTERS, PLAYGROUND_TABLES } from './playgroundDatasets';
 
-export const PLAYGROUNDS_PATH = '/play/playgrounds';
-export const SPARK_PLAYGROUND_PATH = '/play/spark-playground';
+export const PLAYGROUNDS_PATH = '/track/playgrounds';
+export const SPARK_PLAYGROUND_PATH = '/track/spark-playground';
 
 export interface PlaygroundEntry {
   id: string;

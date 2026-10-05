@@ -10,9 +10,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=env.sh
 source "$ROOT/env.sh"
+# shellcheck source=nodegroups.sh
+source "$ROOT/nodegroups.sh"
 eks_need_aws
-
-IFS=',' read -r -a SUBNETS <<< "$EKS_SUBNET_IDS"
 
 create_cluster_if_needed() {
   if eks_cluster_exists; then
@@ -31,31 +31,6 @@ create_cluster_if_needed() {
   eks_wait_cluster_active
 }
 
-ensure_nodegroup() {
-  local ng="$1"
-  if aws eks describe-nodegroup \
-    --cluster-name "$EKS_CLUSTER_NAME" \
-    --nodegroup-name "$ng" \
-    --region "$AWS_REGION" >/dev/null 2>&1; then
-    echo "==> nodegroup $ng already exists"
-    return
-  fi
-  echo "==> creating nodegroup $ng ($EKS_NODE_INSTANCE_TYPE, desired=0)"
-  aws eks create-nodegroup \
-    --cluster-name "$EKS_CLUSTER_NAME" \
-    --nodegroup-name "$ng" \
-    --region "$AWS_REGION" \
-    --node-role "$EKS_NODE_ROLE_ARN" \
-    --subnets "${SUBNETS[@]}" \
-    --instance-types "$EKS_NODE_INSTANCE_TYPE" \
-    --ami-type AL2023_x86_64_STANDARD \
-    --capacity-type ON_DEMAND \
-    --disk-size "$EKS_NODE_DISK_GB" \
-    --scaling-config minSize=0,maxSize="${EKS_WAKE_MAX}",desiredSize=0 \
-    >/dev/null
-  eks_wait_nodegroup_active "$ng"
-}
-
 ensure_addon() {
   local addon="$1"
   if aws eks describe-addon \
@@ -66,7 +41,14 @@ ensure_addon() {
     return
   fi
   echo "==> creating addon $addon"
-  if [[ "$addon" == "aws-ebs-csi-driver" ]]; then
+  if [[ "$addon" == "vpc-cni" ]]; then
+    aws eks create-addon \
+      --cluster-name "$EKS_CLUSTER_NAME" \
+      --addon-name "$addon" \
+      --region "$AWS_REGION" \
+      --configuration-values "$EKS_VPC_CNI_CONFIG" \
+      --resolve-conflicts OVERWRITE >/dev/null || true
+  elif [[ "$addon" == "aws-ebs-csi-driver" ]]; then
     # Pod Identity is required; without it ebs-plugin CrashLoops (no IMDS/IRSA creds).
     aws eks create-addon \
       --cluster-name "$EKS_CLUSTER_NAME" \
@@ -81,6 +63,23 @@ ensure_addon() {
       --region "$AWS_REGION" \
       --resolve-conflicts OVERWRITE >/dev/null || true
   fi
+}
+
+# Idempotent: applies prefix delegation to an existing vpc-cni add-on. Only newly
+# launched nodes use it cleanly; running nodes keep their secondary IPs.
+ensure_vpc_cni_config() {
+  local have
+  have="$(aws eks describe-addon --cluster-name "$EKS_CLUSTER_NAME" --region "$AWS_REGION" \
+    --addon-name vpc-cni --query 'addon.configurationValues' --output text 2>/dev/null || true)"
+  if [[ "$have" == "$EKS_VPC_CNI_CONFIG" ]]; then
+    echo "==> vpc-cni prefix delegation already configured"
+    return
+  fi
+  echo "==> vpc-cni: enable prefix delegation"
+  aws eks update-addon --cluster-name "$EKS_CLUSTER_NAME" --region "$AWS_REGION" \
+    --addon-name vpc-cni --configuration-values "$EKS_VPC_CNI_CONFIG" \
+    --resolve-conflicts PRESERVE >/dev/null
+  aws eks wait addon-active --cluster-name "$EKS_CLUSTER_NAME" --region "$AWS_REGION" --addon-name vpc-cni
 }
 
 # Idempotent: covers "addon already existed without association" (e.g. older recreates).
@@ -118,6 +117,7 @@ for addon in vpc-cni coredns kube-proxy eks-pod-identity-agent metrics-server aw
   ensure_addon "$addon"
 done
 
+ensure_vpc_cni_config
 ensure_ebs_csi_pod_identity
 
 "$ROOT/eks-access.sh"
@@ -125,6 +125,11 @@ ensure_ebs_csi_pod_identity
 
 echo ""
 echo "==> recreate complete"
-echo "    Nodes are Desired=0. Wake when you need labs:"
-echo "      ./deploy/eks/eks-wake.sh"
-echo "    Then restart backend on EC2 if kubeconfig path changed."
+echo "    Nodes are Desired=0. Then, in order (each needs the previous one):"
+echo "      ./deploy/eks/eks-wake.sh              # system-k8s + labs-k8s + labs-linux nodes"
+echo "      ./deploy/eks/eks-addon-placement.sh   # once a system-k8s node is Ready"
+echo "      ./deploy/eks/eks-karpenter.sh         # Karpenter, NodePool, balloons"
+echo "      ./deploy/eks/eks-kyverno.sh           # learner do-not-disrupt policy"
+echo "      ./deploy/eks/eks-admission.sh         # learner quota / LimitRange policies"
+echo "      ./deploy/eks/eks-linux.sh up          # labs-linux-elastic NodePool + NRI plugin"
+echo "    Then copy the new kubeconfig to the App EC2 and restart the backend (endpoint + CA change)."

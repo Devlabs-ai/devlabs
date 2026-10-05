@@ -4,6 +4,7 @@ import TerminalWorkspace from './TerminalWorkspace';
 import CodeEditor from './CodeEditor';
 import BrowserTab from './BrowserTab';
 import WorkspaceMobileSwitcher, { type WorkspaceMobilePane } from './WorkspaceMobileSwitcher';
+import DesktopOnlyNotice from './DesktopOnlyNotice';
 import { useIsNarrowUi } from '../hooks/useMediaQuery';
 import type { ChallengePublic, ChallengeFull, ActiveSession } from '../types/domain';
 
@@ -61,7 +62,10 @@ export default function SandboxWorkspace({
         </div>
       )}
 
-      {showWorkspace && (
+      {showWorkspace && isNarrow && (
+        <DesktopOnlyNotice tools="terminal and editor" onShowBrief={() => setMobilePane('brief')} />
+      )}
+      {showWorkspace && !isNarrow && (
         <div className="col col-main">
           <div className="panel" style={{ flex: 1 }}>
             <div className="panel-header">

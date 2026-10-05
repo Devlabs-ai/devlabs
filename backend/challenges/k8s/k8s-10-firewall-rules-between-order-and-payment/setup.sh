@@ -24,8 +24,11 @@ spec:
             - containerPort: 8000
           resources:
             requests:
-              cpu: "100m"
-              memory: "128Mi"
+              cpu: "20m"
+              memory: "32Mi"
+            limits:
+              cpu: "40m"
+              memory: "64Mi"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -48,7 +51,10 @@ spec:
             - containerPort: 8000
           resources:
             requests:
-              cpu: "100m"
-              memory: "128Mi"
+              cpu: "20m"
+              memory: "32Mi"
+            limits:
+              cpu: "40m"
+              memory: "64Mi"
 EOF
 echo "setup ok: order-processor + payment-handler seeded in ${LEARNER_NS}"

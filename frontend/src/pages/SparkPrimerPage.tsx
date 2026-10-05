@@ -7,7 +7,7 @@ import {
 } from '../constants/sparkPrimer';
 import { useIsAdmin } from '../components/AdminOnlyRoute';
 
-const PAPERS_PATH = '/play/papers';
+const PAPERS_PATH = '/track/papers';
 
 export default function SparkPrimerPage(): JSX.Element {
   const isAdmin = useIsAdmin();
@@ -19,9 +19,9 @@ export default function SparkPrimerPage(): JSX.Element {
       <article className="spark-primer-notebook">
         <header className="spark-primer-header">
           <p className="spark-primer-crumb">
-            <Link to="/play">Tracks</Link>
+            <Link to="/track">Tracks</Link>
             <span aria-hidden> / </span>
-            <Link to="/play/data-engineer">Data Engineer</Link>
+            <Link to="/track/data-engineer">Data Engineer</Link>
             <span aria-hidden> / </span>
             <Link to={SPARK_LABS_PATH}>Spark</Link>
             <span aria-hidden> / </span>

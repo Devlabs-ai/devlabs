@@ -1,0 +1,47 @@
+{
+  "id": "docker-20-memory-and-cpu-limits",
+  "number": 420,
+  "finalized": true,
+  "title": "Memory and CPU Limits",
+  "description": "**SITUATION:**\n\nLast week the daily report job ate all the memory on the order box and order-processor became unresponsive. From now on, every container gets limits.\n\nThe report job, `quickbyte/report-builder:1.0`, loads `REPORT_BATCH_MB` megabytes of orders into memory (default 300).\n\n**YOUR TASK:**\n\n1. Run the report with a 128 MiB limit and its default batch, and see what happens.\n2. Run it again so that it fits inside the same limit, also capping CPU and processes.\n3. Run order-processor with limits.\n\n**SPEC:**\n\n- `report-big`: `quickbyte/report-builder:1.0`, `--memory 128m`, default batch, **killed for running out of memory**\n- `~/answers/report-big-exit-code`: the exit code report-big stopped with\n- `report-small`: `quickbyte/report-builder:1.0`, `--memory 128m`, `--cpus 0.5`, `--pids-limit 64`, a `REPORT_BATCH_MB` that fits; finished with exit code 0 and printed `report done`\n- `order-processor`: `devsetu/order-processor:v1.2`, `--memory 256m`, `--cpus 1`, `--pids-limit 128`, **running**, host port `8080` → `8000`\n\n**GOOD PRACTICES:**\n\n- `docker inspect -f '{{.State.OOMKilled}}'` tells an out-of-memory kill apart from other failures.\n- Over its memory limit a container is killed; over its CPU limit it's only slowed down.\n- `docker stats` shows usage against limits.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "resources",
+    "oom",
+    "cgroups"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Memory and CPU Limits",
+    "brief": "Memory and CPU Limits",
+    "solution": "# Solution — Memory and CPU Limits\n\nWithout limits, a container can use all the memory and CPU of the machine. One runaway report job and order-processor (and the whole box) slows to a crawl, or the kernel starts killing random processes. Limits are the same **cgroups** you met in the Linux track; Docker just sets them for you.\n\nDocs: [Resource constraints](https://docs.docker.com/engine/containers/resource_constraints/)\n\n## Watch a job blow its limit\n\n```bash\ndocker run --name report-big --memory 128m quickbyte/report-builder:1.0\n# report-builder: loading 300 MB of orders\n# report-builder: 50 MB loaded\n# (silence: killed)\ndocker inspect -f 'OOMKilled={{.State.OOMKilled}} exit={{.State.ExitCode}}' report-big\n# OOMKilled=true exit=137\ndocker inspect -f '{{.State.ExitCode}}' report-big > ~/answers/report-big-exit-code\n```\n\n`137` = 128 + 9: killed by **SIGKILL**. The kernel's OOM killer gave the process no chance to clean up or log anything. `OOMKilled=true` is how you tell it apart from someone running `kill -9`. (In Kubernetes the same thing shows up as `OOMKilled` in `kubectl describe pod`.)\n\n## Make the work fit\n\n```bash\ndocker run --name report-small --memory 128m --cpus 0.5 --pids-limit 64 \\\n  -e REPORT_BATCH_MB=48 quickbyte/report-builder:1.0\n# report done: 48 MB processed\n```\n\n- `--memory 128m` is a hard limit. The Python interpreter itself needs ~15 MB, so a 48 MB batch leaves headroom; 120 MB wouldn't.\n- `--cpus 0.5` = at most half a CPU's time. Over the limit, the process is **throttled** (slowed down), not killed.\n- `--pids-limit 64` caps the number of processes and threads: a fork bomb or thread leak hits the wall instead of taking the box down.\n\n## Limit the long-running service too\n\n```bash\ndocker run -d --name order-processor -p 8080:8000 \\\n  --memory 256m --cpus 1 --pids-limit 128 devsetu/order-processor:v1.2\ndocker stats --no-stream             # MEM USAGE / LIMIT, CPU %, PIDS\n```\n\n`docker stats` is your `top` for containers. Size limits from what the app really uses under load, plus headroom. `docker update --memory ... --cpus ...` changes them on a running container.\n\nThen **Submit**.\n",
+    "idLabel": "20",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

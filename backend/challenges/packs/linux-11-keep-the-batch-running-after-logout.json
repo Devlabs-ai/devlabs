@@ -1,0 +1,46 @@
+{
+  "id": "linux-11-keep-the-batch-running-after-logout",
+  "number": 311,
+  "finalized": true,
+  "title": "Keep the Batch Running After Logout",
+  "description": "**SITUATION:**\n\nEvery night someone runs `/opt/order-processor/bin/batch-export` by hand to push the day's orders to the warehouse. It takes about an hour. Twice this week the export died halfway because the engineer's laptop went to sleep and the terminal closed. The warehouse got half the orders.\n\nUntil it's turned into a proper service, the job has to keep running after you log out.\n\n**YOUR TASK:**\n\n1. Run `batch-export` in the foreground, then practise job control: suspend it (`Ctrl+Z`), list it with `jobs`, resume it with `bg` and `fg`, and stop it (`Ctrl+C`).\n2. Start it again so that:\n   - it runs in the background,\n   - its output (stdout and stderr) goes to `~/batch-export.log`,\n   - it survives the terminal closing (SIGHUP).\n\n**SPEC:**\n\n- Exactly one `batch-export` process is running, as `learner` (not root)\n- `~/batch-export.log` exists and keeps growing with `exported batch` lines\n- The process survives `kill -HUP <pid>`, which is what a closing terminal sends\n\n**GOOD PRACTICES:**\n\n- `nohup cmd > file 2>&1 &` is the classic recipe. Learn what each part does.\n- Watch the log with `tail -f`. `Ctrl+C` stops `tail`, not the batch.\n- For anything that must also survive a reboot, write a systemd service instead (lab 12).\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "processes",
+    "jobs"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Keep the Batch Running After Logout",
+    "brief": "Keep the Batch Running After Logout",
+    "solution": "# Solution — Keep the Batch Running After Logout\n\nWhen a terminal closes, the kernel sends **SIGHUP** (\"hang up\") to the processes running in it, and by default they die. `nohup` makes a command ignore SIGHUP. `&` puts it in the background, so you get your prompt back.\n\nDocs: `man nohup` · `man bash` (JOB CONTROL) · `man 7 signal`\n\n## Job control first\n\n```bash\n/opt/order-processor/bin/batch-export      # runs in the foreground, holding your prompt\n# Ctrl+Z   → stops (suspends) it\njobs        # [1]+  Stopped\nbg          # resume it in the background\nfg          # bring it back to the foreground\n# Ctrl+C   → kill it\n```\n\nA background job started this way still dies when the terminal closes.\n\n## Start it properly\n\n```bash\ncd ~\nnohup /opt/order-processor/bin/batch-export > ~/batch-export.log 2>&1 &\njobs -l\ntail -f ~/batch-export.log      # Ctrl+C stops tail, not the batch\n```\n\n- `nohup`: ignore SIGHUP.\n- `> file 2>&1`: stdout *and* stderr into the log. Without it, nohup writes to `nohup.out`.\n- `&`: run in the background.\n\n## Prove it\n\n```bash\npgrep -af batch-export\nkill -HUP \"$(pgrep -f batch-export)\"   # what closing the terminal would do\npgrep -af batch-export                 # still running\n```\n\nThen **Submit**. For anything that must survive a reboot as well, use a systemd service (lab 12).\n",
+    "idLabel": "11",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

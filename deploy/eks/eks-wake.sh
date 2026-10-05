@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Scale selected node groups back up for lab use.
 # Usage:
-#   ./deploy/eks/eks-wake.sh              # default: system-k8s Desired=1
-#   EKS_WAKE_NODEGROUPS=system-k8s,workload-v2 ./deploy/eks/eks-wake.sh
-#   EKS_WAKE_DESIRED=1 ./deploy/eks/eks-wake.sh
+#   ./deploy/eks/eks-wake.sh              # default: system-k8s=1, labs-k8s=1 (base)
+#   EKS_WAKE_NODEGROUPS=labs-k8s ./deploy/eks/eks-wake.sh
+#   EKS_WAKE_DESIRED=1 ./deploy/eks/eks-wake.sh   # force every group to 1
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -16,18 +16,17 @@ if ! eks_cluster_exists; then
   exit 1
 fi
 
-DESIRED="${EKS_WAKE_DESIRED}"
-MIN="${EKS_WAKE_MIN}"
-MAX="${EKS_WAKE_MAX}"
-
 echo "==> wake: scale node groups on $EKS_CLUSTER_NAME ($AWS_REGION)"
 while IFS= read -r ng; do
   [[ -z "$ng" ]] && continue
-  echo "--> $ng desired=$DESIRED (min=$MIN max=$MAX)"
+  desired="$(eks_ng desired "$ng")"
+  min="$(eks_ng min "$ng")"
+  max="$(eks_ng max "$ng")"
+  echo "--> $ng desired=$desired (min=$min max=$max)"
   aws eks update-nodegroup-config \
     --cluster-name "$EKS_CLUSTER_NAME" \
     --nodegroup-name "$ng" \
-    --scaling-config "minSize=${MIN},maxSize=${MAX},desiredSize=${DESIRED}" \
+    --scaling-config "minSize=${min},maxSize=${max},desiredSize=${desired}" \
     --region "$AWS_REGION" >/dev/null
 done < <(eks_csv_to_lines "$EKS_WAKE_NODEGROUPS")
 

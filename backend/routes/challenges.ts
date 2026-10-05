@@ -5,7 +5,7 @@ import type { ExpressRequest, ExpressResponse, ExpressNextFunction } from '../ty
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { requireInterviewer, requireAdmin, requireReviewStaff, isAdminUser } = require('../auth/middleware');
+const { requireInterviewer, optionalAuth, requireAdmin, requireReviewStaff, isAdminUser } = require('../auth/middleware');
 const loader = require('../challenges/loader');
 const {
   hydrateChallengeFromMinio,
@@ -29,6 +29,7 @@ const {
   listSolutionViews,
 } = require('../challenges/solutionViews');
 const { canViewChallenge } = require('../challenges/access');
+const { isClusterLabType } = require('../challenges/labTypes');
 const { catalogSettingsLocked, writePackSettings } = require('../challenges/catalogSettings');
 const reviewStore = require('../challenges/reviewStore');
 const pool = require('../db/pool');
@@ -65,7 +66,7 @@ async function solutionStatus(req: ExpressRequest, c: { id: string; tokens?: unk
   };
 }
 
-router.get('/', requireInterviewer, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+router.get('/', optionalAuth, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
   try {
     // Shelf stays on thin Postgres rows; attach per-user solved from graded submits.
     const userId = (req.user as { sub?: string; id?: string } | undefined)?.sub
@@ -355,7 +356,7 @@ router.put(
 
       const body = (req.body as Record<string, unknown>) || {};
       let solutionFiles: Record<string, string> | null = null;
-      const isK8s = base.sandboxType === 'kubernetes';
+      const isK8s = isClusterLabType(base.sandboxType);
 
       if (tab === 'solution') {
         const files = body.solutionFiles;

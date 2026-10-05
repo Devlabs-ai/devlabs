@@ -48,7 +48,7 @@ export default function WhitePapersPage(): JSX.Element {
   const section = getWhitePaperSection(sectionId);
 
   if (sectionId && !section) {
-    return <Navigate to="/play/papers" replace />;
+    return <Navigate to="/track/papers" replace />;
   }
 
   if (section) {
@@ -57,7 +57,7 @@ export default function WhitePapersPage(): JSX.Element {
         <header className="play-problems-hero">
           <div className="play-problems-hero-copy">
             <p className="play-problems-kicker">
-              <Link to="/play/papers" className="play-papers-crumb">
+              <Link to="/track/papers" className="play-papers-crumb">
                 White papers
               </Link>
               <span aria-hidden> / </span>
@@ -82,7 +82,7 @@ export default function WhitePapersPage(): JSX.Element {
       <header className="play-problems-hero">
         <div className="play-problems-hero-copy">
           <p className="play-problems-kicker">
-            <Link to="/play" className="play-papers-crumb">
+            <Link to="/track" className="play-papers-crumb">
               Play
             </Link>
             <span aria-hidden> / </span>
@@ -97,7 +97,7 @@ export default function WhitePapersPage(): JSX.Element {
 
       <div className="play-paper-section-grid" aria-label="Paper sections">
         {WHITE_PAPER_SECTIONS.map((s) => (
-          <Link key={s.id} to={`/play/papers/${s.id}`} className="play-paper-section-card">
+          <Link key={s.id} to={`/track/papers/${s.id}`} className="play-paper-section-card">
             <span className="play-paper-section-kicker">{s.papers.length} papers</span>
             <strong className="play-paper-section-title">{s.label}</strong>
             <p className="play-paper-section-blurb">{s.blurb}</p>

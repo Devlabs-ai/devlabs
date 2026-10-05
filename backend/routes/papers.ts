@@ -12,12 +12,15 @@ const { getObjectStore, normalizeKey } = require('../workspace/objectStore');
 
 const router = express.Router();
 
+const { MONTHLY_PAPERS } = require('../papers/monthlyPapers');
+
 const ALLOWED = new Set([
   'spark/rdd',
   'spark/spark-sql',
   'spark/dstreams',
   'spark/structured-streaming',
   'spark/mapreduce',
+  ...(MONTHLY_PAPERS as { id: string }[]).map((p) => `monthly/${p.id}`),
 ]);
 
 router.get('/:sectionId/:paperId', async (req: Request, res: Response, next: NextFunction) => {

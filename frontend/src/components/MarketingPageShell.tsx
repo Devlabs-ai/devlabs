@@ -1,11 +1,10 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useContext, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import BrandMark from './BrandMark';
-import LoginModal from './LoginModal';
-import type { UserRecord } from '../types/domain';
 
 interface MarketingContextValue {
   openLogin: () => void;
+  getStarted: () => void;
 }
 
 const MarketingContext = createContext<MarketingContextValue | null>(null);
@@ -18,21 +17,23 @@ export function useMarketing(): MarketingContextValue {
 
 interface MarketingPageShellProps {
   children: React.ReactNode;
-  onLoggedIn: (user: UserRecord) => void;
+  onSignIn: () => void;
+  onGetStarted: () => void;
 }
 
-export default function MarketingPageShell({ children, onLoggedIn }: MarketingPageShellProps): JSX.Element {
-  const [loginOpen, setLoginOpen] = useState<boolean>(false);
-
+export default function MarketingPageShell({
+  children,
+  onSignIn,
+  onGetStarted,
+}: MarketingPageShellProps): JSX.Element {
   const value = useMemo<MarketingContextValue>(() => ({
-    openLogin: (): void => {
-      setLoginOpen(true);
-    },
-  }), []);
+    openLogin: onSignIn,
+    getStarted: onGetStarted,
+  }), [onSignIn, onGetStarted]);
 
   return (
     <MarketingContext.Provider value={value}>
-      <div className={`landing ${loginOpen ? 'landing-modal-open' : ''}`}>
+      <div className="landing">
         <header className="landing-brand-header">
           <Link to="/" className="landing-brand-header-mark" aria-label="DevSetu home">
             <BrandMark className="brand-mark" title="" />
@@ -47,12 +48,6 @@ export default function MarketingPageShell({ children, onLoggedIn }: MarketingPa
           <span className="landing-footer-sep">·</span>
           <span>The bridge to become a versatile engineer</span>
         </footer>
-
-        <LoginModal
-          open={loginOpen}
-          onClose={() => setLoginOpen(false)}
-          onLoggedIn={onLoggedIn}
-        />
       </div>
     </MarketingContext.Provider>
   );

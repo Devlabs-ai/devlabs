@@ -10,5 +10,5 @@ export function useIsAdmin(): boolean {
 
 /** Sends non-admins back to the catalog. */
 export default function AdminOnlyRoute({ children }: { children: React.ReactElement }): React.ReactElement {
-  return useIsAdmin() ? children : <Navigate to="/play" replace />;
+  return useIsAdmin() ? children : <Navigate to="/track" replace />;
 }

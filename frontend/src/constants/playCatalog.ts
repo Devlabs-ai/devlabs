@@ -25,57 +25,78 @@ export interface PlayDomain {
   label: string;
   blurb: string;
   panels: PlayPanel[];
+  /** Listed as Soon and not browsable, even if it has labs. */
+  comingSoon?: boolean;
 }
 
 export const PLAY_DOMAINS: PlayDomain[] = [
   {
-    id: 'data-engineer',
-    label: 'Data Engineer',
-    blurb: 'Batch and streaming pipelines, warehouses, and orchestration.',
+    id: 'devops-engineer',
+    label: 'DevOps Engineer',
+    blurb: 'Ship and operate apps from the ground up — Linux, containers, and Kubernetes application delivery (CKAD).',
     panels: [
       {
-        id: 'spark',
-        label: 'Spark',
-        blurb: 'Distributed batch processing on a shared Spark platform.',
+        id: 'linux',
+        label: 'Linux',
+        blurb: 'Your own Linux machine with sudo: the shell, text tools, users and permissions, processes, systemd, storage, networking, SSH and bash scripting.',
         challengeIds: [
-          'l1-filter-valid-sales-rows',
-          'l1-derive-revenue-column',
-          'l1-sample-qa-slice',
-          'l1-distinct-store-list',
-          'l1-store-contribution-hours',
-          'l1-store-rollup-totals',
-          'l1-store-payment-profile',
-          'l1-store-customer-segments',
-          'l1-enrich-auth-mcc',
-          'l3-interchange-fee-settlement',
-          'l3-click-attribution-stream-join',
+          'linux-00-first-shift-on-the-order-box',
+          'linux-01-organize-the-release-folder',
+          'linux-02-find-the-misplaced-configs',
+          'linux-03-read-the-order-logs',
+          'linux-04-grep-the-failed-payments',
+          'linux-05-pipeline-for-the-daily-order-report',
+          'linux-06-fix-the-config-with-sed-and-vim',
+          'linux-07-onboard-the-payments-team',
+          'linux-08-lock-down-payment-secrets',
+          'linux-09-shared-drop-folder-for-notifications',
+          'linux-10-hunt-the-runaway-process',
+          'linux-11-keep-the-batch-running-after-logout',
+          'linux-12-run-order-processor-as-a-service',
+          'linux-13-restart-on-crash-start-in-order',
+          'linux-14-debug-a-failing-unit',
+          'linux-15-nightly-reconciliation',
+          'linux-16-rotate-notification-logs',
+          'linux-18-disk-full-on-the-order-box',
+          'linux-19-archive-and-roll-back-releases',
+          'linux-20-why-cant-order-reach-payment',
+          'linux-23-script-the-health-check',
+          'linux-24-loop-over-order-batches',
+          'linux-25-order-box-incident',
         ],
       },
       {
-        id: 'airflow',
-        label: 'Airflow',
-        blurb: 'DAG orchestration and dependency-aware scheduling.',
-        challengeIds: [],
+        id: 'docker',
+        label: 'Docker',
+        blurb: 'Your own machine running Docker: containers, images and Dockerfiles, config and data, networks, Compose, registries and day-2 operations.',
+        challengeIds: [
+          'docker-00-first-container-on-the-order-box',
+          'docker-01-run-order-processor-in-a-container',
+          'docker-02-inspect-and-manage-payment-handler',
+          'docker-03-write-a-dockerfile-for-order-processor',
+          'docker-04-fast-rebuilds-and-a-clean-image',
+          'docker-06-run-order-processor-as-non-root',
+          'docker-07-health-check-for-order-processor',
+          'docker-08-configure-order-processor-with-env-files',
+          'docker-09-keep-the-payment-key-out-of-the-image',
+          'docker-10-move-orders-db-to-a-named-volume',
+          'docker-11-live-templates-with-bind-mounts-and-tmpfs',
+          'docker-12-connect-services-on-a-user-defined-network',
+          'docker-13-publish-only-the-ports-you-need',
+          'docker-14-compose-the-order-stack',
+          'docker-15-start-the-stack-in-the-right-order',
+          'docker-16-dev-and-prod-from-one-compose-file',
+          'docker-17-push-and-pin-with-a-private-registry',
+          'docker-18-roll-back-a-bad-release',
+          'docker-19-restart-policies-that-match-the-job',
+          'docker-20-memory-and-cpu-limits',
+          'docker-21-lock-down-payment-handler',
+          'docker-22-keep-container-logs-from-filling-the-disk',
+          'docker-23-docker-disk-full-on-the-order-box',
+          'docker-24-rescue-a-crashlooping-container',
+          'docker-25-order-stack-incident',
+        ],
       },
-      {
-        id: 'flink',
-        label: 'Flink',
-        blurb: 'Stateful stream processing and event-time windows.',
-        challengeIds: [],
-      },
-    ],
-  },
-  {
-    id: 'software-engineer',
-    label: 'Software Engineer',
-    blurb: 'Services, APIs, and application reliability.',
-    panels: [],
-  },
-  {
-    id: 'devops-engineer',
-    label: 'DevOps Engineer',
-    blurb: 'Ship and operate apps — CI/CD, containers, and Kubernetes application delivery (CKAD).',
-    panels: [
       {
         id: 'kubernetes',
         label: 'Kubernetes',
@@ -131,6 +152,50 @@ export const PLAY_DOMAINS: PlayDomain[] = [
     ],
   },
   {
+    id: 'data-engineer',
+    label: 'Data Engineer',
+    comingSoon: true,
+    blurb: 'Batch and streaming pipelines, warehouses, and orchestration.',
+    panels: [
+      {
+        id: 'spark',
+        label: 'Spark',
+        blurb: 'Distributed batch processing on a shared Spark platform.',
+        challengeIds: [
+          'l1-filter-valid-sales-rows',
+          'l1-derive-revenue-column',
+          'l1-sample-qa-slice',
+          'l1-distinct-store-list',
+          'l1-store-contribution-hours',
+          'l1-store-rollup-totals',
+          'l1-store-payment-profile',
+          'l1-store-customer-segments',
+          'l1-enrich-auth-mcc',
+          'l3-interchange-fee-settlement',
+          'l3-click-attribution-stream-join',
+        ],
+      },
+      {
+        id: 'airflow',
+        label: 'Airflow',
+        blurb: 'DAG orchestration and dependency-aware scheduling.',
+        challengeIds: [],
+      },
+      {
+        id: 'flink',
+        label: 'Flink',
+        blurb: 'Stateful stream processing and event-time windows.',
+        challengeIds: [],
+      },
+    ],
+  },
+  {
+    id: 'software-engineer',
+    label: 'Software Engineer',
+    blurb: 'Services, APIs, and application reliability.',
+    panels: [],
+  },
+  {
     id: 'platforms-engineer',
     label: 'Platforms Engineer',
     blurb: 'Cluster operations and shared platform primitives — CKA-oriented Kubernetes ahead.',
@@ -157,7 +222,7 @@ export function isPlayDomainId(id: string | null | undefined): id is PlayDomainI
   return Boolean(id && DOMAIN_IDS.has(id));
 }
 
-/** True for /play/:sessionId ids (UUID or legacy spark-*), not catalog domain slugs. */
+/** True for /track/:sessionId ids (UUID or legacy spark-*), not catalog domain slugs. */
 export function looksLikePlaySessionId(id: string | null | undefined): boolean {
   if (!id) return false;
   if (id.startsWith('spark-')) return true;
@@ -168,9 +233,9 @@ export function playCatalogPath(
   domainId?: string | null,
   panelId?: string | null,
 ): string {
-  if (!domainId || !isPlayDomainId(domainId)) return '/play';
-  if (!panelId) return `/play/${domainId}`;
-  return `/play/${domainId}/${panelId}`;
+  if (!domainId || !isPlayDomainId(domainId)) return '/track';
+  if (!panelId) return `/track/${domainId}`;
+  return `/track/${domainId}/${panelId}`;
 }
 
 /** Catalog membership for flat Play list (domain + panel metadata). */
@@ -224,7 +289,7 @@ export function catalogPathForChallenge(
   sandboxType?: string | null,
   tags?: string[] | null,
 ): string {
-  if (challengeId === SPARK_PLAYGROUND_CHALLENGE_ID) return '/play/spark-playground';
+  if (challengeId === SPARK_PLAYGROUND_CHALLENGE_ID) return '/track/spark-playground';
   if ((sandboxType || '') === 'board') {
     return whiteboardSectionPath(whiteboardSectionForTags(tags).id);
   }
@@ -235,7 +300,7 @@ export function catalogPathForChallenge(
       }
     }
   }
-  return '/play';
+  return '/track';
 }
 
 export function getPlayDomain(id: PlayDomainId | null | undefined): PlayDomain | null {

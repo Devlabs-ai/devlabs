@@ -4,6 +4,7 @@ import type { ChallengeRow, ChallengePublic, ChallengeFull } from '../types/doma
 
 const pool = require('../db/pool');
 const { publicBoardSpec, parseBoardSpec } = require('../workspace/boardGrade');
+const { isClusterLabType } = require('./labTypes');
 
 const cache = new Map<string, ChallengeFull>();
 
@@ -38,7 +39,7 @@ function fullFields(row: ChallengeRow): ChallengeFull {
     sparkPlatform: sandbox === 'spark-platform'
       ? (platformSpec as ChallengeFull['sparkPlatform'])
       : null,
-    k8sPlatform: sandbox === 'kubernetes'
+    k8sPlatform: isClusterLabType(sandbox)
       ? (platformSpec as ChallengeFull['k8sPlatform'])
       : null,
     boardSpec,

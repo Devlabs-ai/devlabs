@@ -1,0 +1,46 @@
+{
+  "id": "linux-18-disk-full-on-the-order-box",
+  "number": 318,
+  "finalized": true,
+  "title": "Disk Full on the Order Box",
+  "description": "**SITUATION:**\n\n**PAGE: order-processor down.** It's crash-looping because it can't write its log. The log volume `/var/log/order-processor` (a separate 64 MiB mount) is at 100%. Someone already tried deleting files and says \"du shows way less than df, the numbers don't add up.\"\n\nThe developers want the heap dump for their investigation. The newest rotated log (`.1`) must be kept for the incident timeline.\n\n**YOUR TASK:**\n\n1. Confirm what's full and what's crashing (`df -h`, `systemctl status`).\n2. Find what's using the space (`du`, `ls -lS`).\n3. Delete the older rotated logs (`.2` to `.5`). Keep `.1` and the live `order-processor.log`.\n4. Move the heap dump to `/var/tmp/`.\n5. Find out why `df` and `du` disagree. Record the process responsible, and make it release the space **without stopping it for good**.\n6. Get order-processor healthy again.\n\n**SPEC:**\n\n- `~/answers/held-by`: the name of the process that held the deleted file open\n- `order-processor.log.1` and `order-processor.log` kept; `.2` to `.5` gone\n- `/var/tmp/order-processor-heap.hprof` exists, complete; not on the log volume\n- No process holds a deleted file on `/var/log/order-processor`; that process is running again (restarted)\n- `/var/log/order-processor` is less than 50% used and still mounted\n- order-processor is active and `curl http://127.0.0.1:8080/health` answers\n\n**GOOD PRACTICES:**\n\n- `du -ah <dir> | sort -h | tail` shows the biggest items.\n- `lsof +L1` lists open files that have been deleted.\n- Deleting a file a process still has open frees nothing until that process closes it.\n",
+  "difficulty": "L2",
+  "tags": [
+    "linux",
+    "l2",
+    "storage",
+    "troubleshooting"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Disk Full on the Order Box",
+    "brief": "Disk Full on the Order Box",
+    "solution": "# Solution — Disk Full on the Order Box\n\n`df` reports what the filesystem says is used. `du` adds up the files it can see. When the two disagree, a process is holding a **deleted** file open: the name is gone, but the space comes back only when the last open handle closes.\n\nDocs: `man df` · `man du` · `man lsof`\n\n## Triage\n\n```bash\ndf -h /var/log/order-processor            # 100%\nsystemctl status order-processor          # crash loop: cannot write log\nsudo du -sh /var/log/order-processor      # noticeably less than df says\nsudo du -ah /var/log/order-processor | sort -h | tail\nls -lhS /var/log/order-processor\n```\n\n## Free the obvious space\n\n```bash\nsudo rm /var/log/order-processor/order-processor.log.{2,3,4,5}\nsudo mv /var/log/order-processor/order-processor-heap.hprof /var/tmp/\ndf -h /var/log/order-processor\n```\n\n## Find the deleted-but-open file\n\n```bash\nsudo lsof +L1                                  # open files with link count 0 (deleted)\nsudo lsof +L1 /var/log/order-processor\n# order-expo  1234 root  4w  REG ... /var/log/order-processor/export-spool.tmp (deleted)\nmkdir -p ~/answers\necho order-exporter > ~/answers/held-by\n```\n\nRestart the holder so it closes the old file:\n\n```bash\nsudo systemctl restart order-exporter\ndf -h /var/log/order-processor                 # space comes back\n```\n\nWithout lsof: `sudo find /proc/*/fd -lname '*(deleted)' -ls`.\n\n## Bring order-processor back\n\n```bash\nsudo systemctl restart order-processor\nsystemctl status order-processor\ncurl http://127.0.0.1:8080/health\n```\n\nThen **Submit**. The long-term fix is a logrotate rule (lab 16) and an alert on disk usage.\n",
+    "idLabel": "18",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

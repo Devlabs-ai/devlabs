@@ -30,8 +30,11 @@ spec:
             - containerPort: 8080
           resources:
             requests:
-              cpu: "100m"
-              memory: "128Mi"
+              cpu: "20m"
+              memory: "32Mi"
+            limits:
+              cpu: "40m"
+              memory: "64Mi"
 ```
 
 Start with `kubectl describe` / `kubectl logs` on the CrashLooping Pods — the actual break may be a bad image tag, wrong command, or a failing probe. Prefer patching the existing Deployment over creating a second one.

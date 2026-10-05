@@ -15,6 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const { getObjectStore, normalizeKey } = require('../workspace/objectStore');
+const { isClusterLabType, labPackDir } = require('./labTypes');
 
 export type ChallengeMeta = {
   id: string;
@@ -92,12 +93,12 @@ async function loadStarterFiles(challengeId: string): Promise<Record<string, str
   return loadPrefixFiles(challengeId, 'starter');
 }
 
-/** Pack-based K8s labs: backend/challenges/k8s/<id>/solution/** */
+/** Pack-based cluster labs: backend/challenges/<k8s|linux>/<id>/solution/** */
 function loadLocalK8sSolutionFiles(challengeId: string): Record<string, string> | null {
   if (!challengeId || challengeId.includes('..') || challengeId.includes('/') || challengeId.includes('\\')) {
     return null;
   }
-  const root = path.join(__dirname, 'k8s', challengeId, 'solution');
+  const root = path.join(labPackDir(challengeId), 'solution');
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) return null;
 
   const binaryExt = /\.(png|jpe?g|gif|webp|svg|ico|pdf|zip|parquet)$/i;
@@ -189,7 +190,7 @@ async function hydrateChallengeFromMinio(
 ): Promise<Record<string, unknown> | null> {
   if (!base || typeof base.id !== 'string') return base;
   if ((base.sandboxType as string | undefined) === 'board') return base;
-  if ((base.sandboxType as string | undefined) === 'kubernetes') return base;
+  if (isClusterLabType(base.sandboxType)) return base;
 
   const meta = await loadChallengeMeta(base.id);
   const wantsMinio = catalogWantsMinio(base)
@@ -270,9 +271,9 @@ async function writeSolutionFiles(
     );
   }
 
-  // Pack-based K8s labs also keep solution/ on disk (Play loads that when MinIO is empty).
-  const localRoot = path.join(__dirname, 'k8s', challengeId, 'solution');
-  if (fs.existsSync(path.join(__dirname, 'k8s', challengeId))) {
+  // Pack-based cluster labs also keep solution/ on disk (Play loads that when MinIO is empty).
+  const localRoot = path.join(labPackDir(challengeId), 'solution');
+  if (fs.existsSync(labPackDir(challengeId))) {
     fs.mkdirSync(localRoot, { recursive: true });
     for (const [rel, body] of Object.entries(written)) {
       const abs = path.join(localRoot, rel);

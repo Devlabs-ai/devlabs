@@ -1,0 +1,47 @@
+{
+  "id": "linux-20-why-cant-order-reach-payment",
+  "number": 320,
+  "finalized": true,
+  "title": "Why Can't Order Reach Payment?",
+  "description": "**SITUATION:**\n\nAfter last night's migration, every checkout fails with *payment service unavailable*. **order-processor** calls **payment-handler** at `http://payment.internal:9090`. payment-handler was moved onto this same box, and the systemd status says it's running. So why can't order reach it?\n\n`/opt/order-processor/bin/check-payments` makes the same health call order-processor makes at startup.\n\n**YOUR TASK:**\n\n1. Record this box's IPv4 address on `eth0` and the DNS server it uses.\n2. Find out what `payment.internal` resolves to, and where that answer comes from.\n3. Find out which port payment-handler is **actually** listening on.\n4. Fix name resolution, so `payment.internal` points at this box (`127.0.0.1`).\n5. Fix payment-handler's config so it listens on `9090`.\n6. Prove `check-payments` succeeds.\n\n**SPEC:**\n\nAll answers go in `~/answers/`:\n\n- `box-ip`: eth0's IPv4 address, without the prefix length\n- `resolver`: the first nameserver in `/etc/resolv.conf`\n- `payment-ip-before`: what `payment.internal` resolved to before your fix\n- `payment-port-before`: the port payment-handler was listening on before your fix\n\nThe fixes:\n\n- `getent hosts payment.internal` returns `127.0.0.1`\n- `/etc/payment-handler/payment-handler.env` has `PAYMENT_HANDLER_PORT=9090`, payment-handler is active and listening on `:9090`\n- `/opt/order-processor/bin/check-payments` exits 0\n\n**GOOD PRACTICES:**\n\n- Work bottom-up: address, then name, then port, then request.\n- `getent hosts` resolves names the way programs do. `dig` asks DNS only and ignores `/etc/hosts`.\n- `ss -tlnp` shows listening TCP ports and the processes that own them.\n",
+  "difficulty": "L2",
+  "tags": [
+    "linux",
+    "l2",
+    "networking",
+    "dns",
+    "troubleshooting"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Why Can't Order Reach Payment?",
+    "brief": "Why Can't Order Reach Payment?",
+    "solution": "# Solution — Why Can't Order Reach Payment?\n\nDebug a connection from the bottom up. Who am I on the network? What does the name resolve to? Is anything listening on that port? Does the request work?\n\nDocs: `man ip` · `man ss` · `man getent` · `man dig` · `man hosts` · `man resolv.conf`\n\n## Reproduce\n\n```bash\n/opt/order-processor/bin/check-payments\ncat /etc/order-processor/app.conf          # http://payment.internal:9090\n```\n\n## Where am I?\n\n```bash\nmkdir -p ~/answers\nip -4 addr show dev eth0                   # inet 10.x.y.z/..\nip route                                   # default gateway\ncat /etc/resolv.conf                       # nameserver ...\necho 10.x.y.z > ~/answers/box-ip           # your address, without the /prefix\nawk '/^nameserver/{print $2; exit}' /etc/resolv.conf > ~/answers/resolver\n```\n\n## Name resolution\n\n```bash\ngetent hosts payment.internal              # 10.99.0.7 — what programs actually use\ndig +short payment.internal                # nothing: dig only asks DNS and skips /etc/hosts\ngrep payment /etc/hosts\necho 10.99.0.7 > ~/answers/payment-ip-before\n```\n\n`/etc/nsswitch.conf` (`hosts: files dns`) is why `/etc/hosts` wins over DNS.\n\n## Is anything listening?\n\n```bash\nsudo ss -tlnp                              # payment-handler on 127.0.0.1:9099, not 9090\necho 9099 > ~/answers/payment-port-before\n```\n\n## Fix both\n\n```bash\nsudo nano /etc/hosts        # change 10.99.0.7 to 127.0.0.1 on the payment.internal line\ngetent hosts payment.internal\n# sed -i fails on this /etc/hosts (\"Device or resource busy\"): in a container it is a\n# bind-mounted file, and sed -i replaces files by renaming. Editors that write in place work.\n\nsudo sed -i 's/^PAYMENT_HANDLER_PORT=.*/PAYMENT_HANDLER_PORT=9090/' /etc/payment-handler/payment-handler.env\nsudo systemctl restart payment-handler\nss -tln | grep 9090\n\ncurl -v http://payment.internal:9090/health\n/opt/order-processor/bin/check-payments\n```\n\nThen **Submit**.\n",
+    "idLabel": "20",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import BrandMark from '../components/BrandMark';
 import { acceptAuthSession } from '../services/authApi';
@@ -16,8 +16,14 @@ export default function GoogleAuthCallbackPage({
   const navigate = useNavigate();
   const [message, setMessage] = useState<string>('Finishing Google sign-in…');
   const [tone, setTone] = useState<'pending' | 'error' | 'ok'>('ok');
+  const onLoggedInRef = useRef(onLoggedIn);
+  onLoggedInRef.current = onLoggedIn;
+  const handledRef = useRef(false);
 
   useEffect(() => {
+    // Signing in re-renders the app with this page still mounted; the token must be consumed once.
+    if (handledRef.current) return undefined;
+    handledRef.current = true;
     const error = searchParams.get('error');
     const pending = searchParams.get('pending');
     const pendingMessage = searchParams.get('message');
@@ -48,7 +54,7 @@ export default function GoogleAuthCallbackPage({
     try {
       const user = JSON.parse(userRaw) as UserRecord;
       acceptAuthSession(token, user);
-      onLoggedIn(user);
+      onLoggedInRef.current(user);
     } catch {
       setTone('error');
       setMessage('Could not complete Google sign-in.');
@@ -56,7 +62,7 @@ export default function GoogleAuthCallbackPage({
       return () => window.clearTimeout(t);
     }
     return undefined;
-  }, [searchParams, navigate, onLoggedIn]);
+  }, [searchParams, navigate]);
 
   return (
     <div className="login login-oauth-callback">

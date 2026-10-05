@@ -25,15 +25,21 @@
     ],
     "overview": "Blue-Green Cutover for Payment Handler",
     "brief": "Blue-Green Cutover for Payment Handler",
-    "solution": "# Solution — Blue-Green Cutover for Payment Handler\n\nStay in your lab namespace. Bring up a full **green** Payment Handler stack on `v1.1`, then flip Service `payment-handler` to `color=green`. Leave blue running for rollback.\n\nDocs: [DevSetu Blog — Canary and Blue-Green Releases](/play/devops-engineer/kubernetes/read/canary-blue-green) · [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) · [Services](https://kubernetes.io/docs/concepts/services-networking/service/)\n\n## Solution YAML\n\nSave as `payment-handler-green-l31.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payment-handler-green\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: payment-handler\n      color: green\n  template:\n    metadata:\n      labels:\n        app: payment-handler\n        color: green\n    spec:\n      containers:\n        - name: payment-handler\n          image: devsetu/payment-handler:v1.1\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n```\n\nSave as `payment-handler-svc-l31.yaml` (cutover — selector points at green):\n\n```yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: payment-handler\nspec:\n  selector:\n    app: payment-handler\n    color: green\n  ports:\n    - port: 8000\n      targetPort: 8000\n```\n\n## Declarative\n\n```bash\nkubectl apply -f payment-handler-green-l31.yaml\nkubectl rollout status deploy/payment-handler-green\nkubectl apply -f payment-handler-svc-l31.yaml\nkubectl get endpoints payment-handler\nkubectl get pods -l app=payment-handler -L color\n```\n\nWait until green is **3/3** Ready and endpoints list only green Pods, then **Submit**. Do not delete blue.\n",
+    "solution": "# Solution — Blue-Green Cutover for Payment Handler\n\nStay in your lab namespace. Bring up a full **green** Payment Handler stack on `v1.1`, then flip Service `payment-handler` to `color=green`. Leave blue running for rollback.\n\nDocs: [DevSetu Blog — Canary and Blue-Green Releases](/play/devops-engineer/kubernetes/read/canary-blue-green) · [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) · [Services](https://kubernetes.io/docs/concepts/services-networking/service/)\n\n## Solution YAML\n\nSave as `payment-handler-green-l31.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payment-handler-green\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: payment-handler\n      color: green\n  template:\n    metadata:\n      labels:\n        app: payment-handler\n        color: green\n    spec:\n      containers:\n        - name: payment-handler\n          image: devsetu/payment-handler:v1.1\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"20m\"\n              memory: \"32Mi\"\n            limits:\n              cpu: \"40m\"\n              memory: \"64Mi\"\n```\n\nSave as `payment-handler-svc-l31.yaml` (cutover — selector points at green):\n\n```yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: payment-handler\nspec:\n  selector:\n    app: payment-handler\n    color: green\n  ports:\n    - port: 8000\n      targetPort: 8000\n```\n\n## Declarative\n\n```bash\nkubectl apply -f payment-handler-green-l31.yaml\nkubectl rollout status deploy/payment-handler-green\nkubectl apply -f payment-handler-svc-l31.yaml\nkubectl get endpoints payment-handler\nkubectl get pods -l app=payment-handler -L color\n```\n\nWait until green is **3/3** Ready and endpoints list only green Pods, then **Submit**. Do not delete blue.\n",
     "idLabel": "31",
     "theory": ""
   },
   "platformSpec": {
     "quota": {
-      "pods": "10",
-      "cpu": "1200m",
-      "memory": "1408Mi"
+      "pods": "9",
+      "requests": {
+        "cpu": "180m",
+        "memory": "288Mi"
+      },
+      "limits": {
+        "cpu": "360m",
+        "memory": "576Mi"
+      }
     },
     "setup": {
       "script": "setup.sh"

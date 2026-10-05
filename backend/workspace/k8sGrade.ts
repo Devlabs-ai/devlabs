@@ -4,6 +4,8 @@ const { v4: uuidv4 } = require('uuid');
 const pool = require('../db/pool');
 const k8s = require('./k8sCluster');
 const loader = require('../challenges/loader');
+const linuxBox = require('./linuxBox');
+const { isBoxLabType } = require('../challenges/labTypes');
 
 export type K8sGradeResult = {
   passed: boolean;
@@ -32,6 +34,7 @@ async function gradeK8sSession(
   challengeId: string,
 ): Promise<K8sGradeResult> {
   const c = loader.getChallenge(challengeId) as {
+    sandboxType?: string | null;
     k8sPlatform?: { grade?: { script?: string; timeoutSeconds?: number } };
   } | null;
   const script = c?.k8sPlatform?.grade?.script || 'grade.sh';
@@ -40,7 +43,8 @@ async function gradeK8sSession(
     (c?.k8sPlatform?.grade?.timeoutSeconds || 60) * 1000,
   );
 
-  const result = await k8s.runChallengeScript(ns, challengeId, script, { timeoutMs });
+  const env = isBoxLabType(c?.sandboxType) ? linuxBox.scriptEnv() : undefined;
+  const result = await k8s.runChallengeScript(ns, challengeId, script, { timeoutMs, env });
   const stdout = (result.stdout || '').trim();
   const stderr = (result.stderr || '').trim();
   const passed = result.code === 0;

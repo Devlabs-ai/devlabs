@@ -39,6 +39,7 @@ import ChallengeReviewPanel from './ChallengeReviewPanel';
 import SolutionGateModal, { hasAcknowledgedSolution } from './SolutionGateModal';
 import BriefBackButton from './BriefBackButton';
 import WorkspaceMobileSwitcher, { type WorkspaceMobilePane } from './WorkspaceMobileSwitcher';
+import DesktopOnlyNotice from './DesktopOnlyNotice';
 import { useAppState } from '../context/AppStateContext';
 import { isAdminUser, isReviewStaff, getCurrentUser } from '../services/authApi';
 import { IconPen, IconPlay, IconStop, IconSubmit } from './ChromeIcons';
@@ -1965,7 +1966,10 @@ export default function SparkPlatformWorkspace({
         </button>
       )}
 
-      {showWorkspace && (
+      {showWorkspace && isNarrow && (
+        <DesktopOnlyNotice tools="code editor and job runner" onShowBrief={() => setMobilePane('brief')} />
+      )}
+      {showWorkspace && !isNarrow && (
       <div className="col col-main">
         <div className="panel spark-ide-panel" style={{ flex: 1 }}>
           <div className="spark-ide-actionbar">

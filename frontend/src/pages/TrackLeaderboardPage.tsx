@@ -51,7 +51,7 @@ export default function TrackLeaderboardPage(): JSX.Element {
     return q ? all.filter((e) => e.name.toLowerCase().includes(q)) : all;
   }, [board, query]);
 
-  if (!domain || !panel || !challengeIds.length) return <Navigate to="/play" replace />;
+  if (!domain || !panel || !challengeIds.length) return <Navigate to="/track" replace />;
 
   const trackPath = playCatalogPath(domain.id, panel.id);
 
@@ -59,7 +59,7 @@ export default function TrackLeaderboardPage(): JSX.Element {
     <div className="app-page leaderboard-page">
       <header className="leaderboard-page-header">
         <p className="spark-primer-crumb">
-          <Link to="/play">Tracks</Link>
+          <Link to="/track">Tracks</Link>
           <span aria-hidden> / </span>
           <Link to={playCatalogPath(domain.id)}>{domain.label}</Link>
           <span aria-hidden> / </span>

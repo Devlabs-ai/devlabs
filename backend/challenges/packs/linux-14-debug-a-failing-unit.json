@@ -1,0 +1,47 @@
+{
+  "id": "linux-14-debug-a-failing-unit",
+  "number": 314,
+  "finalized": true,
+  "title": "Debug a Failing Unit",
+  "description": "**SITUATION:**\n\nOrder confirmation emails stopped going out overnight. **notification-service** is in a restart loop and nobody knows why. The person who set it up is on holiday. All you have is the box, `systemctl` and the journal.\n\nThere's more than one thing wrong. Each fix will reveal the next error.\n\n**YOUR TASK:**\n\n1. Use `systemctl status` and `journalctl -u notification-service` to find out why it fails.\n2. Fix the cause, restart, and read the journal again. Repeat until it's healthy.\n3. Don't work around problems by running the service as root or deleting its unit.\n\n**SPEC:**\n\n- `notification-service.service` is **enabled** and **active**, running as `User=notify`\n- Its `ExecStart` runs `/opt/notification-service/bin/notification-service`, which is executable\n- `/etc/notification-service/notification.env` sets `SMTP_HOST=smtp.internal`\n- `curl http://127.0.0.1:8085/health` returns notification-service's health JSON\n\n**GOOD PRACTICES:**\n\n- `journalctl -u <unit> -n 30 --no-pager` shows recent logs; add `-f` to follow them live.\n- Run `systemctl daemon-reload` after editing a unit file. Env file changes only need a restart.\n- `ss -tlnp` shows which process owns a listening port.\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "systemd",
+    "journalctl",
+    "troubleshooting"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Debug a Failing Unit",
+    "brief": "Debug a Failing Unit",
+    "solution": "# Solution — Debug a Failing Unit\n\nThe loop is always the same: **status → journal → fix one thing → daemon-reload if the unit changed → restart → repeat**. Each fix reveals the next error.\n\nDocs: `man systemctl` · `man journalctl` · `man ss`\n\n## Fault 1: wrong ExecStart path\n\n```bash\nsystemctl status notification-service\n# status=203/EXEC   — systemd couldn't execute the program\njournalctl -u notification-service -n 20 --no-pager\n# Failed to locate executable /opt/notification-service/bin/notification-svc\nls /opt/notification-service/bin/\nsudo sed -i 's#bin/notification-svc$#bin/notification-service#' /etc/systemd/system/notification-service.service\nsudo systemctl daemon-reload\nsudo systemctl restart notification-service\n```\n\n## Fault 2: binary not executable\n\n```bash\njournalctl -u notification-service -n 5 --no-pager\n# Permission denied / 203/EXEC again\nls -l /opt/notification-service/bin/notification-service     # -rw-r--r--\nsudo chmod 755 /opt/notification-service/bin/notification-service\nsudo systemctl restart notification-service\n```\n\n## Fault 3: typo in the environment file\n\n```bash\njournalctl -u notification-service -n 5 --no-pager\n# notification-service: SMTP_HOST is not set\ncat /etc/notification-service/notification.env               # SMTP_HSOT\nsudo sed -i 's/^SMTP_HSOT=/SMTP_HOST=/' /etc/notification-service/notification.env\nsudo systemctl restart notification-service\n```\n\nEnv file changes need a restart, not a `daemon-reload`.\n\n## Fault 4: port already in use\n\n```bash\njournalctl -u notification-service -n 5 --no-pager\n# cannot listen on 127.0.0.1:8085 (address in use?)\nsudo ss -tlnp | grep 8085          # users:((\"nc\",pid=...))\nps -fp <pid>                        # parent: /usr/local/bin/debug-listener\nsudo pkill -f /usr/local/bin/debug-listener\nsudo systemctl restart notification-service\n```\n\n## Verify\n\n```bash\nsystemctl status notification-service\ncurl http://127.0.0.1:8085/health\n```\n\nThen **Submit**.\n",
+    "idLabel": "14",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "notification-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

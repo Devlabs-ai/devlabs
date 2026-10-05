@@ -1,0 +1,47 @@
+{
+  "id": "docker-02-inspect-and-manage-payment-handler",
+  "number": 402,
+  "finalized": true,
+  "title": "Inspect and Manage Payment Handler",
+  "description": "**SITUATION:**\n\npayment-handler is already running on the order box, and the payments team has questions: which merchant account is it configured for, what's its address, and can you send them the last receipt it wrote? They've also rotated its certificates, so it needs a restart.\n\nLast night's `settlement-job` container also died. Before anyone cleans it up, they want to know how it exited.\n\n**YOUR TASK:**\n\n1. Find payment-handler's merchant ID and IP address.\n2. Copy `/tmp/last-receipt.txt` out of the container.\n3. Restart payment-handler.\n4. Record settlement-job's exit code, then remove it.\n\n**SPEC:**\n\n- `~/answers/merchant-id`: the value of `MERCHANT_ID` in payment-handler's environment\n- `~/answers/payment-ip`: payment-handler's IP address\n- `~/answers/last-receipt.txt`: a copy of `/tmp/last-receipt.txt` from inside payment-handler\n- Container `payment-handler`: restarted since the lab started, and **running**\n- `~/answers/settlement-exit-code`: the exit code `settlement-job` stopped with\n- Container `settlement-job`: **removed**\n\n**GOOD PRACTICES:**\n\n- `docker inspect <name>` shows everything Docker knows; `-f '{{...}}'` picks one field.\n- `docker cp` copies files between the box and a container, in either direction.\n- `docker ps -a` shows stopped containers and how they exited.\n",
+  "difficulty": "L0",
+  "tags": [
+    "docker",
+    "l0",
+    "inspect",
+    "cp",
+    "lifecycle"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Inspect and Manage Payment Handler",
+    "brief": "Inspect and Manage Payment Handler",
+    "solution": "# Solution — Inspect and Manage Payment Handler\n\nRunning a container is the easy part. Day to day you'll **look inside** containers (settings, network, files), **move files** in and out, **restart** them, and **read why** a container stopped.\n\nDocs: `docker inspect --help` · `docker cp --help` · `docker restart --help`\n\n## What is payment-handler running with?\n\n```bash\ndocker ps\ndocker inspect payment-handler | less          # everything, as JSON\ndocker inspect -f '{{json .Config.Env}}' payment-handler\ndocker exec payment-handler env                 # the same, from inside the process's view\ndocker inspect -f '{{json .Config.Env}}' payment-handler | jq -r '.[]' | sed -n 's/^MERCHANT_ID=//p' > ~/answers/merchant-id\n```\n\n`-f` (`--format`) takes a Go template, so you can pull out one field instead of scrolling through JSON.\n\n## Its IP address\n\n```bash\ndocker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' payment-handler > ~/answers/payment-ip\n```\n\nEvery container gets its own network namespace and an IP on a Docker network (here the default `bridge`). That IP changes when the container is recreated, which is why later labs reach containers **by name** instead.\n\n## Copy a file out of the container\n\n```bash\ndocker exec payment-handler cat /tmp/last-receipt.txt\ndocker cp payment-handler:/tmp/last-receipt.txt ~/answers/last-receipt.txt\n```\n\n`docker cp` works in both directions (`docker cp ./file name:/path`), and even on stopped containers.\n\n## Restart it\n\n```bash\ndocker restart payment-handler       # stop (SIGTERM, then SIGKILL after 10 s) + start\ndocker ps                            # STATUS: Up a few seconds\n```\n\nRestart keeps the **same container**: same ID, same writable layer, same settings. Only the process starts fresh.\n\n## Why did settlement-job stop?\n\n```bash\ndocker ps -a --filter name=settlement-job     # STATUS: Exited (N) ...\ndocker logs settlement-job                    # ERROR: bank API timeout\ndocker inspect -f '{{.State.ExitCode}}' settlement-job > ~/answers/settlement-exit-code\ndocker rm settlement-job\n```\n\nExit code `0` means success; anything else is the program telling you it failed. `137` would mean it was killed (SIGKILL: often out of memory), `143` stopped by SIGTERM.\n\nThen **Submit**.\n",
+    "idLabel": "02",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

@@ -29,8 +29,9 @@ if ! kubectl -n "$LEARNER_NS" get configmap "$CM" >/dev/null 2>&1; then
   fail "configmap/${CM} not found"
 fi
 
-D1="$(kubectl -n "$LEARNER_NS" get configmap "$CM" -o jsonpath="{.data['${KEY1}']}" 2>/dev/null || true)"
-D2="$(kubectl -n "$LEARNER_NS" get configmap "$CM" -o jsonpath="{.data['${KEY2}']}" 2>/dev/null || true)"
+# jsonpath needs dots inside keys escaped; ['key.txt'] silently returns empty.
+D1="$(kubectl -n "$LEARNER_NS" get configmap "$CM" -o jsonpath="{.data.${KEY1//./\\.}}" 2>/dev/null || true)"
+D2="$(kubectl -n "$LEARNER_NS" get configmap "$CM" -o jsonpath="{.data.${KEY2//./\\.}}" 2>/dev/null || true)"
 # Accept optional trailing newline from `|` block scalars
 D1="${D1%"${D1##*[![:space:]]}"}"
 D2="${D2%"${D2##*[![:space:]]}"}"

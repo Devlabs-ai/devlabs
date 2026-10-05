@@ -9,14 +9,14 @@ import { PLAYGROUNDS_PATH } from '../constants/playgrounds';
 import { useAppState } from '../context/AppStateContext';
 import { isAdminUser } from '../services/authApi';
 
-export const SPARK_PLAYGROUND_OPEN_PATH = '/play/spark-playground/open';
+export const SPARK_PLAYGROUND_OPEN_PATH = '/track/spark-playground/open';
 
 export default function SparkPlaygroundPage(): JSX.Element {
   const { startError, currentUser } = useAppState();
   const isAdmin = Boolean(currentUser?.admin) || isAdminUser(currentUser);
   const [schemaId, setSchemaId] = useState<string | null>(null);
 
-  if (!isAdmin) return <Navigate to="/play" replace />;
+  if (!isAdmin) return <Navigate to="/track" replace />;
 
   const schemaTable = getPlaygroundTable(schemaId);
 
@@ -25,7 +25,7 @@ export default function SparkPlaygroundPage(): JSX.Element {
       <header className="play-problems-hero">
         <div className="play-problems-hero-copy">
           <p className="play-papers-crumb">
-            <Link to="/play">Play</Link>
+            <Link to="/track">Tracks</Link>
             <span aria-hidden> / </span>
             <Link to={PLAYGROUNDS_PATH}>Playgrounds</Link>
             <span aria-hidden> / </span>

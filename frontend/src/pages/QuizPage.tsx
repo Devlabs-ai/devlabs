@@ -82,7 +82,7 @@ export default function QuizPage(): JSX.Element {
   }, [quiz, answers, submitted]);
 
   if (!quizId) {
-    return <Navigate to="/play" replace />;
+    return <Navigate to="/track" replace />;
   }
 
   if (loading) {

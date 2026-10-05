@@ -84,7 +84,7 @@ export default function SideQuestsPage(): JSX.Element {
   const activeTopic = topicId ? topics.find((t) => t.id === topicId) : null;
 
   if (topicId && !loading && !loadError && topics.length > 0 && !activeTopic) {
-    return <Navigate to="/play/quests" replace />;
+    return <Navigate to="/track/quests" replace />;
   }
 
   if (activeTopic) {
@@ -93,7 +93,7 @@ export default function SideQuestsPage(): JSX.Element {
         <header className="play-problems-hero">
           <div className="play-problems-hero-copy">
             <p className="play-problems-kicker">
-              <Link to="/play/quests" className="play-papers-crumb">
+              <Link to="/track/quests" className="play-papers-crumb">
                 Side Quests
               </Link>
               <span aria-hidden> / </span>
@@ -110,7 +110,7 @@ export default function SideQuestsPage(): JSX.Element {
               key={quiz.id}
               type="button"
               className="play-paper-tile play-quest-tile"
-              onClick={() => navigate(`/play/quiz/${quiz.id}`)}
+              onClick={() => navigate(`/track/quiz/${quiz.id}`)}
               title={quiz.learningOutcome}
             >
               <span className="play-paper-tile-meta">
@@ -135,7 +135,7 @@ export default function SideQuestsPage(): JSX.Element {
       <header className="play-problems-hero">
         <div className="play-problems-hero-copy">
           <p className="play-problems-kicker">
-            <Link to="/play" className="play-papers-crumb">
+            <Link to="/track" className="play-papers-crumb">
               Play
             </Link>
             <span aria-hidden> / </span>
@@ -159,7 +159,7 @@ export default function SideQuestsPage(): JSX.Element {
           {topics.map((topic) => (
             <Link
               key={topic.id}
-              to={`/play/quests/${topic.id}`}
+              to={`/track/quests/${topic.id}`}
               className="play-paper-section-card"
             >
               <span className="play-paper-section-kicker">

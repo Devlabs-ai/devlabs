@@ -1,0 +1,46 @@
+{
+  "id": "linux-13-restart-on-crash-start-in-order",
+  "number": 313,
+  "finalized": true,
+  "title": "Restart on Crash, Start in Order",
+  "description": "**SITUATION:**\n\nAfter this morning's reboot, **order-processor** came up before **payment-handler**, couldn't load its payment routes, and exited. It stayed down for two hours because nothing restarted it. Both units came from the vendor package in `/lib/systemd/system/`. Edit those and the next package upgrade silently reverts your fix.\n\n**YOUR TASK:**\n\n1. Read why order-processor failed (`systemctl status`, `journalctl -u`).\n2. Without touching the vendor unit, make order-processor:\n   - **require** payment-handler, so starting it starts payment-handler too,\n   - start **after** payment-handler,\n   - **restart on failure**.\n3. Start order-processor and prove it comes back after `kill -9`.\n\n**SPEC:**\n\n- Changes live in a drop-in under `/etc/systemd/system/order-processor.service.d/` (any `*.conf` file)\n- `/lib/systemd/system/order-processor.service` is unchanged, and no full copy exists in `/etc/systemd/system/`\n- `Requires=payment-handler.service`, `After=payment-handler.service`, `Restart=on-failure`\n- From cold, `systemctl start order-processor` brings up both services and `/health` on `:8080` answers\n- Stopping payment-handler stops order-processor\n\n**GOOD PRACTICES:**\n\n- `systemctl edit <unit>` creates the drop-in and reloads systemd for you.\n- `systemctl cat <unit>` shows the vendor unit plus every drop-in, in order.\n- `Requires=` without `After=` starts both units at the same time. You usually want both.\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "systemd",
+    "services"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Restart on Crash, Start in Order",
+    "brief": "Restart on Crash, Start in Order",
+    "solution": "# Solution — Restart on Crash, Start in Order\n\nUnits shipped by a package live in `/lib/systemd/system/`, and an upgrade overwrites them. Your changes go in a **drop-in** file under `/etc/systemd/system/<unit>.d/`. It overrides only the settings you list and survives upgrades.\n\nDocs: `man systemd.unit` (Requires=, After=) · `man systemd.service` (Restart=) · `man systemctl` (edit, cat)\n\n## See the failure\n\n```bash\nsystemctl status order-processor\njournalctl -u order-processor -n 20      # payment-handler unreachable\nsystemctl cat order-processor            # no After=, no Restart=\n```\n\n## Write the drop-in\n\n```bash\nsudo systemctl edit order-processor\n```\n\nAdd these lines between the comment markers. `systemctl edit` saves them to `/etc/systemd/system/order-processor.service.d/override.conf` and reloads systemd for you:\n\n```ini\n[Unit]\nRequires=payment-handler.service\nAfter=payment-handler.service\n\n[Service]\nRestart=on-failure\nRestartSec=2\n```\n\n- `Requires=`: starting order-processor also starts payment-handler, and stopping payment-handler stops order-processor.\n- `After=`: ordering only, meaning \"wait until payment-handler has started\". `Requires=` alone starts both units at the same time.\n- `Restart=on-failure`: restart after a crash or non-zero exit.\n\nWithout `systemctl edit`:\n\n```bash\nsudo mkdir -p /etc/systemd/system/order-processor.service.d\nsudo nano /etc/systemd/system/order-processor.service.d/override.conf\nsudo systemctl daemon-reload\n```\n\n## Verify\n\n```bash\nsystemctl cat order-processor                     # vendor unit + your drop-in\nsudo systemctl stop order-processor payment-handler\nsudo systemctl start order-processor              # payment-handler starts first\nsystemctl status payment-handler order-processor\ncurl http://127.0.0.1:8080/health\nsudo kill -9 \"$(systemctl show -p MainPID --value order-processor)\"\nsleep 3; systemctl status order-processor         # back, new PID\n```\n\nThen **Submit**.\n",
+    "idLabel": "13",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

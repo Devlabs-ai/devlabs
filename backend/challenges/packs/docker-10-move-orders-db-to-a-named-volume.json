@@ -1,0 +1,47 @@
+{
+  "id": "docker-10-move-orders-db-to-a-named-volume",
+  "number": 410,
+  "finalized": true,
+  "title": "Move the Orders Database to a Named Volume",
+  "description": "**SITUATION:**\n\nSomeone started the orders database with a plain `docker run`, with no `-v`. Postgres declares a volume for its data, so Docker created an **anonymous** volume: a random 64-character name that nobody recognises, that a new container won't reattach, and that the next cleanup may delete along with every order.\n\n**YOUR TASK:**\n\n1. Count the orders in the database.\n2. Move the data into a named volume `orders-data`, without losing a single order.\n3. Run `orders-db` on that volume and remove the old anonymous volume.\n\n**SPEC:**\n\n- `~/answers/order-count`: the number of rows in the `orders` table\n- Volume `orders-data` exists\n- Container `orders-db`: image `postgres:16-alpine`, **running**, `/var/lib/postgresql/data` on the named volume `orders-data`; user, password and database all `orders`\n- Every original order is still there\n- No other volumes left on the box\n\n**GOOD PRACTICES:**\n\n- Stop a database before copying its files.\n- `docker run --rm --volumes-from <old> -v orders-data:/to alpine ...` can copy between volumes.\n- `docker rm -v` removes a container together with its anonymous volumes.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "volumes",
+    "postgres",
+    "data"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Move the Orders Database to a Named Volume",
+    "brief": "Move the Orders Database to a Named Volume",
+    "solution": "# Solution — Move the Orders Database onto a Named Volume\n\nA container's writable layer dies with the container. Databases declare a **volume** for their data directory, so the data lives outside that layer, but `docker run` without `-v` gives it an **anonymous** volume: a random 64-character name that nobody will recognise, that `docker run` won't reattach to a new container, and that the next cleanup might delete.\n\nA **named volume** has a name you choose, lives until you delete it, and is reattached by name to whatever container you start next.\n\nDocs: [Volumes](https://docs.docker.com/engine/storage/volumes/)\n\n## Where is the data now?\n\n```bash\ndocker inspect -f '{{json .Mounts}}' orders-db | jq\n# \"Type\": \"volume\", \"Name\": \"3f1c9e...\", \"Destination\": \"/var/lib/postgresql/data\"\ndocker volume ls\ndocker exec orders-db psql -tA -U orders -d orders -c 'SELECT count(*) FROM orders' > ~/answers/order-count\n```\n\n## Move it\n\n```bash\ndocker stop orders-db                  # clean shutdown: never copy a running database's files\ndocker rename orders-db orders-db-old\ndocker volume create orders-data\n\ndocker run --rm --volumes-from orders-db-old -v orders-data:/to alpine:3.20 \\\n  sh -c 'cp -a /var/lib/postgresql/data/. /to/'\n```\n\n`--volumes-from` mounts every volume of `orders-db-old` at the same paths in a throwaway Alpine container; `cp -a` keeps owners and permissions, which Postgres insists on.\n\n(The other common way is logical: `pg_dump` from the old database, `psql` into a new one. Copying files is faster; dumps also work across Postgres versions.)\n\n## Start the new container on the named volume\n\n```bash\ndocker run -d --name orders-db \\\n  -e POSTGRES_PASSWORD=orders -e POSTGRES_USER=orders -e POSTGRES_DB=orders \\\n  -v orders-data:/var/lib/postgresql/data \\\n  postgres:16-alpine\ndocker logs orders-db | tail -3       # \"database system is ready to accept connections\" (no initdb)\ndocker exec orders-db psql -tA -U orders -d orders -c 'SELECT count(*) FROM orders'\n```\n\n## Clean up the old container and its anonymous volume\n\n```bash\ndocker rm -v orders-db-old            # -v also removes its anonymous volumes\ndocker volume ls                      # only orders-data\n```\n\n## Prove it survives\n\n```bash\ndocker rm -f orders-db\ndocker run -d --name orders-db -e POSTGRES_PASSWORD=orders -e POSTGRES_USER=orders -e POSTGRES_DB=orders \\\n  -v orders-data:/var/lib/postgresql/data postgres:16-alpine\n```\n\nSame data, brand-new container. Volumes are also how Kubernetes thinks about state: a PersistentVolumeClaim is the cluster's named volume.\n\nThen **Submit**.\n",
+    "idLabel": "10",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

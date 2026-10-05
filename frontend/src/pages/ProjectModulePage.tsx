@@ -5,6 +5,7 @@ import SparkProjectEditor from '../components/SparkProjectEditor';
 import WorkspaceMobileSwitcher, {
   type WorkspaceMobilePane,
 } from '../components/WorkspaceMobileSwitcher';
+import DesktopOnlyNotice from '../components/DesktopOnlyNotice';
 import { MAJORS_PATH, getProject, getProjectModule } from '../constants/projects';
 import { MINORS_PATH } from '../constants/minors';
 import { getModuleContent } from '../fixtures/projectModules';
@@ -658,7 +659,14 @@ export function ModuleWorkspace({
           </button>
         )}
 
-        {showWorkspace && (
+        {showWorkspace && isNarrow && (
+          <DesktopOnlyNotice
+              tools="code editor and scratch pad"
+              briefLabel="Read the theory"
+              onShowBrief={() => setMobilePane('brief')}
+            />
+        )}
+        {showWorkspace && !isNarrow && (
           <div className="col col-main">
             <div className="panel spark-ide-panel" style={{ flex: 1 }}>
               <SparkProjectEditor

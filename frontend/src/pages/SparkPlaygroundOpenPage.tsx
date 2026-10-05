@@ -3,7 +3,7 @@ import { Link, Navigate } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
 import { isAdminUser } from '../services/authApi';
 
-/** `/play/spark-playground/open` — starts a session (works for new-tab / middle-click). */
+/** `/track/spark-playground/open` — starts a session (works for new-tab / middle-click). */
 export default function SparkPlaygroundOpenPage(): JSX.Element {
   const { onOpenSparkPlayground, startError, currentUser } = useAppState();
   const isAdmin = Boolean(currentUser?.admin) || isAdminUser(currentUser);
@@ -19,7 +19,7 @@ export default function SparkPlaygroundOpenPage(): JSX.Element {
     });
   }, [onOpenSparkPlayground, isAdmin]);
 
-  if (!isAdmin) return <Navigate to="/play" replace />;
+  if (!isAdmin) return <Navigate to="/track" replace />;
 
   const error = localError || startError;
 
@@ -28,9 +28,9 @@ export default function SparkPlaygroundOpenPage(): JSX.Element {
       <header className="play-problems-hero">
         <div className="play-problems-hero-copy">
           <p className="play-papers-crumb">
-            <Link to="/play">Play</Link>
+            <Link to="/track">Tracks</Link>
             <span aria-hidden> / </span>
-            <Link to="/play/spark-playground">Spark Playground</Link>
+            <Link to="/track/spark-playground">Spark Playground</Link>
             <span aria-hidden> / </span>
             <span>Open</span>
           </p>
@@ -49,7 +49,7 @@ export default function SparkPlaygroundOpenPage(): JSX.Element {
         <div className="alert error">
           {error}
           {' '}
-          <Link to="/play/spark-playground">Back to catalog</Link>
+          <Link to="/track/spark-playground">Back to catalog</Link>
         </div>
       )}
     </div>

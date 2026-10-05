@@ -1,16 +1,10 @@
 # QuickByte Notification Service (lab image)
 
-## Build & push
+## Build & push (multi-arch: arm64 learner nodes + amd64)
 
 ```bash
-cd images/notification-service
-docker build --platform linux/amd64 -t devsetu/notification-service:v1.0 .
-docker push devsetu/notification-service:v1.0
-
-# Canary / blue-green labs need a distinct v1.1 tag
-docker build --platform linux/amd64 --build-arg APP_VERSION=v1.1 \
-  -t devsetu/notification-service:v1.1 .
-docker push devsetu/notification-service:v1.1
+# v1.0, plus v1.1 for the canary / blue-green labs
+./images/build-all.sh notification-service
 ```
 
 EKS nodes pull from Docker Hub; keep the repo **public** (or configure pull secrets).

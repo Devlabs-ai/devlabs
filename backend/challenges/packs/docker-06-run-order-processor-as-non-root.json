@@ -1,0 +1,47 @@
+{
+  "id": "docker-06-run-order-processor-as-non-root",
+  "number": 406,
+  "finalized": true,
+  "title": "Run Order Processor as Non-Root",
+  "description": "**SITUATION:**\n\nThe Kubernetes team will enforce `runAsNonRoot` on the cluster next month, and order-processor's image still runs as **root**. Inside the container, the app could rewrite its own code, and it would be first in line if anyone found a container escape.\n\n`~/order-processor` has a clean Dockerfile from the last lab. It just never says who the app should run as.\n\n**YOUR TASK:**\n\n1. Create a dedicated user in the image and run the app as that user.\n2. Keep the code read-only for the app.\n3. Build `quickbyte/order-processor:1.6` and run it.\n\n**SPEC:**\n\n- A user `orders` with UID `10001` and no login shell (`/usr/sbin/nologin`)\n- The image's `USER` is the **numeric** UID `10001`\n- The app user cannot modify `/app` or `/app/app.py`\n- Image `quickbyte/order-processor:1.6`, `ENV APP_VERSION=v1.6`\n- Container `op-16` from that image, host port `8084` → `8000`, serving `/health` with version `v1.6`\n\n**GOOD PRACTICES:**\n\n- Kubernetes' `runAsNonRoot` can only verify a **numeric** user.\n- Install packages as root, then switch with `USER` near the end of the Dockerfile.\n- `docker run --rm <image> id` shows who the image runs as.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "dockerfile",
+    "security",
+    "user"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Run Order Processor as Non-Root",
+    "brief": "Run Order Processor as Non-Root",
+    "solution": "# Solution — Run Order Processor as Non-Root\n\nUnless the image says otherwise, the process in a container runs as **root** (UID 0). It's not the host's full root, but it is root over everything in the container, and the first in line if someone finds a container escape. Same rule as the Linux track: services run as a dedicated, unprivileged user.\n\nDocs: [USER](https://docs.docker.com/reference/dockerfile/#user) · [Dockerfile best practices](https://docs.docker.com/build/building/best-practices/#user)\n\n## See the problem\n\n```bash\ncd ~/order-processor\ndocker build -t quickbyte/order-processor:1.6 .\ndocker run --rm quickbyte/order-processor:1.6 id         # uid=0(root)\ndocker run --rm --entrypoint sh quickbyte/order-processor:1.6 -c 'echo hacked >> /app/app.py && echo writable'\n```\n\n## The Dockerfile\n\n```dockerfile\nFROM python:3.12-slim\n\nRUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin orders\n\nWORKDIR /app\n\nCOPY requirements.txt .\nCOPY wheels/ ./wheels/\nRUN pip install --no-cache-dir --no-index --find-links=wheels -r requirements.txt \\\n    && rm -rf wheels\n\nCOPY app.py .\n\nENV APP_VERSION=v1.6\nEXPOSE 8000\n\nUSER 10001\n\nCMD [\"gunicorn\", \"--bind\", \"0.0.0.0:8000\", \"--workers\", \"1\", \"--threads\", \"2\", \"app:app\"]\n```\n\n- `useradd --system --uid 10001`: a fixed, high UID that won't collide with users on the host or in other images. `--shell /usr/sbin/nologin`: nobody logs in as it.\n- **`USER 10001`, numeric**, not `USER orders`. Kubernetes' `runAsNonRoot: true` checks the image's user, and it can only prove a **number** isn't 0.\n- `USER` goes **after** `pip install`: installing packages needs root; running the app doesn't.\n- The code stays owned by **root** and is only readable by `orders`. If the app is compromised, it can't rewrite itself. (Only `chown` the directories the app must write to, if any.)\n- Port 8000 is above 1024, so a non-root user can bind it. Ports below 1024 would need root or a capability.\n\n## Build and run\n\n```bash\ndocker build -t quickbyte/order-processor:1.6 ~/order-processor\ndocker run --rm quickbyte/order-processor:1.6 id              # uid=10001(orders)\ndocker run -d --name op-16 -p 8084:8000 quickbyte/order-processor:1.6\ncurl http://127.0.0.1:8084/health\ndocker exec op-16 ps -o user,pid,cmd 2>/dev/null || docker top op-16\n```\n\n`docker top op-16` shows the process from the **host's** side, as UID 10001.\n\nThen **Submit**.\n",
+    "idLabel": "06",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

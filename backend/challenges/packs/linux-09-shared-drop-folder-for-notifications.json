@@ -1,0 +1,46 @@
+{
+  "id": "linux-09-shared-drop-folder-for-notifications",
+  "number": 309,
+  "finalized": true,
+  "title": "Shared Drop Folder for Notifications",
+  "description": "**SITUATION:**\n\n**notification-service** picks up messages from a drop folder. Two bots write into it: `order-bot` (order confirmations) and `payment-bot` (receipts). Both are in the `notify` group. The compliance team's `auditor` account needs to read everything but must never write.\n\nLast week's attempt went badly. payment-bot couldn't read order-bot's files, and then payment-bot's cleanup job deleted order-bot's messages. The folder `/srv/notifications/outbox` is currently root-only.\n\n**YOUR TASK:**\n\n1. Give the folder to group `notify`, with full access for the owner and group and none for others.\n2. Make new files inherit the folder's group, so every bot can read every message.\n3. Stop bots from deleting files they don't own.\n4. Give `auditor` read-only access to the folder and to every file created in it later, without adding auditor to `notify`.\n\n**SPEC:**\n\n- `/srv/notifications/outbox`: owner `root`, group `notify`, mode `3770` (setgid + sticky + `rwxrwx---`)\n- ACL `user:auditor:r-x` and a **default** ACL for auditor (`default:user:auditor:r-x`)\n- A file order-bot creates there belongs to group `notify`; payment-bot can read it but not delete it\n- auditor can list the folder and read files but can't create any; other users can't even list it\n\n**GOOD PRACTICES:**\n\n- `ls -ld` shows the special bits: `s` for setgid, `t`/`T` for sticky, and a trailing `+` when an ACL exists.\n- Default ACLs (`setfacl -d`) apply to files created later; normal ACLs apply only to what exists now.\n- Test as each user with `sudo -u <user> ...` before you submit.\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "permissions",
+    "acl"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Shared Drop Folder for Notifications",
+    "brief": "Shared Drop Folder for Notifications",
+    "solution": "# Solution — Shared Drop Folder for Notifications\n\nPlain `rwx` modes have three limits for shared folders:\n- New files get the creator's own group, so teammates can't read them. The **setgid** bit on the directory fixes that.\n- Anyone who can write the directory can delete anyone's file. The **sticky** bit fixes that.\n- There's only one group slot, so a read-only outsider can't be given access. **ACLs** fix that.\n\nDocs: `man chmod` (SETUID AND SETGID BITS, RESTRICTED DELETION FLAG) · `man setfacl` · `man getfacl`\n\n## Group ownership and special bits\n\n```bash\nsudo chgrp notify /srv/notifications/outbox\nsudo chmod 3770 /srv/notifications/outbox\nls -ld /srv/notifications/outbox        # drwxrws--T  root notify\n```\n\nThe leading `3` is `2` (setgid) plus `1` (sticky). In `ls`, an `s` in the group slot means setgid, and a `T`/`t` in the others slot means sticky.\n\n## ACL for the auditor\n\n```bash\nsudo setfacl -m u:auditor:rx /srv/notifications/outbox        # access now\nsudo setfacl -d -m u:auditor:rx /srv/notifications/outbox     # default: inherited by new files\ngetfacl /srv/notifications/outbox\nls -ld /srv/notifications/outbox        # a trailing + means an ACL is set\n```\n\n## Prove it\n\n```bash\nsudo -u order-bot   sh -c 'echo hi > /srv/notifications/outbox/o1'\nls -l /srv/notifications/outbox/o1                                     # group notify\nsudo -u payment-bot cat /srv/notifications/outbox/o1                   # works\nsudo -u payment-bot rm  /srv/notifications/outbox/o1                   # Operation not permitted (sticky)\nsudo -u auditor     cat /srv/notifications/outbox/o1                   # works (ACL)\nsudo -u auditor     touch /srv/notifications/outbox/a1                 # Permission denied\nsudo rm /srv/notifications/outbox/o1\n```\n\nThen **Submit**.\n",
+    "idLabel": "09",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "notification-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

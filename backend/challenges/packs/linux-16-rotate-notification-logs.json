@@ -1,0 +1,46 @@
+{
+  "id": "linux-16-rotate-notification-logs",
+  "number": 316,
+  "finalized": true,
+  "title": "Rotate Notification Logs",
+  "description": "**SITUATION:**\n\n`/var/log/notification-service/notification.log` has never been rotated. It's tens of thousands of lines and growing every few seconds. On the last box where this happened, the disk filled up and order confirmations stopped. **notification-service** opens its log once at startup and keeps writing to that open file. It never reopens it.\n\n**YOUR TASK:**\n\n1. Look at the log directory and confirm the service keeps the log open (`lsof`).\n2. Write a logrotate rule for every `.log` file in `/var/log/notification-service/`:\n   - rotate **daily** and keep **7** old logs,\n   - **compress** old logs,\n   - don't fail if a log is missing, and skip empty logs,\n   - keep the service writing to `notification.log` after rotation, **without restarting it**.\n3. Dry-run it, then force a rotation and confirm new lines still land in `notification.log`.\n\n**SPEC:**\n\n- `/etc/logrotate.d/notification-service`: owned by root, block for `/var/log/notification-service/*.log`\n- Directives: `daily`, `rotate 7`, `compress`, `missingok`, `notifempty`, `copytruncate`\n- `logrotate -d` reports no errors\n- After a forced rotation, `notification.log.1` (or `.1.gz`) exists, `notification.log` is the same file (truncated), and the running service keeps writing to it\n\n**GOOD PRACTICES:**\n\n- Read the existing rules in `/etc/logrotate.d/` before writing your own.\n- `logrotate -d` is a dry run; `-f` forces a rotation now.\n- Choose `copytruncate` versus `create` + `postrotate` based on whether the app can reopen its logs.\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "logs",
+    "logrotate"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Rotate Notification Logs",
+    "brief": "Rotate Notification Logs",
+    "solution": "# Solution — Rotate Notification Logs\n\n`logrotate` runs daily (from a systemd timer or cron). It renames `x.log` to `x.log.1`, compresses old copies and deletes the oldest. One question matters most: **does the service reopen its log?** notification-service doesn't. It keeps the file open forever. A plain rename would leave it writing into `notification.log.1`, so use `copytruncate`: copy the content out, then truncate the original in place.\n\nDocs: `man logrotate`\n\n## Inspect\n\n```bash\nls -lh /var/log/notification-service/\nsudo lsof /var/log/notification-service/notification.log     # the service holds it open\ncat /etc/logrotate.conf; ls /etc/logrotate.d/                # examples to copy from\n```\n\n## Write the rule\n\n```bash\nsudo tee /etc/logrotate.d/notification-service >/dev/null <<'EOF'\n/var/log/notification-service/*.log {\n    daily\n    rotate 7\n    compress\n    delaycompress\n    missingok\n    notifempty\n    copytruncate\n}\nEOF\n```\n\n| Directive | Why |\n|-----------|-----|\n| `daily`, `rotate 7` | one file per day, keep a week |\n| `compress`, `delaycompress` | gzip old logs, but leave the newest `.1` plain for easy reading |\n| `missingok`, `notifempty` | don't error on a missing file; skip empty ones |\n| `copytruncate` | the service keeps its file open, so truncate in place |\n\nIf the service could reopen its logs on a signal, `create` plus a `postrotate` running `systemctl reload ...` would be cleaner. With copytruncate, a few lines can be lost between the copy and the truncate.\n\n## Test\n\n```bash\nsudo logrotate -d /etc/logrotate.d/notification-service      # dry run\nsudo logrotate -f /etc/logrotate.d/notification-service      # force one rotation now\nls -lh /var/log/notification-service/\ntail -f /var/log/notification-service/notification.log       # new heartbeats keep arriving\n```\n\nThen **Submit**.\n",
+    "idLabel": "16",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "notification-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

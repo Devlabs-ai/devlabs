@@ -53,7 +53,29 @@ function detectLanguage(filePath: string): string {
   if (ext === 'sql') return 'sql';
   if (ext === 'ts' || ext === 'tsx') return 'typescript';
   if (ext === 'js' || ext === 'jsx') return 'javascript';
+  if (ext === 'csv') return 'csv';
   return 'plaintext';
+}
+
+let csvLanguageRegistered = false;
+
+function ensureCsvLanguage(monaco: typeof Monaco): void {
+  if (csvLanguageRegistered) return;
+  csvLanguageRegistered = true;
+  monaco.languages.register({ id: 'csv' });
+  monaco.languages.setMonarchTokensProvider('csv', {
+    defaultToken: 'string',
+    tokenizer: {
+      root: [
+        [/^(date,cabin,snack,status,cents).*$/, 'type'],
+        [/\b(successful|failed|paid|refund)\b/, 'keyword'],
+        [/\d{4}-\d{2}-\d{2}/, 'number'],
+        [/,(\s*)(\d{2,})\b/, 'number'],
+        [/[,]/, 'operator'],
+        [/[^,\n]+/, 'string'],
+      ],
+    },
+  });
 }
 
 const LINE_HEIGHT_PX = 18;
@@ -101,6 +123,7 @@ export default function ReadOnlyCodePane({
   );
 
   function handleMount(editor: MonacoEditorNS.IStandaloneCodeEditor, monaco: typeof Monaco): void {
+    ensureCsvLanguage(monaco);
     defineTheme(monaco);
     monaco.editor.setTheme(THEME_NAME);
     editor.updateOptions({

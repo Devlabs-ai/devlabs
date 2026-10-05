@@ -1,0 +1,47 @@
+{
+  "id": "docker-05-multi-stage-build-for-reconciliation",
+  "number": 405,
+  "finalized": true,
+  "title": "Multi-Stage Build for Reconciliation",
+  "description": "**SITUATION:**\n\nThe nightly reconciliation job was rewritten in Go. The source is in `~/reconciliation`, and the Dockerfile works, but the image is around **250 MB**: it ships the entire Go compiler to run one small binary. Every node pulls all of it, and every tool in there is something an attacker could use.\n\n**YOUR TASK:**\n\n1. Rewrite the Dockerfile as a **multi-stage** build: compile in one stage, ship only the binary in the next.\n2. Build `quickbyte/order-reconciliation:2.0`.\n\n**SPEC:**\n\n- At least two `FROM` stages, and the binary copied across with `COPY --from=...`\n- Image `quickbyte/order-reconciliation:2.0`, **20 MB or less**\n- No Go toolchain (`/usr/local/go`) and no source code in the image\n- `docker run --rm quickbyte/order-reconciliation:2.0` runs the job built from `~/reconciliation` in mode `full`\n- Arguments reach the binary: `docker run --rm quickbyte/order-reconciliation:2.0 --mode=incremental` runs mode `incremental`\n\n**GOOD PRACTICES:**\n\n- Name stages: `FROM golang:1.23-alpine AS build`.\n- `CGO_ENABLED=0` builds a static binary that runs on Alpine, or even on an empty `scratch` image.\n- `ENTRYPOINT` is the program, `CMD` its default arguments.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "dockerfile",
+    "multi-stage",
+    "image-size"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Multi-Stage Build for Reconciliation",
+    "brief": "Multi-Stage Build for Reconciliation",
+    "solution": "# Solution — Multi-Stage Build for Reconciliation\n\nTo **build** a Go program you need the Go toolchain (hundreds of MB). To **run** it you need one static binary. A multi-stage Dockerfile uses a big image to build and a tiny one to ship, and copies only the result across.\n\nDocs: [Multi-stage builds](https://docs.docker.com/build/building/multi-stage/)\n\n## See the problem\n\n```bash\ncd ~/reconciliation\ndocker build -t reconciliation:fat .\ndocker images reconciliation:fat       # ~250 MB to run a 2 MB program\ndocker run --rm --entrypoint go reconciliation:fat version     # the whole toolchain ships too\n```\n\nEvery extra MB is pulled on every node, and every extra tool (compiler, shell, package manager) is something an attacker can use.\n\n## Two stages\n\n```dockerfile\n# ---- build ----\nFROM golang:1.23-alpine AS build\nWORKDIR /src\nCOPY go.mod main.go ./\nRUN CGO_ENABLED=0 go build -ldflags=\"-s -w\" -o /out/reconciliation .\n\n# ---- run ----\nFROM alpine:3.20\nCOPY --from=build /out/reconciliation /usr/local/bin/reconciliation\nUSER 65534\nENTRYPOINT [\"/usr/local/bin/reconciliation\"]\nCMD [\"--mode=full\"]\n```\n\n- `AS build` names the first stage; `COPY --from=build` copies a file out of it. Nothing else from that stage reaches the final image.\n- `CGO_ENABLED=0` makes a fully static binary that needs no C library, so it runs on Alpine (or even `FROM scratch`, an empty image).\n- `-ldflags=\"-s -w\"` strips debug symbols: smaller binary.\n- **ENTRYPOINT + CMD**: the entrypoint is the program; CMD supplies default arguments. `docker run IMAGE --mode=incremental` replaces only the CMD part.\n\n## Build and run\n\n```bash\ndocker build -t quickbyte/order-reconciliation:2.0 ~/reconciliation\ndocker images quickbyte/order-reconciliation      # a few MB\ndocker run --rm quickbyte/order-reconciliation:2.0\n# reconciliation build=R-.... mode=full\ndocker run --rm quickbyte/order-reconciliation:2.0 --mode=incremental\n```\n\n## Going further: FROM scratch\n\n```dockerfile\nFROM scratch\nCOPY --from=build /out/reconciliation /reconciliation\nENTRYPOINT [\"/reconciliation\"]\nCMD [\"--mode=full\"]\n```\n\n`scratch` has no shell and no files at all: the smallest and most locked-down option, but you can't `docker exec ... sh` into it to debug. Alpine is a common middle ground.\n\nThen **Submit**.\n",
+    "idLabel": "05",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

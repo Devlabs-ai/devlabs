@@ -3,17 +3,13 @@ import { Link, Navigate, useParams } from 'react-router-dom';
 import { ModuleWorkspace } from './ProjectModulePage';
 import { MINORS, MINORS_PATH, getMinor } from '../constants/minors';
 import { getMinorContent, hasMinorContent } from '../fixtures/projectModules';
+import NotifyButton from '../components/NotifyButton';
 
 function MinorsIndex(): JSX.Element {
   return (
     <div className="app-page play-problems-page">
       <header className="play-problems-hero">
         <div className="play-problems-hero-copy">
-          <p className="play-papers-crumb">
-            <Link to="/play">Play</Link>
-            <span aria-hidden> / </span>
-            <Link to={MINORS_PATH}>Minors</Link>
-          </p>
           <h1 className="play-problems-title">Minors</h1>
           <p className="play-problems-lead">
             Small independent builds. One sitting, one working program — a
@@ -30,10 +26,18 @@ function MinorsIndex(): JSX.Element {
               <div key={minor.id} className="playground-tile playground-tile--soon">
                 <strong className="playground-tile-title">
                   {minor.name}
-                  <span className="playground-tile-soon">Soon</span>
+                  <span className="playground-tile-soon">Coming soon</span>
+                  <NotifyButton kind="minor" itemId={minor.id} label={minor.name} />
                 </strong>
                 <p className="project-tile-subtitle">{minor.subtitle}</p>
                 <p className="playground-tile-blurb">{minor.blurb}</p>
+                <ul className="playground-tile-facts">
+                  {minor.facts.map((fact) => (
+                    <li key={fact} className="playground-tile-fact">
+                      {fact}
+                    </li>
+                  ))}
+                </ul>
               </div>
             );
           }
@@ -43,7 +47,7 @@ function MinorsIndex(): JSX.Element {
               <p className="project-tile-subtitle">{minor.subtitle}</p>
               <p className="playground-tile-blurb">{minor.blurb}</p>
               <ul className="playground-tile-facts">
-                <li className="playground-tile-fact">{minor.language}</li>
+                {minor.language && <li className="playground-tile-fact">{minor.language}</li>}
                 {minor.facts.map((fact) => (
                   <li key={fact} className="playground-tile-fact">
                     {fact}
@@ -68,7 +72,7 @@ export default function MinorsPage(): JSX.Element {
   if (!minorId) return <MinorsIndex />;
 
   const minor = getMinor(minorId);
-  if (!minor) return <Navigate to={MINORS_PATH} replace />;
+  if (!minor || minor.status !== 'ready') return <Navigate to={MINORS_PATH} replace />;
 
   const content = getMinorContent(minor.id);
   if (!content) return <Navigate to={MINORS_PATH} replace />;

@@ -1,0 +1,47 @@
+{
+  "id": "docker-01-run-order-processor-in-a-container",
+  "number": 401,
+  "finalized": true,
+  "title": "Run Order Processor in a Container",
+  "description": "**SITUATION:**\n\nQA wants **order-processor v1.1** running on the order box. In the Linux track you installed it as a binary and wrote a systemd unit; this time it ships as an image on Docker Hub: `devsetu/order-processor`.\n\nA teammate already tried: there's a container called `order-processor` on the box, but it's the old **v1.0** and was never started.\n\n**YOUR TASK:**\n\n1. Replace the stale container with one running `devsetu/order-processor:v1.1`.\n2. Make it reachable on the box's port **8080** (the app listens on **8000** inside the container), with debug logging.\n3. Place a test order and record its ID.\n4. Find out which user the app runs as **inside** the container.\n\n**SPEC:**\n\n- Container `order-processor`: image `devsetu/order-processor:v1.1`, **running**\n- Host port `8080` → container port `8000`\n- Environment `LOG_LEVEL=DEBUG`\n- `curl http://127.0.0.1:8080/health` returns `{\"status\":\"ok\",\"version\":\"v1.1\"}`\n- `~/answers/order-id`: the `order_id` returned by `POST http://127.0.0.1:8080/orders` with body `{\"customer_id\":\"c-42\",\"items\":[\"masala-dosa\"],\"total\":25}` (header `Content-Type: application/json`)\n- `~/answers/app-user`: the user name the app process runs as inside the container\n\n**GOOD PRACTICES:**\n\n- Container names are unique; remove what's in the way with `docker rm`.\n- `-p HOST:CONTAINER` publishes a port; `-e KEY=value` sets an environment variable.\n- `docker exec <name> <command>` runs a command inside a running container.\n",
+  "difficulty": "L0",
+  "tags": [
+    "docker",
+    "l0",
+    "ports",
+    "environment",
+    "exec"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Run Order Processor in a Container",
+    "brief": "Run Order Processor in a Container",
+    "solution": "# Solution — Run Order Processor in a Container\n\nOn a plain server you installed order-processor, wrote a systemd unit and opened a port. With Docker, the image already contains the app and everything it needs; you choose **which version**, **which port** and **which settings** when you start it.\n\nDocs: `docker run --help` (look for `-p`, `-e`, `--name`, `-d`) · `docker exec --help`\n\n## Clear the name\n\n```bash\ndocker ps -a\n# order-processor   devsetu/order-processor:v1.0   Created\ndocker run -d --name order-processor devsetu/order-processor:v1.1\n# Error: Conflict. The container name \"/order-processor\" is already in use\ndocker rm order-processor\n```\n\nNames are unique per machine. A container that was only **created** (never started) still holds its name until you remove it.\n\n## Pull and run v1.1\n\n```bash\ndocker pull devsetu/order-processor:v1.1\ndocker run -d --name order-processor \\\n  -p 8080:8000 \\\n  -e LOG_LEVEL=DEBUG \\\n  devsetu/order-processor:v1.1\ndocker ps\ndocker logs order-processor\n```\n\n- `-p 8080:8000` publishes **host** port 8080 to **container** port 8000. The app listens on 8000 inside its own network namespace; without `-p` nothing outside the container can reach it.\n- `-e LOG_LEVEL=DEBUG` sets an environment variable for the process. Same image, different settings: no rebuild.\n- `docker pull` is optional (`run` pulls a missing image), but it's good to see where images come from: `devsetu/order-processor` on Docker Hub, tag `v1.1`.\n\n## Check it and place an order\n\n```bash\ncurl http://127.0.0.1:8080/health\n# {\"status\":\"ok\",\"version\":\"v1.1\"}\n\ncurl -s -X POST http://127.0.0.1:8080/orders \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"customer_id\":\"c-42\",\"items\":[\"masala-dosa\"],\"total\":25}'\n# {\"order_id\":\"ORD-1A2B3C4D\",\"status\":\"created\",...}\n\nmkdir -p ~/answers\ncurl -s -X POST http://127.0.0.1:8080/orders -H 'Content-Type: application/json' \\\n  -d '{\"customer_id\":\"c-42\",\"items\":[\"masala-dosa\"],\"total\":25}' | jq -r .order_id > ~/answers/order-id\ndocker logs order-processor | tail -3   # INFO created ORD-...\n```\n\n## Look inside the running container\n\n```bash\ndocker exec order-processor id -un      # nobody\ndocker exec order-processor id -un > ~/answers/app-user\ndocker exec -it order-processor sh      # an interactive shell inside; exit to leave\ndocker inspect order-processor | less   # everything Docker knows: env, ports, mounts, state\n```\n\n`docker exec` runs an extra process in an existing container. The image's Dockerfile set `USER nobody`, so the app doesn't run as root, just like `User=orders` in the systemd unit from the Linux track.\n\nThen **Submit**.\n",
+    "idLabel": "01",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

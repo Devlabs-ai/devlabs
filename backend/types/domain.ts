@@ -137,15 +137,43 @@ export interface K8sLimitRangeSpec {
 
 /** Namespaced Kubernetes lab (per-user Namespace + setup/grade scripts). */
 export interface K8sPlatformSpec {
-  /** Namespace ResourceQuota hard caps (requests + limits). */
-  quota?: { pods?: string; cpu?: string; memory?: string };
+  /**
+   * Namespace ResourceQuota hard caps. Legacy cpu/memory apply to both requests
+   * and limits; requests/limits override them per side.
+   */
+  quota?: {
+    pods?: string;
+    cpu?: string;
+    memory?: string;
+    requests?: { cpu?: string; memory?: string };
+    limits?: { cpu?: string; memory?: string };
+  };
   /** Optional LimitRange overrides (defaults applied when omitted). */
   limitRange?: K8sLimitRangeSpec;
+  /** Pods held as reserved balloon slots while the lab is open (default quota pods − 3). */
+  reservePods?: number;
+  /** Balloon slots (40m / 64Mi each) one lab pod needs when it is larger (default 1). */
+  slotsPerPod?: number;
   setup?: { script?: string };
   grade?: { script?: string; timeoutSeconds?: number };
   /** Hands-on only: no Submit, no grading, no tokens or leaderboard credit. */
   practice?: boolean;
+  /** sandboxType "linux" / "docker" only: the learner machine (workspace/linuxBox). */
+  box?: LinuxBoxSpec;
   [key: string]: unknown;
+}
+
+/** Box labs: "linux" is the plain machine, "docker" the same machine running dockerd. */
+export type BoxFlavor = 'linux' | 'docker';
+
+export interface LinuxBoxSpec {
+  /** Defaults to the flavor's image: LINUX_LAB_IMAGE / DOCKER_LAB_IMAGE. */
+  image?: string;
+  hostname?: string;
+  resources?: {
+    requests?: { cpu?: string; memory?: string };
+    limits?: { cpu?: string; memory?: string };
+  };
 }
 
 export type BoardLaneId = string;

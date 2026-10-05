@@ -1,0 +1,46 @@
+{
+  "id": "linux-12-run-order-processor-as-a-service",
+  "number": 312,
+  "finalized": true,
+  "title": "Run Order Processor as a Service",
+  "description": "**SITUATION:**\n\nOn the order box, **order-processor** only runs when someone starts it by hand in a terminal. Last night the box rebooted, nobody restarted it, and orders queued for hours. Before it moved to Kubernetes, this is how every service on a Linux server was kept alive: **systemd**.\n\nThe binary is installed at `/opt/order-processor/bin/order-processor`. It refuses to run as root, and reads its port from `ORDER_PROCESSOR_PORT`, set in `/etc/order-processor/order-processor.env`. A system user `orders` already exists.\n\n**YOUR TASK:**\n\n1. Try running the binary by hand and read why it won't start.\n2. Write a systemd unit for it.\n3. Load it, **enable** it for boot, and **start** it.\n4. Prove it comes back after a crash: `kill -9` the main PID and watch systemd restart it.\n\n**SPEC:**\n\n- Unit file: `/etc/systemd/system/order-processor.service`\n- `ExecStart`: `/opt/order-processor/bin/order-processor`\n- Runs as `User=orders`\n- Settings from `EnvironmentFile=/etc/order-processor/order-processor.env` (don't copy the values into the unit)\n- `Restart=on-failure`\n- Enabled via `[Install] WantedBy=multi-user.target`, and **active** now\n- `curl http://127.0.0.1:8080/health` returns `{\"status\":\"ok\",...}`\n\n**GOOD PRACTICES:**\n\n- Run `systemctl daemon-reload` after every edit to a unit file.\n- Debug with `systemctl status order-processor` and `journalctl -u order-processor`.\n- `enable --now` enables and starts in one step.\n- The grader kills the process; it must come back without you.\n",
+  "difficulty": "L0",
+  "tags": [
+    "linux",
+    "l0",
+    "systemd",
+    "services"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Run Order Processor as a Service",
+    "brief": "Run Order Processor as a Service",
+    "solution": "# Solution — Run Order Processor as a Service\n\nRight now order-processor only runs while someone keeps a terminal open. A **systemd unit** makes systemd own the process: start it on boot, run it as a dedicated user, feed it its settings, and restart it when it crashes.\n\nDocs: `man systemd.service` · `man systemd.exec` (User=, EnvironmentFile=) · `man systemd.unit` ([Install])\n\n## See why it can't run by hand\n\n```bash\n/opt/order-processor/bin/order-processor\n# ORDER_PROCESSOR_PORT is not set\nsudo /opt/order-processor/bin/order-processor\n# refusing to run as root\ncat /etc/order-processor/order-processor.env\nid orders\n```\n\n## Write the unit\n\n```bash\nsudo nano /etc/systemd/system/order-processor.service\n```\n\n```ini\n[Unit]\nDescription=Order Processor\nAfter=network.target\n\n[Service]\nUser=orders\nGroup=orders\nEnvironmentFile=/etc/order-processor/order-processor.env\nExecStart=/opt/order-processor/bin/order-processor\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=multi-user.target\n```\n\n- `User=` — run as `orders`, never root.\n- `EnvironmentFile=` — settings stay in `/etc/order-processor/`; ops can change the port without editing the unit.\n- `Restart=on-failure` — restart on a crash or non-zero exit, but not after a clean `systemctl stop`.\n- `WantedBy=multi-user.target` — what `systemctl enable` hooks into, so it starts on boot.\n\n## Load, enable, start\n\n```bash\nsudo systemctl daemon-reload                    # pick up the new/changed unit file\nsudo systemctl enable --now order-processor     # enable for boot + start now\nsystemctl status order-processor\njournalctl -u order-processor -n 20\ncurl http://127.0.0.1:8080/health\n```\n\n## Prove it survives a crash\n\n```bash\nsudo kill -9 \"$(systemctl show -p MainPID --value order-processor)\"\nsleep 3\nsystemctl status order-processor                # active again, new PID\n```\n\nThen **Submit**. The grader kills the process too and expects systemd to bring it back.\n",
+    "idLabel": "12",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

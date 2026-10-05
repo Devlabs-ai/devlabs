@@ -12,9 +12,9 @@ export default function K8sPrimerPage(): JSX.Element {
       <article className="spark-primer-notebook">
         <header className="spark-primer-header">
           <p className="spark-primer-crumb">
-            <Link to="/play">Tracks</Link>
+            <Link to="/track">Tracks</Link>
             <span aria-hidden> / </span>
-            <Link to="/play/devops-engineer">DevOps Engineer</Link>
+            <Link to="/track/devops-engineer">DevOps Engineer</Link>
             <span aria-hidden> / </span>
             <Link to={K8S_LABS_PATH}>Kubernetes</Link>
             <span aria-hidden> / </span>

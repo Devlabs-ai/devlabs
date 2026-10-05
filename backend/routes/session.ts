@@ -11,9 +11,11 @@ const sparkLifecycle = require('../workspace/sparkLifecycle');
 const sparkJobs = require('../workspace/sparkJobs');
 const boardLifecycle = require('../workspace/boardLifecycle');
 const k8sLifecycle = require('../workspace/k8sLifecycle');
+const k8sCapacity = require('../workspace/k8sCapacity');
 const k8sGrade = require('../workspace/k8sGrade');
 const k8sCluster = require('../workspace/k8sCluster');
 const k8sLabFiles = require('../workspace/k8sLabFiles');
+const { isBoxLabType } = require('../challenges/labTypes');
 const { publicBoardSpec } = require('../workspace/boardGrade');
 const workspaceStore = require('../workspace/workspaceStore');
 const sessionStore = require('../db/sessionStore');
@@ -28,10 +30,22 @@ const { handleBrowse, listBrowseServices } = require('../sandbox/sessionBrowsePr
 const router = express.Router();
 
 /** Any /:id session traffic counts as activity (keeps idle timer fresh). */
-router.param('id', (req: ExpressRequest, _res: ExpressResponse, next: ExpressNextFunction, id: string) => {
+router.param('id', (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction, id: string) => {
   const p = String(req.path || '');
+  const leaseRoute = p.endsWith('/heartbeat') || p.endsWith('/lease/release');
+  // A tab that lost the lab to another tab may still read, but not change it.
+  if (id && !leaseRoute && req.method !== 'GET' && req.method !== 'HEAD') {
+    const header = req.headers['x-lab-client'];
+    const clientId = typeof header === 'string' && header.trim() ? header.trim().slice(0, 128) : null;
+    if (!sessionExclusivity.isLeaseHolder(id, clientId)) {
+      return res.status(409).json({
+        error: 'This lab is open in another tab or window.',
+        code: 'LAB_OPEN_IN_OTHER_TAB',
+      });
+    }
+  }
   // Tab heartbeats prove the tab is open, not that the learner is active.
-  if (id && !p.endsWith('/end') && !p.endsWith('/heartbeat') && !p.endsWith('/lease/release')) {
+  if (id && !p.endsWith('/end') && !leaseRoute) {
     sessionIdle.touch(id);
   }
   next();
@@ -94,6 +108,17 @@ function getK8sSession(id: string, res: ExpressResponse): GameSession | null {
   const ns = session.k8sNamespace || session.workspacePrefix;
   if (!ns) {
     res.status(409).json({ error: 'session missing namespace' });
+    return null;
+  }
+  return session;
+}
+
+/** Kubernetes-flavor labs only: learner kubectl and the lab-home file editor have no box-lab counterpart. */
+function getKubectlLabSession(id: string, res: ExpressResponse): GameSession | null {
+  const session = getK8sSession(id, res);
+  if (!session) return null;
+  if (isBoxLabType(loader.getChallenge(String(session.challengeId || ''))?.sandboxType)) {
+    res.status(409).json({ error: 'not available in Linux or Docker labs' });
     return null;
   }
   return session;
@@ -456,6 +481,28 @@ router.post('/k8s/start', requireSessionAccess, async (req: ExpressRequest, res:
   }
 });
 
+// GET /api/session/k8s/capacity — the learner's pods waiting for a node (also while
+// /k8s/start is still in flight, before the client has a session id).
+router.get('/k8s/capacity', requireSessionAccess, (req: ExpressRequest, res: ExpressResponse) => {
+  const user = req.user as { sub?: string; id?: string; email?: string } | undefined;
+  const email = String(user?.email || '').trim().toLowerCase();
+  const userName = email.includes('@') ? email.slice(0, email.indexOf('@')) : (email || null);
+  const ns = k8sLifecycle.namespaceFor(user?.sub || user?.id || null, userName);
+  res.json({ waiting: k8sCapacity.waitingPods(ns), reservingSeconds: k8sCapacity.reservingSeconds(ns) });
+});
+
+// GET /api/session/k8s/availability?challengeId= — whether the lab's node pool is up,
+// so the client can open a locked lab (description only) without starting a session.
+router.get('/k8s/availability', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const challengeId = String(req.query.challengeId || '');
+    assertChallengeAccess(req, challengeId);
+    res.json(await k8sLifecycle.labAvailability(challengeId));
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.post('/:id/k8s/reset', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
   try {
     const session = getK8sSession(req.params.id, res);
@@ -508,7 +555,7 @@ router.get('/:id/k8s/submissions', requireSessionAccess, async (req: ExpressRequ
 
 router.post('/:id/k8s/exec', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
   try {
-    const session = getK8sSession(req.params.id, res);
+    const session = getKubectlLabSession(req.params.id, res);
     if (!session) return;
     const ns = String(session.k8sNamespace || session.workspacePrefix);
     const body = (req.body as Record<string, unknown>) || {};
@@ -549,7 +596,7 @@ type LabFilesHandler = (ns: string, req: ExpressRequest) => unknown;
 function labFilesRoute(handler: LabFilesHandler, opts: { touch?: boolean } = {}) {
   return (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction): void => {
     try {
-      const session = getK8sSession(req.params.id, res);
+      const session = getKubectlLabSession(req.params.id, res);
       if (!session) return;
       if (opts.touch) sessionIdle.touch(session.id);
       res.json(handler(String(session.k8sNamespace || session.workspacePrefix), req));

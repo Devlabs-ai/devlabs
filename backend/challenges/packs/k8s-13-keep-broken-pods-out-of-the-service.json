@@ -25,15 +25,21 @@
     ],
     "overview": "Keep Broken Pods Out of the Service",
     "brief": "Keep Broken Pods Out of the Service",
-    "solution": "# Solution — Keep Broken Pods Out of the Service\n\nStay in your lab namespace. Update Deployment `order-processor-deploy` with an HTTP **readiness** probe on `/health` so half-booted Pods stay out of Service Endpoints.\n\nDocs: [DevSetu Blog — Probes: Startup, Readiness, and Liveness](/play/devops-engineer/kubernetes/read/probes-liveness-readiness-startup) · [Readiness probe](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)\n\n## Solution YAML\n\nSave as `order-processor-readiness-l13.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: order-processor\n  template:\n    metadata:\n      labels:\n        app: order-processor\n    spec:\n      containers:\n        - name: order-processor\n          image: devsetu/order-processor:v1.2\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n          readinessProbe:\n            httpGet:\n              path: /health\n              port: 8000\n            initialDelaySeconds: 5\n            periodSeconds: 5\n            failureThreshold: 3\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-processor-readiness-l13.yaml\nkubectl get deploy order-processor-deploy\nkubectl get pods -l app=order-processor\nkubectl get endpoints order-processor-svc\n```\n\nWait until **2** Pods are Ready and `order-processor-svc` has Endpoints, then **Submit**.\n\nDo not remove the Service. Work only in your lab namespace (not `default`).\n",
+    "solution": "# Solution — Keep Broken Pods Out of the Service\n\nStay in your lab namespace. Update Deployment `order-processor-deploy` with an HTTP **readiness** probe on `/health` so half-booted Pods stay out of Service Endpoints.\n\nDocs: [DevSetu Blog — Probes: Startup, Readiness, and Liveness](/play/devops-engineer/kubernetes/read/probes-liveness-readiness-startup) · [Readiness probe](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)\n\n## Solution YAML\n\nSave as `order-processor-readiness-l13.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: order-processor\n  template:\n    metadata:\n      labels:\n        app: order-processor\n    spec:\n      containers:\n        - name: order-processor\n          image: devsetu/order-processor:v1.2\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"20m\"\n              memory: \"32Mi\"\n            limits:\n              cpu: \"40m\"\n              memory: \"64Mi\"\n          readinessProbe:\n            httpGet:\n              path: /health\n              port: 8000\n            initialDelaySeconds: 5\n            periodSeconds: 5\n            failureThreshold: 3\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-processor-readiness-l13.yaml\nkubectl get deploy order-processor-deploy\nkubectl get pods -l app=order-processor\nkubectl get endpoints order-processor-svc\n```\n\nWait until **2** Pods are Ready and `order-processor-svc` has Endpoints, then **Submit**.\n\nDo not remove the Service. Work only in your lab namespace (not `default`).\n",
     "idLabel": "13",
     "theory": ""
   },
   "platformSpec": {
     "quota": {
-      "pods": "10",
-      "cpu": "800m",
-      "memory": "896Mi"
+      "pods": "6",
+      "requests": {
+        "cpu": "120m",
+        "memory": "192Mi"
+      },
+      "limits": {
+        "cpu": "240m",
+        "memory": "384Mi"
+      }
     },
     "setup": {
       "script": "setup.sh"

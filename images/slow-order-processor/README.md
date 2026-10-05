@@ -7,7 +7,5 @@ probe, kubelet kills mid-warmup → CrashLoopBackOff.
 Image: `devsetu/slow-order-processor:1.0`
 
 ```bash
-cd images/slow-order-processor
-docker build --platform linux/amd64 -t devsetu/slow-order-processor:1.0 .
-docker push devsetu/slow-order-processor:1.0
+./images/build-all.sh slow-order-processor   # multi-arch: arm64 + amd64
 ```

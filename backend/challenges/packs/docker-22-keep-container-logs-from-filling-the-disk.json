@@ -1,0 +1,47 @@
+{
+  "id": "docker-22-keep-container-logs-from-filling-the-disk",
+  "number": 422,
+  "finalized": true,
+  "title": "Keep Container Logs from Filling the Disk",
+  "description": "**SITUATION:**\n\nThe order box's disk keeps filling up. The culprit is a chatty notifier container: Docker keeps every line a container prints, in a file on the box, and by default that file **never stops growing**. Someone also removed the log limits from Docker's configuration.\n\n**YOUR TASK:**\n\n1. Find where the chatty container's log file lives, then get rid of the container.\n2. Give every new container a log size limit by default.\n3. Run the notifier again with its own, tighter limit.\n\n**SPEC:**\n\n- `~/answers/chatty-log-path`: the path of `notifier-chatty`'s log file on the box\n- Container `notifier-chatty`: **removed**\n- `/etc/docker/daemon.json`: valid JSON, `log-driver` `json-file`, `log-opts` with `max-size` `\"10m\"` and `max-file` `\"3\"`, every existing setting kept\n- New containers actually get those defaults\n- Container `notifier`: image `devsetu/notification-service:v1.1`, **running**, `--restart unless-stopped`, `--log-opt max-size=5m --log-opt max-file=3`\n\n**GOOD PRACTICES:**\n\n- `docker inspect -f '{{.LogPath}}'` shows where a container's log is stored.\n- Editing `daemon.json` needs `sudo`; Docker reads it only when it starts, and a typo stops it from starting (check with `jq .` first).\n- Defaults apply to containers created **after** the restart.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "logging",
+    "daemon",
+    "disk"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Keep Container Logs from Filling the Disk",
+    "brief": "Keep Container Logs from Filling the Disk",
+    "solution": "# Solution — Keep Container Logs from Filling the Disk\n\nEverything a container prints to stdout/stderr is captured by Docker's **logging driver**. The default, `json-file`, writes it to a file on the host, and **by default that file grows forever**. A chatty container can fill the disk in days, and then everything on the machine fails at once. Same lesson as logrotate in the Linux track, applied to containers.\n\nDocs: [Configure logging drivers](https://docs.docker.com/engine/logging/configure/) · [json-file](https://docs.docker.com/engine/logging/drivers/json-file/)\n\n## Find the culprit\n\n```bash\ndocker ps --format '{{.Names}}'\ndocker inspect -f '{{.LogPath}}' notifier-chatty\nsudo ls -lh \"$(docker inspect -f '{{.LogPath}}' notifier-chatty)\"     # 40+ MB and growing\ndocker inspect -f '{{.LogPath}}' notifier-chatty > ~/answers/chatty-log-path\ndocker rm -f notifier-chatty         # the log file goes with the container\n```\n\n`docker logs` reads that same file. Never delete or truncate it by hand while the container runs; remove or recreate the container instead.\n\n## A sane default for every new container\n\n```bash\nsudo cat /etc/docker/daemon.json\nsudo nano /etc/docker/daemon.json\n```\n\nAdd `log-driver` and `log-opts`, **keeping everything that's already there** (the registry mirror, the networks...):\n\n```json\n{\n  \"registry-mirrors\": [\"...\"],\n  \"log-driver\": \"json-file\",\n  \"log-opts\": {\n    \"max-size\": \"10m\",\n    \"max-file\": \"3\"\n  }\n}\n```\n\n```bash\nsudo jq . /etc/docker/daemon.json          # validate: a typo here and Docker won't start\nsudo systemctl restart docker\ndocker run --rm alpine:3.20 true && echo ok\n```\n\n- Values in `log-opts` are **strings**: `\"3\"`, not `3`.\n- `max-size` × `max-file` = at most 30 MB per container: when the file reaches 10 MB it's rotated, and the oldest of 3 is deleted.\n- The daemon reads `daemon.json` only at **startup**, and the defaults apply to containers **created afterwards**. Existing containers keep the options they were created with.\n\n## Override per container\n\n```bash\ndocker run -d --name notifier --restart unless-stopped \\\n  --log-opt max-size=5m --log-opt max-file=3 \\\n  devsetu/notification-service:v1.1\ndocker inspect -f '{{json .HostConfig.LogConfig}}' notifier\n```\n\nCreate notifier **after** restarting Docker, or give it `--restart unless-stopped` (as here): a container without a restart policy stays stopped when the daemon restarts.\n\nIn production, logs usually go off the box entirely (to Loki, CloudWatch, Elasticsearch...) via a logging agent or a different driver. Local rotation is still the safety net.\n\nThen **Submit**.\n",
+    "idLabel": "22",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

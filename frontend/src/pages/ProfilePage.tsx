@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
 import { isAdminUser } from '../services/authApi';
 import { IconCoins } from '../components/ChromeIcons';
+import SubscriptionsPanel from '../components/SubscriptionsPanel';
 
 type ProfileSection = 'overview' | 'subscriptions' | 'contact' | 'preferences' | 'privacy';
 
@@ -155,25 +156,7 @@ export default function ProfilePage(): JSX.Element {
             </section>
           ) : null}
 
-          {section === 'subscriptions' ? (
-            <section className="profile-panel" aria-labelledby="profile-subs-heading">
-              <h2 id="profile-subs-heading" className="profile-panel-title">
-                Subscriptions
-              </h2>
-              <div className="profile-plan-card">
-                <p className="profile-plan-badge">Current plan</p>
-                <h3 className="profile-plan-name">Beta access</h3>
-                <p className="profile-plan-price">Free</p>
-                <p className="profile-panel-copy">
-                  You&apos;re on open beta — full practice floor while we grow. Paid plans will appear here
-                  when billing opens.
-                </p>
-                <Link to="/" className="profile-panel-link">
-                  View pricing on the home page
-                </Link>
-              </div>
-            </section>
-          ) : null}
+          {section === 'subscriptions' ? <SubscriptionsPanel /> : null}
 
           {section === 'contact' ? (
             <section className="profile-panel" aria-labelledby="profile-contact-heading">

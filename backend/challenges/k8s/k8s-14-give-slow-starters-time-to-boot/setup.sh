@@ -27,8 +27,11 @@ spec:
             - containerPort: 8000
           resources:
             requests:
-              cpu: "100m"
-              memory: "128Mi"
+              cpu: "20m"
+              memory: "32Mi"
+            limits:
+              cpu: "40m"
+              memory: "64Mi"
           # Aggressive on purpose: kills ~9s into the ~25s /health warmup.
           livenessProbe:
             httpGet:

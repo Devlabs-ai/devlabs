@@ -1,0 +1,46 @@
+{
+  "id": "linux-00-first-shift-on-the-order-box",
+  "number": 300,
+  "finalized": true,
+  "title": "First Shift on the Order Box",
+  "description": "**SITUATION:**\n\nIt's your first shift on the ops team at an online store. Ops is the team that keeps the company's servers running, so customers can always shop.\n\nYou've been handed the **order box**: the Linux server that runs **order-processor**, the program that handles every order customers place. If it stops, nobody can check out.\n\nThe previous on-call engineer, the person who answers when something breaks, left without writing anything down. Before anything goes wrong on your watch, look around the machine, find out what's installed and how it's set up, and leave notes for whoever comes next.\n\n**YOUR TASK:**\n\n1. Get your bearings: who you are, which machine you're on, where you are (`whoami`, `hostname`, `pwd`, `ls /`).\n2. Find the order-processor **release version**. It is installed under `/opt/order-processor` in a **hidden** file.\n3. Find the **port** order-processor listens on, in its config under `/etc/order-processor/`.\n4. Find the **biggest log file** in `/var/log/order-processor/`.\n5. Write your findings to `~/notes/first-shift.txt` as your own user (no `sudo`), one per line:\n   - Line 1: the release version (e.g. `1.4.2`)\n   - Line 2: the port (e.g. `8317`)\n   - Line 3: the biggest log's file **name**, not its full path (e.g. `orders-2026-09-14.log`)\n\n**GOOD PRACTICES:**\n\n- `ls -la` shows hidden files (names starting with `.`) and who owns what.\n- Values differ per learner — read them from your machine.\n",
+  "difficulty": "L0",
+  "tags": [
+    "linux",
+    "l0",
+    "shell",
+    "filesystem"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "First Shift on the Order Box",
+    "brief": "First Shift on the Order Box",
+    "solution": "# Solution — First Shift on the Order Box\n\nYou are logged in as `learner` on the order box. Everything here is plain shell navigation: `pwd`, `ls`, `cd`, `cat`, and `man` to look up flags you don't know yet.\n\nDocs: `man ls` · `man hier` (what each top-level directory is for)\n\n## Look around\n\n```bash\nwhoami                      # learner\nhostname                    # order-box\npwd                         # /home/learner\nls /                        # top-level directories\n```\n\n## Find the release version\n\nThe version lives in a **hidden** file (name starts with a dot), so plain `ls` won't show it:\n\n```bash\ncd /opt/order-processor\nls -la                      # -a shows dotfiles: .release\ncat .release\n```\n\n## Find the port\n\n```bash\ncat /etc/order-processor/app.conf\n# or just the line you need:\ngrep port /etc/order-processor/app.conf\n```\n\n## Find the biggest log file\n\n`man ls` → search with `/size` → `-S` sorts by file size, largest first:\n\n```bash\nls -lS /var/log/order-processor\nls -S /var/log/order-processor | head -1\n```\n\n## Write your notes\n\nCreate the folder and the file as `learner` (no `sudo` — the file must be yours):\n\n```bash\nmkdir -p ~/notes\ncd ~/notes\necho \"<version>\"  >  first-shift.txt    # e.g. 1.4.2\necho \"<port>\"     >> first-shift.txt    # e.g. 8317\necho \"<logfile>\"  >> first-shift.txt    # e.g. orders-2026-09-14.log\ncat first-shift.txt\n```\n\n`>` creates/overwrites the file, `>>` appends a line. Use the file **name** for line 3, not the full path. Then **Submit**.\n",
+    "idLabel": "00",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 5
+}

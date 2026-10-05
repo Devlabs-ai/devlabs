@@ -56,8 +56,8 @@ MEM="$(kubectl -n "$LEARNER_NS" get sts "$STS" -o jsonpath='{.spec.template.spec
 [[ "$DB" == "orders" ]] || fail "POSTGRES_DB must be orders"
 [[ "$PGDATA" == "/var/lib/postgresql/data/pgdata" ]] || fail "PGDATA must be /var/lib/postgresql/data/pgdata (got '${PGDATA}')"
 [[ "$FSG" == "70" ]] || fail "pod securityContext.fsGroup must be 70 (got '${FSG}')"
-case "$CPU" in 100m|0.1) ;; *) fail "cpu request must be 100m (got '${CPU}')" ;; esac
-[[ "$MEM" == "512Mi" ]] || fail "memory request must be 512Mi (got '${MEM}')"
+case "$CPU" in 20m|0.02) ;; *) fail "cpu request must be 20m (got '${CPU}')" ;; esac
+[[ "$MEM" == "64Mi" ]] || fail "memory request must be 64Mi (got '${MEM}')"
 [[ "${READY:-0}" == "2" ]] || fail "readyReplicas must be 2 (got '${READY:-0}')"
 
 pass "statefulset/${STS} has 2 Ready replicas with volumeClaimTemplates in ${LEARNER_NS}"

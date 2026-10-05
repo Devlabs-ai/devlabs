@@ -1,0 +1,46 @@
+{
+  "id": "linux-25-order-box-incident",
+  "number": 325,
+  "finalized": true,
+  "title": "Order-Box Incident",
+  "description": "**SITUATION:**\n\n**SEV-1: checkout is down.** Both **order-processor** and **payment-handler** are down on the order box. The previous on-call did \"some maintenance\" yesterday and is now unreachable. Nobody knows what changed.\n\nYou have root and every tool from this module. There's more than one root cause. Find them all and fix each one properly, so the box stays healthy after you leave, including across a reboot.\n\n**YOUR TASK:**\n\n1. Triage: what's failed, why, and what's filling up.\n2. Fix every root cause. Treating a symptom doesn't count: if the problem comes back on its own in five minutes, it isn't fixed.\n3. Get both services healthy and make sure they start at boot.\n4. Write a short incident note.\n\n**SPEC:**\n\n- Nothing in cron writes debug dumps anymore; no `.dump` files remain, and `/var/log/order-processor` is less than 50% used and still mounted\n- `/var/lib/order-processor` is owned by `orders` and not group/world-writable\n- `order-processor` and `payment-handler` are both **enabled** and **active**; neither is masked; order-processor runs as `orders`\n- `curl 127.0.0.1:8080/health` and `curl 127.0.0.1:9090/health` both answer\n- `~/answers/incident.md`: at least 3 lines, one per root cause, with what you did about it\n\n**GOOD PRACTICES:**\n\n- Start with `systemctl --failed`, `journalctl -u <unit>` and `df -h`.\n- When something keeps refilling, stop the source before cleaning up.\n- Don't fix permissions by running services as root.\n",
+  "difficulty": "L2",
+  "tags": [
+    "linux",
+    "l2",
+    "capstone",
+    "troubleshooting"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Order-Box Incident",
+    "brief": "Order-Box Incident",
+    "solution": "# Solution — Order-Box Incident\n\nThree independent faults, found with the tools from the earlier labs. Triage first, then fix each root cause, not just its symptom.\n\n## Triage\n\n```bash\nsystemctl --failed\nsystemctl status order-processor payment-handler\njournalctl -u order-processor -n 20 --no-pager\ndf -h /var/log/order-processor\n```\n\n## Fault 1: the log volume keeps filling (labs 15, 18)\n\n```bash\nls -lhS /var/log/order-processor          # debug-*.dump, 4 MiB each, one per minute\ngrep -r debug-dump /etc/cron.d /etc/crontab\ncat /usr/local/bin/debug-dump              # \"Temporary ... remove after\"\nsudo rm /etc/cron.d/debug-dump             # stop the source first\nsudo rm /var/log/order-processor/*.dump    # then clean up\ndf -h /var/log/order-processor\n```\n\nIf you delete the dumps but leave the cron job, the volume fills up again within minutes.\n\n## Fault 2: order-processor can't write its state (labs 8, 14)\n\n```bash\njournalctl -u order-processor -n 5 --no-pager    # cannot write to /var/lib/order-processor\nls -ld /var/lib/order-processor                  # root:root 755\nsudo chown orders:orders /var/lib/order-processor\nsudo systemctl restart order-processor\n```\n\n## Fault 3: payment-handler is masked (labs 12, 13)\n\n```bash\nsystemctl status payment-handler          # Loaded: masked\nsudo systemctl unmask payment-handler\nsudo systemctl enable --now payment-handler\n```\n\nA masked unit is symlinked to `/dev/null`, so nothing can start it: not you, not a dependency, not a reboot.\n\n## Verify\n\n```bash\nsystemctl is-active order-processor payment-handler\ncurl http://127.0.0.1:8080/health; echo\ncurl http://127.0.0.1:9090/health; echo\n```\n\n## Write it up\n\n```bash\nmkdir -p ~/answers\ncat > ~/answers/incident.md <<'EOF'\n1. Leftover debug cron job (INC-4411) filled /var/log/order-processor every minute; removed job and dumps.\n2. /var/lib/order-processor owned by root; order-processor (user orders) couldn't write state; chowned to orders.\n3. payment-handler masked during maintenance and never unmasked; unmasked, enabled and started.\nEOF\n```\n\nThen **Submit**.\n",
+    "idLabel": "25",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

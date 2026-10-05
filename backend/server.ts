@@ -25,6 +25,9 @@ const quizzesRoutes = require('./routes/quizzes');
 const adminRoutes = require('./routes/admin');
 const devDbRoutes = require('./routes/devDb');
 const leaderboardRoutes = require('./routes/leaderboard');
+const billingRoutes = require('./routes/billing');
+const notifyRoutes = require('./routes/notify');
+const monthlyPaperRoutes = require('./routes/monthlyPaper');
 
 const terminalService = require('./observability/terminalService');
 const k8sTerminalService = require('./observability/k8sTerminalService');
@@ -33,6 +36,11 @@ const metricsService = require('./observability/metricsService');
 const PORT = parseInt(process.env.PORT || '4000', 10);
 
 const app = express();
+app.post(
+  '/api/billing/webhook',
+  express.raw({ type: 'application/json', limit: '1mb' }),
+  billingRoutes.webhookHandler,
+);
 app.use(express.json({ limit: '2mb' }));
 
 app.use((req: ExpressRequest, _res: ExpressResponse, next: ExpressNextFunction) => {
@@ -50,6 +58,9 @@ app.use('/api/papers', papersRoutes);
 app.use('/api/quizzes', quizzesRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
+app.use('/api/billing', billingRoutes);
+app.use('/api/notify', notifyRoutes);
+app.use('/api/monthly-paper', monthlyPaperRoutes);
 app.use('/api/dev/db', devDbRoutes);
 
 app.use((err: Error & { status?: number }, _req: ExpressRequest, res: ExpressResponse, _next: ExpressNextFunction) => {
@@ -107,6 +118,10 @@ async function start(): Promise<void> {
     sessionIdle.startIdleWatcher();
   } catch (e: unknown) {
     console.warn('[boot] session idle watcher skipped:', (e as Error).message);
+  }
+
+  if (process.env.K8S_LAB_KUBECONFIG || process.env.KUBECONFIG) {
+    require('./workspace/k8sCapacity').start();
   }
 
   try {

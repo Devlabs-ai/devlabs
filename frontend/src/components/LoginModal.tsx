@@ -8,6 +8,8 @@ interface LoginModalProps {
   onClose: () => void;
   onLoggedIn: (user: UserRecord) => void;
   initialError?: string | null;
+  /** Page to land on after sign-in; defaults to the current page. */
+  returnTo?: string | null;
 }
 
 function GoogleMark(): JSX.Element {
@@ -25,6 +27,7 @@ export default function LoginModal({
   open,
   onClose,
   initialError = null,
+  returnTo = null,
 }: LoginModalProps): JSX.Element | null {
   const [error, setError] = useState<string | null>(initialError);
   const [busy, setBusy] = useState<boolean>(false);
@@ -56,7 +59,7 @@ export default function LoginModal({
     if (!googleEnabled) return;
     setError(null);
     setBusy(true);
-    startGoogleSignIn();
+    startGoogleSignIn(returnTo);
   };
 
   if (!open) return null;

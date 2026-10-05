@@ -1,0 +1,47 @@
+{
+  "id": "docker-24-rescue-a-crashlooping-container",
+  "number": 424,
+  "finalized": true,
+  "title": "Rescue a Crash-Looping Container",
+  "description": "**SITUATION:**\n\nnotification-service 1.2 was deployed an hour ago and has been restarting ever since: `docker ps` shows `Restarting`, and no notifications go out. The new version checks its settings on startup and refuses to run when something is wrong.\n\nOps left notes in `~/notify/README.txt`. The service's config is `~/notify/config.json`.\n\n**YOUR TASK:**\n\n1. Find out how the container is failing.\n2. Fix whatever it complains about, one problem at a time, until it stays up.\n\n**SPEC:**\n\n- `~/answers/exit-code`: the exit code the crashing container stops with\n- `~/notify/config.json`: valid JSON, with the same settings as before\n- Container `notification-service`: image `quickbyte/notification-service:1.2`, `SMTP_HOST=smtp.quickbyte.internal`, `~/notify/config.json` mounted **read-only** at `/etc/notify/config.json`, published on `8090` → `8080`\n- **Running** and no longer restarting; `http://127.0.0.1:8090/health` answers\n\n**GOOD PRACTICES:**\n\n- Read the exit code and `docker logs --tail` first; fix one thing, then look again.\n- `docker run --rm -it --entrypoint sh <image>` opens a shell in the image without starting the app.\n- `jq . <file>` validates JSON and points at the error.\n",
+  "difficulty": "L2",
+  "tags": [
+    "docker",
+    "l2",
+    "troubleshooting",
+    "crashloop",
+    "logs"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Rescue a Crash-Looping Container",
+    "brief": "Rescue a Crash-Looping Container",
+    "solution": "# Solution — Rescue a Crash-Looping Container\n\nA container that dies on startup and has `--restart always` turns into a **crash loop**: start, fail, restart, fail. `docker ps` shows `Restarting (78) 2 seconds ago` and the logs pile up. The fix is always the same routine: **read the exit code, read the logs, fix one thing, repeat**. (Kubernetes calls this `CrashLoopBackOff`; the routine is identical.)\n\nDocs: `docker logs --help` · `docker inspect --help`\n\n## Read the evidence\n\n```bash\ndocker ps -a --filter name=notification-service      # Restarting (78) ...\ndocker inspect -f 'exit={{.State.ExitCode}} restarts={{.RestartCount}}' notification-service\ndocker inspect -f '{{.State.ExitCode}}' notification-service > ~/answers/exit-code\ndocker logs --tail 5 notification-service\n# notification-service: FATAL: SMTP_HOST is not set\ncat ~/notify/README.txt\n```\n\nExit code **78** is `EX_CONFIG` (\"configuration error\") from `sysexits.h`: a well-behaved app telling you exactly which kind of problem it has.\n\n## Fix, recreate, look again\n\nEnvironment and mounts are fixed at creation, so each fix means recreating the container:\n\n```bash\ndocker rm -f notification-service\ndocker run -d --name notification-service --restart always -p 8090:8080 \\\n  -e SMTP_HOST=smtp.quickbyte.internal \\\n  -v ~/notify/config.json:/etc/notify.json:ro \\\n  quickbyte/notification-service:1.2\ndocker logs --tail 3 notification-service\n# FATAL: cannot read /etc/notify/config.json\n```\n\nThe mount target was wrong (`/etc/notify.json`). When you're not sure what the image expects, open a shell **in the image** without running its entrypoint:\n\n```bash\ndocker run --rm -it --entrypoint sh quickbyte/notification-service:1.2\ncat /entrypoint.sh       # the checks it runs, and the paths it reads\nexit\n```\n\n```bash\ndocker rm -f notification-service\ndocker run -d --name notification-service --restart always -p 8090:8080 \\\n  -e SMTP_HOST=smtp.quickbyte.internal \\\n  -v ~/notify/config.json:/etc/notify/config.json:ro \\\n  quickbyte/notification-service:1.2\ndocker logs --tail 3 notification-service\n# FATAL: /etc/notify/config.json is not valid JSON: ... line 5 column 1\n```\n\n## The last one: the config itself\n\n```bash\njq . ~/notify/config.json          # parse error: Expected another key-value pair at line 5\nnano ~/notify/config.json          # remove the trailing comma after the \"retry\" object\njq . ~/notify/config.json\ndocker restart notification-service\ndocker logs --tail 3 notification-service     # sending via smtp.quickbyte.internal ... Listening\ncurl http://127.0.0.1:8090/health\n```\n\nA bind mount is live, so fixing the file only needs a **restart**, not a recreate.\n\nOne catch with **single-file** bind mounts: the mount is tied to the file's inode. Editors that save by writing a new file and renaming it over the old one (some vim setups, `sed -i`) leave the container still seeing the **old** file. If the logs still show the old error after a restart, recreate the container (or bind-mount the directory instead of the file).\n\nThen **Submit**.\n",
+    "idLabel": "24",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

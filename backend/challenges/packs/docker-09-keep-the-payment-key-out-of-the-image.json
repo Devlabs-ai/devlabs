@@ -1,0 +1,47 @@
+{
+  "id": "docker-09-keep-the-payment-key-out-of-the-image",
+  "number": 409,
+  "finalized": true,
+  "title": "Keep the Payment Key Out of the Image",
+  "description": "**SITUATION:**\n\nA hotfix build of payment-handler, `quickbyte/payment-handler:1.1-hotfix`, was made with the payment provider's API key **baked into the image**. The key has been revoked, but security wants it recorded for the incident report.\n\nThe new key is in `~/payments/secrets/payment_api_key.txt`, and `~/payments/compose.yaml` still passes it as a plain environment variable, visible to anyone who can run `docker inspect`.\n\n**YOUR TASK:**\n\n1. Find the leaked key in the hotfix image, then delete the image.\n2. Lock down the key file.\n3. Change the Compose project to run the official payment-handler with the key as a **secret** file.\n\n**SPEC:**\n\n- `~/answers/leaked-key`: the API key baked into `quickbyte/payment-handler:1.1-hotfix`\n- Image `quickbyte/payment-handler:1.1-hotfix`: **deleted**\n- `~/payments/secrets/payment_api_key.txt`: mode `600`, still holding the current key\n- `compose.yaml`: service `payment-handler` runs `devsetu/payment-handler:v1.1`; a top-level secret `payment_api_key` with `file: ./secrets/payment_api_key.txt`, granted to the service; the key itself appears nowhere in `compose.yaml`\n- The stack is running (`docker compose up -d` in `~/payments`); the key is readable at `/run/secrets/payment_api_key` and doesn't appear anywhere in `docker inspect`\n\n**GOOD PRACTICES:**\n\n- Anything in an image layer can be read by anyone who can pull it: `docker history --no-trunc`, `docker image inspect`.\n- Environment variables show up in `docker inspect` and are inherited by every child process.\n- Secret files are mounted at runtime and never stored in the image or the container's config.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "secrets",
+    "compose",
+    "security"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Keep the Payment Key Out of the Image",
+    "brief": "Keep the Payment Key Out of the Image",
+    "solution": "# Solution — Keep the Payment Key Out of the Image\n\nTwo common ways to leak a secret with Docker:\n\n- **Baked into the image** (`ENV KEY=...`, or `COPY .env`). Every layer is readable by anyone who can pull the image, forever, even if a later layer \"removes\" it.\n- **Passed as an environment variable**. Better, but `docker inspect` shows it to anyone with Docker access, child processes inherit it, and crash reporters love to dump the environment.\n\nA **secret file** mounted at runtime fixes both: the value never enters the image and never appears in the container's config.\n\nDocs: [Secrets in Compose](https://docs.docker.com/compose/how-tos/use-secrets/)\n\n## Find the leak\n\n```bash\ndocker images quickbyte/payment-handler\ndocker history --no-trunc quickbyte/payment-handler:1.1-hotfix | grep -i key\ndocker image inspect -f '{{json .Config.Env}}' quickbyte/payment-handler:1.1-hotfix\ndocker image inspect -f '{{json .Config.Env}}' quickbyte/payment-handler:1.1-hotfix \\\n  | jq -r '.[]' | sed -n 's/^PAYMENT_API_KEY=//p' > ~/answers/leaked-key\ndocker rmi quickbyte/payment-handler:1.1-hotfix\n```\n\nIn real life: **revoke the key** with the payment provider first. Deleting the image doesn't help if it was ever pushed to a registry.\n\n## Lock down the key file\n\n```bash\ncd ~/payments\nls -l secrets/            # -rw-r--r--: every user on the box can read it\nchmod 600 secrets/payment_api_key.txt\n```\n\n## compose.yaml with a secret\n\n```yaml\nservices:\n  payment-handler:\n    image: devsetu/payment-handler:v1.1\n    restart: unless-stopped\n    secrets:\n      - payment_api_key\n\nsecrets:\n  payment_api_key:\n    file: ./secrets/payment_api_key.txt\n```\n\n- The top-level `secrets:` says where the value comes from; the service-level `secrets:` grants it to that service.\n- Compose mounts it read-only at **`/run/secrets/payment_api_key`**. The app reads the file (many images support `*_FILE` variables for this, e.g. `POSTGRES_PASSWORD_FILE`).\n- The container runs as UID 1000, the same UID as `learner` who owns the file, so `600` still lets it read.\n\n## Bring it up and check\n\n```bash\ndocker compose up -d\ndocker compose exec payment-handler cat /run/secrets/payment_api_key     # the key\ndocker inspect $(docker compose ps -q payment-handler) | grep -c pk_live  # 0\n```\n\nKeep `secrets/` out of git (`.gitignore`) and out of builds (`.dockerignore`).\n\nThen **Submit**.\n",
+    "idLabel": "09",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

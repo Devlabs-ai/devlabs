@@ -1,0 +1,96 @@
+# Placeholder ("balloon") pods holding learner slots. They are pause pods at negative
+# priority: any learner pod preempts them in ~1 s, and an evicted balloon goes Pending so
+# Karpenter buys the next node in the background.
+#
+# One balloon = one learner slot on a t4g.medium with 42 pods (38 learner slots, each at
+# the LimitRange default limit of 40m / 64Mi).
+#
+#   dl-balloon           warm pool, fixed 10. Absorbs lab opens and headroom pods.
+#   dl-balloon-reserved  per open lab: Σ max(0, reservePods − pods in use), scaled by the
+#                        backend (backend/workspace/k8sCapacity.ts). Re-applying this file
+#                        resets it to 0 until the next reconcile (≤ 3 s).
+#
+# Reserved balloons have the higher priority, so a full node gives up warm balloons first
+# and one learner's headroom pods rarely take another learner's reserved slots.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: dl-balloon
+value: -10
+preemptionPolicy: Never
+globalDefault: false
+description: Warm placeholder pods for learner capacity; preempted by any real pod.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: dl-balloon-reserved
+value: -5
+preemptionPolicy: Never
+globalDefault: false
+description: Placeholder pods holding open labs' reserved slots; preempted by any real pod.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dl-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dl-balloon
+  namespace: dl-system
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: dl-balloon
+  template:
+    metadata:
+      labels:
+        app: dl-balloon
+    spec:
+      priorityClassName: dl-balloon
+      # Must stay > 0. With 0 the preempted balloon vanishes instantly and learners that
+      # preempted it together can sit Pending for 5 min (kubernetes/kubernetes#141694,
+      # async preemption, K8s 1.33–1.36). pause exits on SIGTERM, so eviction still takes ~1 s.
+      terminationGracePeriodSeconds: 5
+      automountServiceAccountToken: false
+      # Anywhere in the learner pool, base included: learners take free slots first and only
+      # preempt balloons once a node is otherwise full, and consolidation can pack balloons
+      # back onto the base so no extra node idles.
+      nodeSelector:
+        devlabs.io/pool: labs
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10
+          resources:
+            requests: {cpu: 40m, memory: 64Mi}
+            limits: {cpu: 40m, memory: 64Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dl-balloon-reserved
+  namespace: dl-system
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: dl-balloon-reserved
+  template:
+    metadata:
+      labels:
+        app: dl-balloon-reserved
+    spec:
+      priorityClassName: dl-balloon-reserved
+      terminationGracePeriodSeconds: 5
+      automountServiceAccountToken: false
+      nodeSelector:
+        devlabs.io/pool: labs
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10
+          resources:
+            requests: {cpu: 40m, memory: 64Mi}
+            limits: {cpu: 40m, memory: 64Mi}

@@ -1,0 +1,46 @@
+{
+  "id": "docker-12-connect-services-on-a-user-defined-network",
+  "number": 412,
+  "finalized": true,
+  "title": "Connect Services on a User-Defined Network",
+  "description": "**SITUATION:**\n\norder-processor needs to call payment-handler, and soon notification-service too. Both run on the order box, but on Docker's default `bridge` network a container can only reach another **by IP**, and the IP changes every time the container is recreated. Some clients also expect payments at the name `payments`.\n\n**YOUR TASK:**\n\n1. Create a network where containers find each other by name.\n2. Move the running services onto it, without recreating order-processor.\n3. Start notification-service on it.\n\n**SPEC:**\n\n- A bridge network named `quickbyte-net`\n- `order-processor` connected to `quickbyte-net`, still publishing `8080`\n- `payment-handler` on `quickbyte-net` **only** (off the default bridge), with the extra name (alias) `payments`\n- Container `notification-service`: image `devsetu/notification-service:v1.1`, on `quickbyte-net` only\n- From order-processor, `http://payment-handler:8000`, `http://payments:8000` and `http://notification-service:8080` all answer\n- `~/answers/payment-ip`: payment-handler's IP address on `quickbyte-net`\n\n**GOOD PRACTICES:**\n\n- Only user-defined networks have Docker's built-in DNS.\n- `docker network connect` / `disconnect` work on running containers.\n- The images have Python but no curl: `docker exec order-processor python -c \"import urllib.request as u; print(u.urlopen('http://...').read())\"`.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "networking",
+    "dns"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Connect Services on a User-Defined Network",
+    "brief": "Connect Services on a User-Defined Network",
+    "solution": "# Solution — Connect Services on a User-Defined Network\n\nEvery container gets an IP, but IPs change whenever a container is recreated, so services should find each other **by name**. Docker runs a small DNS server for this, at `127.0.0.11` inside each container, but only on **user-defined networks**. The default `bridge` network has no name resolution at all.\n\nDocs: [Bridge networks](https://docs.docker.com/engine/network/drivers/bridge/) · `docker network --help`\n\n## See the problem\n\n```bash\ndocker network ls                     # bridge, host, none\ndocker exec order-processor python -c \\\n  \"import urllib.request; print(urllib.request.urlopen('http://payment-handler:8000/health').read())\"\n# urllib.error.URLError: <urlopen error [Errno -2] Name or service not known>\ndocker inspect -f '{{.NetworkSettings.IPAddress}}' payment-handler   # works by IP, until it changes\n```\n\n## Create a network and connect the running containers\n\n```bash\ndocker network create quickbyte-net\ndocker network connect quickbyte-net order-processor\ndocker network connect --alias payments quickbyte-net payment-handler\ndocker network disconnect bridge payment-handler\n```\n\n- `docker network connect` attaches a **running** container to another network, with no restart: it gets a second network interface.\n- `--alias payments` adds an extra DNS name on that network. Handy when clients expect a different name (`payments`) than the container's (`payment-handler`).\n- payment-handler is an internal service: taking it off `bridge` leaves it reachable only by what's on `quickbyte-net`.\n\n## Start notification-service straight on the network\n\n```bash\ndocker run -d --name notification-service --network quickbyte-net devsetu/notification-service:v1.1\n```\n\n## Check\n\n```bash\ndocker network inspect quickbyte-net | jq '.[0].Containers'\ndocker exec order-processor python -c \"import urllib.request as u; print(u.urlopen('http://payments:8000/health').read())\"\ndocker exec order-processor python -c \"import urllib.request as u; print(u.urlopen('http://notification-service:8080/health').read())\"\ndocker exec order-processor cat /etc/resolv.conf     # nameserver 127.0.0.11: Docker's embedded DNS\ndocker inspect -f '{{(index .NetworkSettings.Networks \"quickbyte-net\").IPAddress}}' payment-handler > ~/answers/payment-ip\n```\n\nCompose does all of this for you: every project gets its own network and every service is reachable by its name. In Kubernetes the same idea is a **Service**: a stable DNS name in front of pods whose IPs come and go.\n\nThen **Submit**.\n",
+    "idLabel": "12",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

@@ -1,6 +1,6 @@
 'use strict';
 
-import type { GameSession } from '../types/domain';
+import type { BoxFlavor, GameSession, K8sPlatformSpec } from '../types/domain';
 
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../db/pool');
@@ -8,6 +8,9 @@ const sessionStore = require('../db/sessionStore');
 const workspaceStore = require('./workspaceStore');
 const loader = require('../challenges/loader');
 const k8s = require('./k8sCluster');
+const capacity = require('./k8sCapacity');
+const linuxBox = require('./linuxBox');
+const { isClusterLabType, boxFlavor } = require('../challenges/labTypes');
 
 interface StartK8sOpts {
   challengeId: string;
@@ -23,31 +26,14 @@ export type StartK8sResult = {
   provisioned: boolean;
 };
 
-function platformSpecOf(challengeId: string): {
-  quota?: { pods?: string; cpu?: string; memory?: string };
-  limitRange?: {
-    defaultRequest?: { cpu?: string; memory?: string };
-    default?: { cpu?: string; memory?: string };
-    max?: { cpu?: string; memory?: string };
-    min?: { cpu?: string; memory?: string };
-  };
-  setup?: { script?: string };
-  grade?: { script?: string; timeoutSeconds?: number };
-} {
-  const c = loader.getChallenge(challengeId) as {
-    k8sPlatform?: {
-      quota?: { pods?: string; cpu?: string; memory?: string };
-      limitRange?: {
-        defaultRequest?: { cpu?: string; memory?: string };
-        default?: { cpu?: string; memory?: string };
-        max?: { cpu?: string; memory?: string };
-        min?: { cpu?: string; memory?: string };
-      };
-      setup?: { script?: string };
-      grade?: { script?: string; timeoutSeconds?: number };
-    };
-  } | null;
+function platformSpecOf(challengeId: string): K8sPlatformSpec {
+  const c = loader.getChallenge(challengeId) as { k8sPlatform?: K8sPlatformSpec } | null;
   return c?.k8sPlatform || {};
+}
+
+/** linux / docker for box labs (one machine per learner), null for namespace labs. */
+function boxFlavorOf(challengeId: string): BoxFlavor | null {
+  return boxFlavor(loader.getChallenge(challengeId)?.sandboxType);
 }
 
 /**
@@ -144,8 +130,60 @@ function labEnvUnavailable(): Error {
   });
 }
 
+const LAB_CAPACITY_DOWN_MSG =
+  'The cluster that runs these labs is busy or offline right now, so your lab could not start. '
+  + 'Please try again in a few minutes, and contact the administrator if it keeps happening.';
+
+function labCapacityDown(): Error {
+  return Object.assign(new Error(LAB_CAPACITY_DOWN_MSG), {
+    status: 503,
+    code: 'LAB_ENV_UNAVAILABLE',
+  });
+}
+
+/** Setup failed because pods had no room (pool asleep or full), not because of a lab bug. */
+const CAPACITY_FAILURE = /exceeded quota|Unschedulable|Insufficient (cpu|memory)|Too many pods/i;
+
+/** Whether the challenge's node pool can run labs right now; the message is shown on a locked lab. */
+async function labAvailability(challengeId: string): Promise<{ available: boolean; message: string | null }> {
+  const flavor = boxFlavorOf(challengeId);
+  const available = await capacity.poolUp(flavor ? linuxBox.poolFor(flavor) : undefined);
+  return { available, message: available ? null : LAB_CAPACITY_DOWN_MSG };
+}
+
+async function requirePool(ns: string, challengeId: string, pool?: string): Promise<void> {
+  if (await capacity.poolUp(pool)) return;
+  console.warn(`[k8s] ${ns}: node pool ${pool || 'labs'} has no nodes and cannot add any, refusing to open ${challengeId}`);
+  throw labCapacityDown();
+}
+
 function ensureProvisioned(ns: string, challengeId: string, forceSetup: boolean): Promise<boolean> {
+  const flavor = boxFlavorOf(challengeId);
+  if (flavor) {
+    return withNsLock(ns, () => provisionBox(ns, challengeId, flavor));
+  }
   return withNsLock(ns, () => provision(ns, challengeId, forceSetup));
+}
+
+/** Box labs never resume a machine: every open (and reset) is a fresh box + setup.sh. */
+async function provisionBox(ns: string, challengeId: string, flavor: BoxFlavor): Promise<boolean> {
+  const spec = platformSpecOf(challengeId);
+  await requirePool(ns, challengeId, linuxBox.poolFor(flavor));
+  try {
+    await linuxBox.recreateBox(ns, challengeId, flavor, spec.box);
+  } catch (err) {
+    console.error(`[${flavor}] ${ns}: could not start a box for ${challengeId}: ${(err as Error).message || err}`);
+    throw labEnvUnavailable();
+  }
+  const result = await k8s.runChallengeScript(ns, challengeId, spec.setup?.script || 'setup.sh', {
+    timeoutMs: 180_000,
+    env: linuxBox.scriptEnv(),
+  });
+  if (result.code !== 0) {
+    const msg = (result.stderr || result.stdout || 'setup failed').trim();
+    throw Object.assign(new Error(`Lab setup failed: ${msg}`), { status: 502 });
+  }
+  return true;
 }
 
 /**
@@ -189,13 +227,17 @@ async function provision(
   forceSetup: boolean,
 ): Promise<boolean> {
   const spec = platformSpecOf(challengeId);
+  await requirePool(ns, challengeId);
   await ensureCleanSlate(ns, challengeId, forceSetup, spec);
+  // The session is already active, so this reserves the lab's slots before setup runs.
+  if (!(await capacity.waitForReservation(ns))) throw labCapacityDown();
 
   if (!forceSetup) {
     // Resume: re-apply parked namespace state from last session end.
     const restored = await k8s.restoreChallengeSnapshot(ns, challengeId);
     if (restored) {
       await k8s.markChallengeSetup(ns, challengeId);
+      await capacity.waitForPodsScheduled(ns);
       return true;
     }
     // Do not skip setup just because the NS annotation is set — a prior open can
@@ -210,10 +252,29 @@ async function provision(
   });
   if (result.code !== 0) {
     const msg = (result.stderr || result.stdout || 'setup failed').trim();
+    if (CAPACITY_FAILURE.test(msg)) {
+      console.warn(`[k8s] ${ns}: setup for ${challengeId} hit a capacity limit: ${msg}`);
+      throw labCapacityDown();
+    }
     throw Object.assign(new Error(`Lab setup failed: ${msg}`), { status: 502 });
   }
   await k8s.markChallengeSetup(ns, challengeId);
+  // The start response (and so the terminal) waits until setup pods have a node.
+  await capacity.waitForPodsScheduled(ns);
   return true;
+}
+
+/** The learner's namespace, as startK8sSession derives it. */
+function namespaceFor(userId: string | null, userName: string | null): string {
+  const owner = workspaceStore.sanitizeOwner(userId || 'anonymous');
+  return k8s.learnerNamespace(userName || owner);
+}
+
+function namespaceForChallenge(challengeId: string, userId: string | null, userName: string | null): string {
+  const flavor = boxFlavorOf(challengeId);
+  if (!flavor) return namespaceFor(userId, userName);
+  const owner = workspaceStore.sanitizeOwner(userId || 'anonymous');
+  return linuxBox.boxNamespace(userName || owner, flavor);
 }
 
 async function startK8sSession({
@@ -230,14 +291,24 @@ async function startK8sSession({
   if (!listed) {
     throw Object.assign(new Error('challenge not found'), { status: 404 });
   }
-  if ((listed.sandboxType || '') !== 'kubernetes') {
+  if (!isClusterLabType(listed.sandboxType)) {
     throw Object.assign(new Error('not a kubernetes lab'), { status: 400 });
   }
 
   const owner = workspaceStore.sanitizeOwner(userId || candidateName || 'anonymous');
-  const ns = k8s.learnerNamespace(userName || candidateName || owner);
+  const ns = namespaceForChallenge(challengeId, userId || candidateName, userName || candidateName);
 
   const existing = await findExistingK8sSession(challengeId, owner);
+  if (existing && existing.status === 'active') {
+    // Still live (another tab, a reload, or leaving without ending): its objects
+    // are in the namespace and not parked, so resume as-is. Waiting on the lock
+    // lets an open that is still provisioning finish first.
+    await withNsLock(ns, async () => undefined);
+    if (existing.status === 'active') {
+      existing.lastActivityAt = Date.now();
+      return { session: existing, created: false, provisioned: false };
+    }
+  }
   if (existing) {
     existing.status = 'active';
     existing.endTime = null;
@@ -331,8 +402,14 @@ async function endK8sSession(sessionId: string): Promise<GameSession> {
   session.status = 'ended';
   session.endTime = Date.now();
   await sessionStore.persistRow(session);
+  void capacity.nudge();
 
-  if (ns && challengeId) {
+  const flavor = challengeId ? boxFlavorOf(challengeId) : null;
+  if (ns && challengeId && flavor) {
+    void withNsLock(ns, () => linuxBox.deleteBox(ns)).catch((err: unknown) => {
+      console.warn(`[${flavor}] background box delete failed for ${ns}: ${(err as Error).message || err}`);
+    });
+  } else if (ns && challengeId) {
     void withNsLock(ns, () => park(ns, challengeId)).catch((err: unknown) => {
       console.warn(
         `[k8s] background park failed for ${ns}/${challengeId}: ${(err as Error).message || err}`,
@@ -343,6 +420,8 @@ async function endK8sSession(sessionId: string): Promise<GameSession> {
 }
 
 module.exports = {
+  namespaceFor,
+  labAvailability,
   startK8sSession,
   resetK8sSession,
   endK8sSession,

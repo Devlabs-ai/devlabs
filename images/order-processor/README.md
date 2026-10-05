@@ -16,15 +16,8 @@ Minimal Flask service for Kubernetes CKAD labs.
 
 For the liveness “hung /health” demo see `../zombie-order-processor` (`zombie-order-processor:1.0`).
 
-## Build & push (linux/amd64 for EKS)
+## Build & push (multi-arch: arm64 learner nodes + amd64)
 
 ```bash
-cd images/order-processor
-
-for TAG in v1.0 v1.1 v1.2; do
-  docker build --platform linux/amd64 \
-    --build-arg APP_VERSION=$TAG \
-    -t devsetu/order-processor:$TAG .
-  docker push devsetu/order-processor:$TAG
-done
+./images/build-all.sh order-processor   # v1.0 v1.1 v1.2
 ```

@@ -76,6 +76,8 @@ export interface K8sReadingCallout {
 export interface K8sReadingCodeBlock {
   language: string;
   code: string;
+  /** IDE-style toolbar label (e.g. snacks.csv). */
+  filename?: string;
 }
 
 export interface K8sReadingFlow {
@@ -83,10 +85,19 @@ export interface K8sReadingFlow {
   steps: string[];
 }
 
+export interface K8sReadingSubsection {
+  id: string;
+  title: string;
+  body: string[];
+  code?: K8sReadingCodeBlock;
+}
+
 export interface K8sReadingSection {
   id: string;
   title: string;
   body: string[];
+  /** Optional h3 blocks within a section (e.g. split a long explainer). */
+  subsections?: K8sReadingSubsection[];
   table?: K8sReadingTable;
   /** Optional second table (e.g. after elaboration). */
   tableAfter?: K8sReadingTable;
@@ -117,6 +128,8 @@ export interface K8sReading {
   sections: K8sReadingSection[];
   takeaways: string[];
   relatedLabs: K8sReadingRelatedLab[];
+  /** Overrides the track default under Related labs. */
+  relatedLabsIntro?: string;
   /** Optional top-right “The DevSetu Blog” stamp (trial on select readings). */
   showBlogStamp?: boolean;
   /** Hide from the track list unless this lab is visible to the viewer. */

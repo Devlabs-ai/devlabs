@@ -1,0 +1,47 @@
+{
+  "id": "docker-14-compose-the-order-stack",
+  "number": 414,
+  "finalized": true,
+  "title": "Compose the Order Stack",
+  "description": "**SITUATION:**\n\norder-processor now talks to **payment-handler**. Starting both by hand means two long `docker run` commands, a network to create, and remembering to start payment first. Last week someone started them in the wrong order and the first orders failed.\n\nOps left the settings in `~/order-stack/order-processor.env`. Describe the stack once, in a Compose file, so anyone can bring it up with one command.\n\n**YOUR TASK:**\n\n1. Write `~/order-stack/compose.yaml` with services `order-processor` and `payment-handler`.\n2. Start the stack with `docker compose up -d` and leave it running.\n3. Check that orders follow the minimum order value from the env file.\n\n**SPEC:**\n\n- Project name `order-stack` (the folder name; don't override it)\n- `payment-handler`: image `devsetu/payment-handler:v1.1`, **no published ports**, a `healthcheck` probing `http://127.0.0.1:8000/health`\n- `order-processor`: image `devsetu/order-processor:v1.2`, host port `8080` → `8000`, settings from `env_file: order-processor.env` (don't copy the values into compose.yaml)\n- `order-processor` starts only after `payment-handler` is **healthy** (`depends_on` … `condition: service_healthy`)\n- Both services on a network named `orders-net`, both with `restart: unless-stopped`\n- order-processor reaches payment-handler at `http://payment-handler:8000`\n\n**GOOD PRACTICES:**\n\n- `docker compose config` validates the file and shows it with the env file resolved.\n- `docker compose ps` and `docker compose logs <service>` are your first debugging steps.\n- Service names are DNS names on the stack's network. No IPs, no `/etc/hosts`.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "compose",
+    "networks",
+    "healthcheck"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Compose the Order Stack",
+    "brief": "Compose the Order Stack",
+    "solution": "# Solution — Compose the Order Stack\n\nTwo `docker run` commands with a dozen flags each, a network you must remember to create, and an order to start them in: that's what **Docker Compose** replaces. You describe the stack once in `compose.yaml`; `docker compose up -d` creates the network and containers, in the right order, every time.\n\nDocs: [Compose file reference](https://docs.docker.com/reference/compose-file/) · `docker compose --help`\n\n## compose.yaml\n\n```bash\ncd ~/order-stack\ncat order-processor.env      # the settings ops gave you\nnano compose.yaml\n```\n\n```yaml\nservices:\n  payment-handler:\n    image: devsetu/payment-handler:v1.1\n    restart: unless-stopped\n    networks: [orders-net]\n    healthcheck:\n      test: [\"CMD\", \"python\", \"-c\", \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)\"]\n      interval: 5s\n      timeout: 3s\n      retries: 3\n      start_period: 5s\n\n  order-processor:\n    image: devsetu/order-processor:v1.2\n    restart: unless-stopped\n    ports:\n      - \"8080:8000\"\n    env_file: order-processor.env\n    networks: [orders-net]\n    depends_on:\n      payment-handler:\n        condition: service_healthy\n\nnetworks:\n  orders-net:\n```\n\n- **Project**: Compose names everything after the folder, `order-stack`. Containers become `order-stack-order-processor-1`, the network `order-stack_orders-net`.\n- **Service names are DNS names** on the network. order-processor reaches `http://payment-handler:8000` with no IPs and no `/etc/hosts`.\n- **Only order-processor has `ports:`**. payment-handler is reachable from orders-net but not from outside the box. Publish only what users need.\n- **`env_file`** keeps settings (and the API key) out of `compose.yaml`, so the file can be committed and shared.\n- **`depends_on` with `condition: service_healthy`** starts order-processor only once payment-handler's healthcheck passes. Plain `depends_on` only waits for the container to *start*, not for the app to be ready.\n- **`restart: unless-stopped`**: restart after crashes and reboots, but not if you stopped it on purpose.\n\n## Bring it up\n\n```bash\ndocker compose config        # validate, and show the file with env_file values resolved\ndocker compose up -d\ndocker compose ps            # payment-handler (healthy), then order-processor Up\ndocker compose logs -f order-processor     # Ctrl+C to stop following\n```\n\n## Try it\n\n```bash\ncurl http://127.0.0.1:8080/health\ncurl -s -X POST http://127.0.0.1:8080/orders -H 'Content-Type: application/json' \\\n  -d '{\"items\":[\"chai\"],\"total\":99}'\ndocker compose exec order-processor python -c \\\n  \"import urllib.request; print(urllib.request.urlopen('http://payment-handler:8000/health').read())\"\ncurl http://127.0.0.1:8000/health          # fails: payment-handler isn't published\n```\n\n## Day-2 commands\n\n```bash\ndocker compose restart order-processor\ndocker compose down          # stop and remove containers + network (named volumes stay)\ndocker compose up -d         # back again, identical\n```\n\nLeave the stack **running**, then **Submit**.\n",
+    "idLabel": "14",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 150
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

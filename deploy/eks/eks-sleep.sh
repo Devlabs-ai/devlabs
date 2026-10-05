@@ -21,7 +21,7 @@ while IFS= read -r ng; do
   aws eks update-nodegroup-config \
     --cluster-name "$EKS_CLUSTER_NAME" \
     --nodegroup-name "$ng" \
-    --scaling-config "minSize=0,maxSize=${EKS_WAKE_MAX},desiredSize=0" \
+    --scaling-config "minSize=0,maxSize=$(eks_ng max "$ng"),desiredSize=0" \
     --region "$AWS_REGION" >/dev/null
 done < <(eks_csv_to_lines "$EKS_NODEGROUPS")
 

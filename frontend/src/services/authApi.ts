@@ -107,8 +107,21 @@ export function acceptAuthSession(token: string, user: UserRecord): void {
   saveUser(user);
 }
 
-export function startGoogleSignIn(): void {
+const POST_LOGIN_PATH_KEY = 'devsetu_post_login_path';
+
+export function startGoogleSignIn(returnTo?: string | null): void {
+  const { pathname, search } = window.location;
+  const path = returnTo || (pathname === '/' || pathname.startsWith('/auth/') ? null : pathname + search);
+  if (path) sessionStorage.setItem(POST_LOGIN_PATH_KEY, path);
+  else sessionStorage.removeItem(POST_LOGIN_PATH_KEY);
   window.location.assign('/api/auth/google');
+}
+
+/** Where the guest was when they chose to sign in; read once. */
+export function takePostLoginPath(): string | null {
+  const path = sessionStorage.getItem(POST_LOGIN_PATH_KEY);
+  sessionStorage.removeItem(POST_LOGIN_PATH_KEY);
+  return path;
 }
 
 export async function fetchGoogleAuthStatus(): Promise<boolean> {

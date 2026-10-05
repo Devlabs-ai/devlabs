@@ -1,7 +1,7 @@
 /** Kubernetes "Start here" primer — why the platform exists, before labs. */
 
-export const K8S_PRIMER_PATH = '/play/devops-engineer/kubernetes/intro';
-export const K8S_LABS_PATH = '/play/devops-engineer/kubernetes';
+export const K8S_PRIMER_PATH = '/track/devops-engineer/kubernetes/intro';
+export const K8S_LABS_PATH = '/track/devops-engineer/kubernetes';
 
 export interface K8sPrimerExample {
   title: string;

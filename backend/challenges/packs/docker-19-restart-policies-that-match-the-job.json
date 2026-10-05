@@ -1,0 +1,46 @@
+{
+  "id": "docker-19-restart-policies-that-match-the-job",
+  "number": 419,
+  "finalized": true,
+  "title": "Restart Policies That Match the Job",
+  "description": "**SITUATION:**\n\nThree containers, three different jobs:\n\n- **order-processor** must always be up, including after a reboot.\n- **order-sync** pulls batches from a partner API, which is flaky today. Retry a failing run a few times, then stop hammering the partner and let someone look.\n- **notification-service** is down for maintenance. When someone stops it on purpose, it must stay stopped, even after a reboot.\n\n**YOUR TASK:**\n\nRun all three with restart policies that match their jobs, and stop notification-service.\n\n**SPEC:**\n\n- `order-processor`: image `devsetu/order-processor:v1.2`, host port `8080` → `8000`, `--restart unless-stopped`, **running**\n- `order-sync`: image `quickbyte/order-sync:1.0`, retried **3 times** on failure, then left exited\n- `notification-service`: image `devsetu/notification-service:v1.1`, `--restart unless-stopped`, **stopped** with `docker stop`\n- After Docker restarts (the grader runs `systemctl restart docker`), order-processor comes back and the other two stay down\n\n**GOOD PRACTICES:**\n\n- Policies: `no`, `on-failure[:N]`, `unless-stopped`, `always`.\n- `docker inspect -f '{{.RestartCount}}'` shows how often a container was restarted.\n- A daemon restart is what a reboot looks like to containers: `sudo systemctl restart docker`.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "restart-policy",
+    "reliability"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Restart Policies That Match the Job",
+    "brief": "Restart Policies That Match the Job",
+    "solution": "# Solution — Restart Policies That Match the Job\n\nIn the Linux track, systemd's `Restart=` decided what happens when a service dies. For containers, Docker's **restart policy** does the same job, and it also decides what comes back after a reboot.\n\nDocs: [Start containers automatically](https://docs.docker.com/engine/containers/start-containers-automatically/)\n\n| Policy | Restarts after a crash | After Docker / host restarts | Good for |\n|---|---|---|---|\n| `no` (default) | no | no | one-off commands |\n| `on-failure[:N]` | only on non-zero exit, at most N times | if it was still retrying | jobs that may hit a transient error |\n| `unless-stopped` | yes | yes, **unless you stopped it** | long-running services |\n| `always` | yes | yes, even if you stopped it | rarely what you want |\n\n## Long-running services\n\n```bash\ndocker run -d --name order-processor --restart unless-stopped -p 8080:8000 devsetu/order-processor:v1.2\ndocker run -d --name notification-service --restart unless-stopped devsetu/notification-service:v1.1\ndocker stop notification-service          # maintenance: should stay down\n```\n\n## A flaky job: retry, but not forever\n\n```bash\ndocker run -d --name order-sync --restart on-failure:3 quickbyte/order-sync:1.0\ndocker ps -a --filter name=order-sync     # Restarting (1) ... then Exited (1)\ndocker inspect -f '{{.RestartCount}} restarts, exit {{.State.ExitCode}}' order-sync\ndocker logs order-sync                    # four runs: the first + 3 retries\n```\n\nDocker waits a little longer between each restart (100 ms, doubling) so a crash loop doesn't hammer the machine. A job that keeps failing after 3 tries has a real problem; restarting it forever (`always`) just hides it and floods the partner API.\n\n## What survives a restart of Docker?\n\n```bash\nsudo systemctl restart docker            # what a reboot looks like to containers\ndocker ps -a --format 'table {{.Names}}\\t{{.Status}}'\n# order-processor        Up 2 seconds\n# notification-service   Exited (0) ...   <- stopped on purpose, stays stopped\n# order-sync             Exited (1) ...   <- gave up, stays down\n```\n\nWith `always`, notification-service would have come back: an operator's `docker stop` undone by a reboot. That difference is the whole reason `unless-stopped` exists.\n\nKubernetes has the same idea per pod: `restartPolicy: Always` for Deployments, `OnFailure` with `backoffLimit` for Jobs.\n\nThen **Submit**. The grader restarts Docker itself.\n",
+    "idLabel": "19",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 150
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

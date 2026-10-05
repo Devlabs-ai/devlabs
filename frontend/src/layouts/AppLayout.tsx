@@ -7,21 +7,27 @@ import { PlayChromeProvider } from '../context/PlayChromeContext';
 import { PLAYGROUNDS_PATH, SPARK_PLAYGROUND_PATH } from '../constants/playgrounds';
 import { MAJORS_PATH } from '../constants/projects';
 import { MINORS_PATH } from '../constants/minors';
+import { PRICING_PATH } from '../constants/pricing';
+import { MONTHLY_PAPER_PATH } from '../constants/monthlyPaper';
+import { LEADERBOARD_PATH } from '../constants/leaderboard';
 import { WHITEBOARD_PATH } from '../constants/whiteboard';
 import { useIsNarrowUi } from '../hooks/useMediaQuery';
+import NavIcon from '../components/NavIcons';
 
-const PAPERS_PATH = '/play/papers';
+const PAPERS_PATH = '/track/papers';
 
 /** Play routes that bring their own page chrome instead of the catalog's. */
 const PLAY_SUBROUTES = [
-  '/play/quiz/',
+  PRICING_PATH,
+  MONTHLY_PAPER_PATH,
+  LEADERBOARD_PATH,
+  '/track/quiz/',
   PAPERS_PATH,
-  '/play/quests',
+  '/track/quests',
   PLAYGROUNDS_PATH,
   MAJORS_PATH,
   MINORS_PATH,
   WHITEBOARD_PATH,
-  '/play/projects',
   SPARK_PLAYGROUND_PATH,
 ];
 
@@ -49,6 +55,7 @@ function AppLayoutInner(): React.JSX.Element {
     playState,
     activeSession,
     currentUser,
+    onRequestLogin,
   } = useAppState();
 
   const location = useLocation();
@@ -57,12 +64,13 @@ function AppLayoutInner(): React.JSX.Element {
   const menuId = useId();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const challengeOpen = playState === 'active' && Boolean(activeSession);
-  const showNav = authMode === 'interviewer' && playState !== 'active';
+  const signedIn = authMode === 'interviewer';
+  const showNav = authMode !== 'resolving' && playState !== 'active';
   const showAdmin = Boolean(currentUser?.admin) || isAdminUser(currentUser);
   const onPlaySubroute = PLAY_SUBROUTES.some((p) => location.pathname.startsWith(p));
   const onPlayRoute =
-    location.pathname === '/play' ||
-    (location.pathname.startsWith('/play/') && !onPlaySubroute);
+    location.pathname === '/track' ||
+    (location.pathname.startsWith('/track/') && !onPlaySubroute);
   const usePlayChrome = (onPlayRoute || onPlaySubroute) && !challengeOpen;
   // The Spark bench is reached through the index, so keep the pill lit inside it.
   const playgroundsActive =
@@ -99,49 +107,84 @@ function AppLayoutInner(): React.JSX.Element {
     };
   }, [navOpen]);
 
-  const sectionLinks = showAdmin ? (
+  const sectionLinks = (
     <>
       <NavLink
         to={MAJORS_PATH}
         className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
         onClick={() => setNavOpen(false)}
       >
-        Majors
+        <NavIcon name="majors" />
+        <span>Majors</span>
       </NavLink>
       <NavLink
         to={MINORS_PATH}
         className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
         onClick={() => setNavOpen(false)}
       >
-        Minors
+        <NavIcon name="minors" />
+        <span>Minors</span>
       </NavLink>
+      {showAdmin && (
+        <>
+          <NavLink
+            to={PAPERS_PATH}
+            className={`topnav-pill topnav-action${papersActive ? ' active' : ''}`}
+            onClick={() => setNavOpen(false)}
+          >
+            <NavIcon name="papers" />
+            <span>Papers</span>
+          </NavLink>
+          <NavLink
+            to={PLAYGROUNDS_PATH}
+            className={`topnav-pill topnav-action${playgroundsActive ? ' active' : ''}`}
+            onClick={() => setNavOpen(false)}
+          >
+            <NavIcon name="playgrounds" />
+            <span>Playgrounds</span>
+          </NavLink>
+        </>
+      )}
       <NavLink
-        to={PAPERS_PATH}
-        className={`topnav-pill topnav-action${papersActive ? ' active' : ''}`}
-        onClick={() => setNavOpen(false)}
-      >
-        Papers
-      </NavLink>
-      <NavLink
-        to={PLAYGROUNDS_PATH}
-        className={`topnav-pill topnav-action${playgroundsActive ? ' active' : ''}`}
-        onClick={() => setNavOpen(false)}
-      >
-        Playgrounds
-      </NavLink>
-    </>
-  ) : null;
-
-  const accountLinks = (
-    <>
-      <NavLink
-        to="/profile"
+        to={LEADERBOARD_PATH}
         className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
         onClick={() => setNavOpen(false)}
       >
-        Profile
+        <NavIcon name="leaderboard" />
+        <span>Leaderboard</span>
+      </NavLink>
+      <NavLink
+        to={PRICING_PATH}
+        className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
+        onClick={() => setNavOpen(false)}
+      >
+        <NavIcon name="pricing" />
+        <span>Pricing</span>
       </NavLink>
     </>
+  );
+
+  const accountLinks = signedIn ? (
+    <NavLink
+      to="/profile"
+      className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
+      onClick={() => setNavOpen(false)}
+    >
+      <NavIcon name="profile" />
+      <span>Profile</span>
+    </NavLink>
+  ) : (
+    <button
+      type="button"
+      className="topnav-pill topnav-action"
+      onClick={() => {
+        setNavOpen(false);
+        onRequestLogin();
+      }}
+    >
+      <NavIcon name="signin" />
+      <span>Sign in</span>
+    </button>
   );
 
   return (
@@ -184,12 +227,20 @@ function AppLayoutInner(): React.JSX.Element {
           </div>
 
           {showNav ? (
+            <div
+              className={`topnav-scrim${navOpen ? ' is-open' : ''}`}
+              aria-hidden
+              onClick={() => setNavOpen(false)}
+            />
+          ) : null}
+          {showNav ? (
             <nav
               id={menuId}
               className={`topnav-drawer${navOpen ? ' is-open' : ''}`}
               aria-label="Sections"
               aria-hidden={!navOpen}
             >
+              <p className="topnav-drawer-heading">Menu</p>
               {sectionLinks ? <div className="topnav-drawer-group">{sectionLinks}</div> : null}
               <div className="topnav-drawer-group">{accountLinks}</div>
             </nav>

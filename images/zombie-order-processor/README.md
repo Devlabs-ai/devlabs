@@ -7,7 +7,5 @@ marker survives restart; after kubelet restarts the container, `/health` is heal
 Image: `devsetu/zombie-order-processor:1.0`
 
 ```bash
-cd images/zombie-order-processor
-docker build --platform linux/amd64 -t devsetu/zombie-order-processor:1.0 .
-docker push devsetu/zombie-order-processor:1.0
+./images/build-all.sh zombie-order-processor   # multi-arch: arm64 + amd64
 ```

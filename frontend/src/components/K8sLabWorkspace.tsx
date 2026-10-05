@@ -9,15 +9,25 @@ import SolutionGateModal, { hasAcknowledgedSolution } from './SolutionGateModal'
 import ConfirmDialog from './ConfirmDialog';
 import BriefBackButton from './BriefBackButton';
 import WorkspaceMobileSwitcher, { type WorkspaceMobilePane } from './WorkspaceMobileSwitcher';
+import DesktopOnlyNotice from './DesktopOnlyNotice';
 import { IconPen, IconSubmit } from './ChromeIcons';
 import { useIsNarrowUi } from '../hooks/useMediaQuery';
 import { fetchChallenge, fetchChallengeSolution } from '../services/challengeApi';
 import { isAdminUser, isReviewStaff, getCurrentUser } from '../services/authApi';
 import { readMigrating, writeMigrating } from '../utils/storageMigrate';
 import {
+  LAB_LEASE_RECLAIMED_EVENT,
+  LAB_LEASE_TAKEN_EVENT,
+  LAB_SESSION_ENDED_EVENT,
+  sendLabHeartbeat,
+  withLabClientId,
+} from '../services/labTabLease';
+import {
+  fetchK8sCapacity,
   fetchK8sSubmissions,
   gradeK8sSession,
   resetK8sSession,
+  type K8sCapacityState,
   type K8sSubmissionRecord,
 } from '../services/workspaceApi';
 import type { ActiveSession, ChallengeFull, ChallengePublic } from '../types/domain';
@@ -46,10 +56,29 @@ function k8sTerminalWsUrl(sessionId: string): string {
   return `${proto}://${window.location.host}/ws/k8s-terminal?sessionId=${sessionId}`;
 }
 
+/**
+ * Cluster labs (sandboxType kubernetes, linux or docker) share this workspace and the
+ * kubernetes session runtime; Linux and Docker labs are a single machine with a shell.
+ */
 export function isKubernetesChallenge(
   challenge: ChallengePublic | ChallengeFull | null | undefined,
 ): boolean {
-  return (challenge?.sandboxType || '') === 'kubernetes';
+  const t = challenge?.sandboxType || '';
+  return t === 'kubernetes' || t === 'linux' || t === 'docker';
+}
+
+/** Linux and Docker labs: one machine per learner, no namespace or Editor. */
+export function isBoxChallenge(
+  challenge: ChallengePublic | ChallengeFull | null | undefined,
+): boolean {
+  const t = challenge?.sandboxType || '';
+  return t === 'linux' || t === 'docker';
+}
+
+export function boxMachineLabel(
+  challenge: ChallengePublic | ChallengeFull | null | undefined,
+): string {
+  return challenge?.sandboxType === 'docker' ? 'Docker' : 'Linux';
 }
 
 type MainTab = 'terminal' | 'editor';
@@ -62,6 +91,40 @@ type EvalResult = {
   at: number;
 };
 
+const CAPACITY_POLL_MS = 3000;
+/** Typical Karpenter node boot, shown to learners as the expected wait. */
+const NODE_BOOT_SECONDS = 40;
+
+/** Poll capacity waits (lab open held, pods waiting for a node) while the lab is open. */
+function useCapacity(enabled: boolean): K8sCapacityState {
+  const [state, setState] = useState<K8sCapacityState>({ waiting: [], reservingSeconds: null });
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async (): Promise<void> => {
+      try {
+        const next = await fetchK8sCapacity();
+        if (!cancelled) setState(next);
+      } catch {
+        /* keep the last value; the notice is best-effort */
+      }
+      if (!cancelled) timer = window.setTimeout(() => void poll(), CAPACITY_POLL_MS);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [enabled]);
+  return state;
+}
+
+function capacityEta(waitedSeconds: number): string {
+  const left = NODE_BOOT_SECONDS - waitedSeconds;
+  return left > 5 ? `about ${left} s` : 'a few more seconds';
+}
+
 const RESULTS_DRAWER_DEFAULT = 280;
 const RESULTS_DRAWER_MIN = 140;
 const RESULTS_DRAWER_MAX = 560;
@@ -71,11 +134,15 @@ export default function K8sLabWorkspace({
   session,
   onClose: _onClose,
 }: K8sLabWorkspaceProps): JSX.Element {
-  const { currentUser } = useAppState();
+  const { currentUser, onSelectChallenge } = useAppState();
   const isAdmin = isAdminUser(currentUser) || isAdminUser(getCurrentUser());
   const showReviewTab = isReviewStaff(currentUser) || isReviewStaff(getCurrentUser());
   const labReady = session.labReady !== false;
+  const lockedMessage = session.lockedMessage || null;
+  const notReadyTitle = lockedMessage ? 'Lab is unavailable right now' : 'Lab is still preparing';
   const challengeId = challenge?.id || '';
+  const box = isBoxChallenge(challenge);
+  const machineLabel = boxMachineLabel(challenge);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const dragging = useRef(false);
   const isNarrow = useIsNarrowUi();
@@ -94,7 +161,8 @@ export default function K8sLabWorkspace({
   });
   const [termEpoch, setTermEpoch] = useState(0);
   // Editor first so the lab is usable instantly; the terminal connects in the background.
-  const [mainTab, setMainTab] = useState<MainTab>('editor');
+  // Box labs (Linux, Docker) have no Editor: files are edited on the machine itself.
+  const [mainTab, setMainTab] = useState<MainTab>(box ? 'terminal' : 'editor');
   const showBrief = isNarrow ? mobilePane === 'brief' : !briefCollapsed;
   const showWorkspace = isNarrow ? mobilePane === 'workspace' : true;
   const showResize = !isNarrow && !briefCollapsed;
@@ -113,12 +181,37 @@ export default function K8sLabWorkspace({
   const [busy, setBusy] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [evalResult, setEvalResult] = useState<EvalResult | null>(null);
+  const capacity = useCapacity(!box && !lockedMessage);
+  const capacityWaits = capacity.waiting;
+  const capacityWaitedSeconds = Math.max(
+    capacity.reservingSeconds ?? 0,
+    ...capacityWaits.map((w) => w.waitingSeconds),
+  );
+  const openingHeldForCapacity = capacity.reservingSeconds !== null || capacityWaits.length > 0;
 
   const wsUrl = useMemo(() => {
     if (!labReady || !session.id || session.id.startsWith('pending-k8s-')) return '';
-    const base = session.terminalWsUrl || k8sTerminalWsUrl(session.id);
-    return `${base}${base.includes('?') ? '&' : '?'}v=${termEpoch}`;
+    const base = withLabClientId(session.terminalWsUrl || k8sTerminalWsUrl(session.id));
+    return `${base}&v=${termEpoch}`;
   }, [labReady, session.terminalWsUrl, session.id, termEpoch]);
+
+  useEffect(() => {
+    const onReclaimed = (): void => setTermEpoch((n) => n + 1);
+    window.addEventListener(LAB_LEASE_RECLAIMED_EVENT, onReclaimed);
+    return () => window.removeEventListener(LAB_LEASE_RECLAIMED_EVENT, onReclaimed);
+  }, []);
+
+  const onTerminalDisconnect = (): void => {
+    if (!session.id || session.id.startsWith('pending-k8s-')) return;
+    void sendLabHeartbeat(session.id).then((result) => {
+      if (result === 'taken') window.dispatchEvent(new Event(LAB_LEASE_TAKEN_EVENT));
+      if (result === 'ended') window.dispatchEvent(new Event(LAB_SESSION_ENDED_EVENT));
+    });
+  };
+
+  useEffect(() => {
+    if (lockedMessage) setMainTab('terminal');
+  }, [lockedMessage]);
 
   const prevLabReady = useRef(labReady);
   useEffect(() => {
@@ -306,6 +399,7 @@ export default function K8sLabWorkspace({
   };
 
   useEffect(() => {
+    if (box) return undefined;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== '`' || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
       e.preventDefault();
@@ -314,7 +408,7 @@ export default function K8sLabWorkspace({
     // Capture phase: xterm swallows keystrokes once the terminal has focus.
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, []);
+  }, [box]);
 
   const toggleHint = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘`' : 'Ctrl+`';
 
@@ -482,7 +576,7 @@ export default function K8sLabWorkspace({
                     <div className="spark-submissions-list spark-submissions-list--brief">
                       {submissions.length === 0 ? (
                         <p className="dim" style={{ fontSize: 13, margin: 0 }}>
-                          No submissions yet. Submit grades the cluster state for this lab.
+                          No submissions yet. Submit grades the {box ? 'state of your machine' : 'cluster state'} for this lab.
                         </p>
                       ) : (
                         submissions.map((sub) => (
@@ -573,12 +667,16 @@ export default function K8sLabWorkspace({
         </button>
       )}
 
-      {showWorkspace && (
+      {showWorkspace && isNarrow && (
+        <DesktopOnlyNotice tools="terminal and editor" onShowBrief={() => setMobilePane('brief')} />
+      )}
+      {showWorkspace && !isNarrow && (
       <div className="col col-main">
         <div className="panel spark-ide-panel" style={{ flex: 1 }}>
           <div className="spark-ide-actionbar">
             <div className="spark-ide-actionbar-left">
               <div className="k8s-lab-main-tabs" role="tablist" aria-label="Lab workspace">
+                {!box && !lockedMessage && (
                 <button
                   type="button"
                   role="tab"
@@ -589,6 +687,7 @@ export default function K8sLabWorkspace({
                 >
                   Editor
                 </button>
+                )}
                 <button
                   type="button"
                   role="tab"
@@ -596,15 +695,17 @@ export default function K8sLabWorkspace({
                   className={`k8s-lab-main-tab${mainTab === 'terminal' ? ' active' : ''}`}
                   onClick={() => setMainTab('terminal')}
                   title={
-                    labReady
-                      ? `Terminal (${toggleHint} to toggle)`
-                      : 'Terminal is connecting in the background'
+                    lockedMessage
+                      ? 'Terminal is unavailable right now'
+                      : labReady
+                        ? (box ? 'Terminal' : `Terminal (${toggleHint} to toggle)`)
+                        : 'Terminal is connecting in the background'
                   }
                 >
                   Terminal
                   <span
-                    className={`k8s-lab-term-status${labReady ? ' is-ready' : ''}`}
-                    aria-label={labReady ? 'ready' : 'connecting'}
+                    className={`k8s-lab-term-status${labReady ? ' is-ready' : ''}${lockedMessage ? ' is-locked' : ''}`}
+                    aria-label={lockedMessage ? 'unavailable' : labReady ? 'ready' : 'connecting'}
                   />
                 </button>
               </div>
@@ -623,7 +724,11 @@ export default function K8sLabWorkspace({
                 className="spark-ide-btn spark-ide-btn--run"
                 disabled={busy || !labReady}
                 onClick={() => setResetConfirmOpen(true)}
-                title={labReady ? 'Reset workloads in your namespace' : 'Lab is still preparing'}
+                title={
+                  !labReady
+                    ? notReadyTitle
+                    : box ? 'Start over on a fresh machine' : 'Reset workloads in your namespace'
+                }
               >
                 Reset
               </button>
@@ -640,7 +745,7 @@ export default function K8sLabWorkspace({
                   className="spark-ide-btn spark-ide-btn--submit"
                   disabled={busy || !labReady}
                   onClick={() => void onGrade()}
-                  title={labReady ? 'Submit for grading' : 'Lab is still preparing'}
+                  title={labReady ? 'Submit for grading' : notReadyTitle}
                 >
                   <IconSubmit color="#04120c" />
                   <span>{busy ? 'Submitting…' : 'Submit'}</span>
@@ -665,20 +770,80 @@ export default function K8sLabWorkspace({
               className={`k8s-lab-term-pane-layer${mainTab === 'terminal' ? ' is-active' : ''}`}
               aria-hidden={mainTab !== 'terminal'}
             >
-              {!labReady ? (
+              {lockedMessage ? (
+                <div className="k8s-lab-locked" role="status" aria-live="polite">
+                  <svg className="k8s-lab-locked-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
+                    <rect x="4.5" y="10.5" width="15" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                    <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                  </svg>
+                  <strong>This lab is locked for now</strong>
+                  <p>{lockedMessage}</p>
+                  <p className="k8s-lab-locked-hint">
+                    You can still read the description and the rest of the brief on the left.
+                  </p>
+                  {challenge && (
+                    <button
+                      type="button"
+                      className="spark-ide-btn k8s-lab-locked-retry"
+                      onClick={() => void onSelectChallenge(challenge)}
+                    >
+                      Try again
+                    </button>
+                  )}
+                </div>
+              ) : !labReady ? (
                 <div className="k8s-lab-terminal-warming" role="status" aria-live="polite">
                   <span className="spinner" />
                   <div>
-                    <strong>Preparing your cluster terminal…</strong>
-                    <p>
-                      Keep drafting in the Editor — the shell opens here as soon as your namespace is ready.
-                    </p>
+                    {box ? (
+                      <>
+                        <strong>Starting your {machineLabel} machine…</strong>
+                        <p>
+                          A fresh machine is booting for you. This usually takes a few seconds, and up to
+                          two minutes when a new server has to start first.
+                        </p>
+                      </>
+                    ) : openingHeldForCapacity ? (
+                      <>
+                        <strong>Adding cluster capacity for your lab…</strong>
+                        <p>
+                          The cluster is busy, so a node is starting for your lab&apos;s pods
+                          ({capacityEta(capacityWaitedSeconds)}). The shell opens here as soon as they are placed.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <strong>Preparing your cluster terminal…</strong>
+                        <p>
+                          Keep drafting in the Editor — the shell opens here as soon as your namespace is ready.
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
               ) : (
-                <TerminalPanel wsUrl={wsUrl} isActive={mainTab === 'terminal'} resizeProtocol />
+                <>
+                  {capacityWaits.length > 0 && (
+                    <div className="k8s-lab-capacity-notice" role="status" aria-live="polite">
+                      <span className="spinner" />
+                      <span>
+                        Starting extra capacity for{' '}
+                        <code>{capacityWaits.map((w) => w.pod).join(', ')}</code>
+                        {' '}— {capacityEta(capacityWaitedSeconds)}. Your lab&apos;s reserved pods are in use;
+                        this starts automatically and your other pods are unaffected.
+                      </span>
+                    </div>
+                  )}
+                  <TerminalPanel
+                    wsUrl={wsUrl}
+                    isActive={mainTab === 'terminal'}
+                    resizeProtocol
+                    onDisconnect={onTerminalDisconnect}
+                  />
+                </>
               )}
             </div>
+            {!box && (
             <div
               className={`k8s-lab-scratch${mainTab === 'editor' ? ' is-active' : ''}`}
               aria-hidden={mainTab !== 'editor'}
@@ -691,6 +856,7 @@ export default function K8sLabWorkspace({
                 toggleHint={toggleHint}
               />
             </div>
+            )}
 
             {!resultsOpen && evalResult && (
               <button
@@ -805,14 +971,23 @@ export default function K8sLabWorkspace({
         onCancel={() => setResetConfirmOpen(false)}
         onConfirm={() => void onReset()}
       >
-        <p>
-          Everything running in your namespace is wiped (Pods, Deployments, Services, ConfigMaps,
-          volumes, …) and the lab&apos;s starting state is set up again.
-        </p>
-        <p>
-          Your code and config files are <strong>not</strong> touched. Anything you created in the
-          Editor or your home folder stays, so you can <code>kubectl apply -f</code> it again.
-        </p>
+        {box ? (
+          <p>
+            Your machine is replaced with a fresh one and the lab&apos;s starting state is set up again.
+            Everything you changed on it, including files in your home folder, is lost.
+          </p>
+        ) : (
+          <>
+            <p>
+              Everything running in your namespace is wiped (Pods, Deployments, Services, ConfigMaps,
+              volumes, …) and the lab&apos;s starting state is set up again.
+            </p>
+            <p>
+              Your code and config files are <strong>not</strong> touched. Anything you created in the
+              Editor or your home folder stays, so you can <code>kubectl apply -f</code> it again.
+            </p>
+          </>
+        )}
       </ConfirmDialog>
     </div>
   );

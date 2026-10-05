@@ -102,7 +102,7 @@ export default function WhiteboardPage(): JSX.Element {
       <header className="play-problems-hero">
         <div className="play-problems-hero-copy">
           <p className="play-papers-crumb">
-            <Link to="/play">Play</Link>
+            <Link to="/track">Tracks</Link>
             <span aria-hidden> / </span>
             <span>Whiteboard</span>
           </p>

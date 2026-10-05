@@ -1,0 +1,53 @@
+# NRI plugin on labs-linux nodes only: re-mounts /sys/fs/cgroup read-write for
+# user-namespaced pods annotated devlabs.io/cgroup-rw: "true", so learner machines can run
+# systemd as PID 1 (images/nri-cgroup-rw/main.go). Talks to containerd over its NRI socket.
+#
+# A box created on a fresh node before this pod registers starts with a read-only cgroupfs,
+# exits, and is fixed on its next restart.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dl-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nri-cgroup-rw
+  namespace: dl-system
+spec:
+  selector:
+    matchLabels:
+      app: nri-cgroup-rw
+  template:
+    metadata:
+      labels:
+        app: nri-cgroup-rw
+    spec:
+      priorityClassName: system-node-critical
+      automountServiceAccountToken: false
+      nodeSelector:
+        devlabs.io/pool: linux
+      tolerations:
+        - key: devlabs.io/pool
+          value: linux
+          effect: NoSchedule
+      containers:
+        - name: plugin
+          image: devsetu/nri-cgroup-rw:v0.1
+          securityContext:
+            runAsUser: 0
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {cpu: 50m, memory: 32Mi}
+          volumeMounts:
+            - name: nri
+              mountPath: /var/run/nri
+      volumes:
+        - name: nri
+          hostPath:
+            path: /var/run/nri
+            type: Directory

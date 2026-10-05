@@ -1,0 +1,46 @@
+{
+  "id": "linux-22-ssh-keys-for-the-deploy-bot",
+  "number": 322,
+  "finalized": true,
+  "title": "SSH Keys for the Deploy Bot",
+  "description": "**SITUATION:**\n\nThe CI pipeline deploys order-processor by SSHing into the box as the `deploy` user, with a **password** stored in a CI variable. That password just turned up in a public build log. Security wants three things today: key-based login for the bot, no password logins at all, and no direct root logins. You're setting up the bot's key from your own account first.\n\n**YOUR TASK:**\n\n1. Generate an **ed25519** key pair for `learner` at `~/.ssh/id_ed25519`, with no passphrase (it's for a bot).\n2. Authorize the public key for the `deploy` account.\n3. Add a `Host order-box` entry to your `~/.ssh/config`, so `ssh order-box` logs in as `deploy` on `127.0.0.1` with that key.\n4. Harden sshd: no password authentication, no root login. Make sure the **running** daemon uses the new settings.\n\n**SPEC:**\n\n- `~/.ssh/id_ed25519` (mode 600) and `id_ed25519.pub`, type ed25519\n- `/home/deploy/.ssh` is `700`, and `authorized_keys` is `600`, both owned by `deploy`, containing your public key\n- `ssh order-box whoami` (as learner) prints `deploy`\n- `sshd -T` shows `passwordauthentication no` and `permitrootlogin no`\n- A login attempt without a key is refused with `Permission denied (publickey)`\n\n**GOOD PRACTICES:**\n\n- sshd uses the **first** value it reads for each setting, and `sshd_config.d/*.conf` files are read in name order.\n- Run `sshd -t` before restarting sshd. A broken config on a remote box locks you out.\n- On a real server, keep your current session open until a **new** session logs in successfully.\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "ssh",
+    "security"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "SSH Keys for the Deploy Bot",
+    "brief": "SSH Keys for the Deploy Bot",
+    "solution": "# Solution — SSH Keys for the Deploy Bot\n\nKey authentication works like this: the **private** key stays on the client (`~/.ssh/id_ed25519`, mode 600), and the **public** key goes into the server account's `~/.ssh/authorized_keys`. sshd refuses keys whose files are writable by other users, so permissions matter.\n\nDocs: `man ssh-keygen` · `man sshd_config` · `man ssh_config`\n\n## Key pair\n\n```bash\nssh-keygen -t ed25519 -C \"deploy-bot\" -f ~/.ssh/id_ed25519 -N ''\nls -l ~/.ssh\n```\n\n`-N ''` means no passphrase, which suits a bot. For a human, use a passphrase and `ssh-agent`.\n\n## Authorize it for deploy\n\n`ssh-copy-id` would do this over SSH. Here you have sudo, so do it directly:\n\n```bash\nsudo install -d -m 700 -o deploy -g deploy /home/deploy/.ssh\ncat ~/.ssh/id_ed25519.pub | sudo tee -a /home/deploy/.ssh/authorized_keys >/dev/null\nsudo chown deploy:deploy /home/deploy/.ssh/authorized_keys\nsudo chmod 600 /home/deploy/.ssh/authorized_keys\nssh -o StrictHostKeyChecking=accept-new deploy@127.0.0.1 whoami     # deploy\n```\n\n## Client alias\n\n```bash\ncat >> ~/.ssh/config <<'EOF'\nHost order-box\n    HostName 127.0.0.1\n    User deploy\n    IdentityFile ~/.ssh/id_ed25519\nEOF\nchmod 600 ~/.ssh/config\nssh order-box whoami\n```\n\n## Harden sshd\n\nFor each setting, sshd uses the **first** value it reads, and files in `sshd_config.d/` are read in name order. A `10-` file therefore beats the existing `50-legacy.conf`. You could also delete or fix the legacy file.\n\n```bash\nsudo tee /etc/ssh/sshd_config.d/10-hardening.conf >/dev/null <<'EOF'\nPasswordAuthentication no\nPermitRootLogin no\nEOF\nsudo sshd -t                                   # syntax check\nsudo sshd -T | grep -E 'passwordauthentication|permitrootlogin'\nsudo systemctl restart ssh\nssh -o PubkeyAuthentication=no deploy@127.0.0.1   # Permission denied (publickey)\nssh order-box whoami                              # still works\n```\n\nThen **Submit**.\n",
+    "idLabel": "22",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

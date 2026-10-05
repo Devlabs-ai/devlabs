@@ -62,6 +62,14 @@ function requireInterviewer(req: ExpressRequest, res: ExpressResponse, next: Exp
   next();
 }
 
+/** Guests pass through without req.user; a valid JWT still identifies the caller. */
+function optionalAuth(req: ExpressRequest, _res: ExpressResponse, next: ExpressNextFunction): void {
+  const token = bearer(req);
+  const payload = token ? verifyToken(token) : null;
+  if (payload) req.user = payload;
+  next();
+}
+
 /** Admin authoring / dashboard — JWT claim, ADMIN_EMAILS, or users.is_admin. */
 function requireAdmin(req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction): void {
   requireInterviewer(req, res, () => {
@@ -139,6 +147,7 @@ function requireSessionAccess(req: ExpressRequest, res: ExpressResponse, next: E
 
 module.exports = {
   requireInterviewer,
+  optionalAuth,
   requireAdmin,
   requireReviewStaff,
   requireSessionAccess,

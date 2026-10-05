@@ -156,11 +156,89 @@ const STATEMENTS: string[] = [
      PRIMARY KEY (user_id, challenge_id)
    )`,
 
+  // "Notify me" on coming-soon content (e.g. a Major); one row per user per item.
+  `CREATE TABLE IF NOT EXISTS notify_requests (
+     user_id     TEXT NOT NULL,
+     item_kind   TEXT NOT NULL,
+     item_id     TEXT NOT NULL,
+     email       TEXT,
+     created_at  BIGINT NOT NULL,
+     PRIMARY KEY (user_id, item_kind, item_id)
+   )`,
+
+  // Paper of the Month: an admin picks a paper from the pool; the latest pick is current.
+  `ALTER TABLE IF EXISTS weekly_paper_picks RENAME TO monthly_paper_picks`,
+  `CREATE TABLE IF NOT EXISTS monthly_paper_picks (
+     id          SERIAL PRIMARY KEY,
+     paper_id    TEXT NOT NULL,
+     picked_by   TEXT,
+     picked_at   BIGINT NOT NULL
+   )`,
+  // One graded attempt per user per paper; tokens count toward the platform leaderboard.
+  `CREATE TABLE IF NOT EXISTS paper_quiz_attempts (
+     user_id     TEXT NOT NULL,
+     paper_id    TEXT NOT NULL,
+     answers     JSONB NOT NULL,
+     correct     INTEGER NOT NULL,
+     total       INTEGER NOT NULL,
+     tokens      INTEGER NOT NULL,
+     created_at  BIGINT NOT NULL,
+     PRIMARY KEY (user_id, paper_id)
+   )`,
+
   // Global catalog number across all platforms (1, 2, 3, …).
   `ALTER TABLE challenges ADD COLUMN IF NOT EXISTS number INTEGER`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_challenges_number
      ON challenges (number)
      WHERE number IS NOT NULL`,
+
+  // Razorpay subscriptions — one row per track subscription. Access lasts until
+  // paid_until (ms); webhooks keep status / periods in sync.
+  `CREATE TABLE IF NOT EXISTS subscriptions (
+     id                        TEXT PRIMARY KEY,
+     user_id                   TEXT NOT NULL,
+     plan_id                   TEXT NOT NULL,
+     razorpay_subscription_id  TEXT NOT NULL UNIQUE,
+     razorpay_plan_id          TEXT NOT NULL,
+     status                    TEXT NOT NULL,
+     first_month_amount_paise  INTEGER NOT NULL,
+     offer_percent             INTEGER NOT NULL DEFAULT 0,
+     start_at                  BIGINT,
+     current_start             BIGINT,
+     current_end               BIGINT,
+     paid_until                BIGINT,
+     cancel_requested          BOOLEAN NOT NULL DEFAULT false,
+     created_at                BIGINT NOT NULL,
+     updated_at                BIGINT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions (user_id, created_at DESC)`,
+  // One-time monthly passes (Razorpay Orders) share the table: kind = 'one_time'.
+  `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'subscription'`,
+  `ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS razorpay_order_id TEXT`,
+  `ALTER TABLE subscriptions ALTER COLUMN razorpay_subscription_id DROP NOT NULL`,
+  `ALTER TABLE subscriptions ALTER COLUMN razorpay_plan_id DROP NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_subscriptions_order
+     ON subscriptions (razorpay_order_id)
+     WHERE razorpay_order_id IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS payments (
+     id                        TEXT PRIMARY KEY,
+     user_id                   TEXT NOT NULL,
+     subscription_id           TEXT REFERENCES subscriptions(id) ON DELETE SET NULL,
+     razorpay_payment_id       TEXT NOT NULL UNIQUE,
+     razorpay_invoice_id       TEXT,
+     amount_paise              INTEGER NOT NULL,
+     currency                  TEXT NOT NULL,
+     status                    TEXT NOT NULL,
+     method                    TEXT,
+     created_at                BIGINT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_payments_user ON payments (user_id, created_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS billing_events (
+     event_id     TEXT PRIMARY KEY,
+     type         TEXT NOT NULL,
+     payload      JSONB NOT NULL,
+     received_at  BIGINT NOT NULL
+   )`,
 ];
 
 const CATALOG_V2_KEY = 'challenges_catalog_v2';

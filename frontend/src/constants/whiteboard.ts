@@ -1,6 +1,6 @@
 /** Whiteboard — internals boards, separate from graded Spark labs. */
 
-export const WHITEBOARD_PATH = '/play/whiteboard';
+export const WHITEBOARD_PATH = '/track/whiteboard';
 
 export interface WhiteboardSection {
   id: string;

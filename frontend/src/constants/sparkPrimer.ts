@@ -5,8 +5,8 @@ import whyImg from '../assets/spark-primer/spark-primer-why.png';
 import howEngineImg from '../assets/spark-primer/spark-primer-how-engine.png';
 import howLabImg from '../assets/spark-primer/spark-primer-how-lab.png';
 
-export const SPARK_PRIMER_PATH = '/play/data-engineer/spark/intro';
-export const SPARK_LABS_PATH = '/play/data-engineer/spark';
+export const SPARK_PRIMER_PATH = '/track/data-engineer/spark/intro';
+export const SPARK_LABS_PATH = '/track/data-engineer/spark';
 
 export interface SparkPrimerExample {
   title: string;
@@ -112,7 +112,7 @@ export const SPARK_PRIMER_NEXT_LINKS: Array<{ label: string; href: string; exter
   },
   {
     label: 'RDD white paper (optional depth)',
-    href: '/play/papers/spark',
+    href: '/track/papers/spark',
   },
   {
     label: 'Open Spark labs',

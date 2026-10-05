@@ -1,0 +1,47 @@
+{
+  "id": "docker-04-fast-rebuilds-and-a-clean-image",
+  "number": 404,
+  "finalized": true,
+  "title": "Fast Rebuilds and a Clean Image",
+  "description": "**SITUATION:**\n\nEvery change to order-processor means a slow rebuild: a one-line edit to `app.py` reinstalls every Python package. Worse, security found that the published image contains the team's `.git` history, logs, tests and a `.env` file with a **live payment key**.\n\n`~/order-processor` is the team's working copy, and its Dockerfile starts with `COPY . .`.\n\n**YOUR TASK:**\n\n1. Keep junk and secrets out of the build with a `.dockerignore`.\n2. Reorder the Dockerfile so changing `app.py` doesn't reinstall dependencies.\n3. Build `quickbyte/order-processor:1.5`.\n\n**SPEC:**\n\n- `~/order-processor/.dockerignore` excludes at least `.git`, `.env` and `logs`\n- Image `quickbyte/order-processor:1.5`, `ENV APP_VERSION=v1.5`\n- `/app` in the image contains **only** `app.py` and `requirements.txt`, and flask and gunicorn are installed\n- Rebuilding after a change to `app.py` takes `pip install` from the **cache**\n\n**GOOD PRACTICES:**\n\n- Docker reuses a cached layer only if its instruction and **every instruction before it** are unchanged.\n- Put what rarely changes first (dependencies), what changes all the time last (code).\n- `docker build --progress=plain` shows which steps are `CACHED`.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "dockerfile",
+    "build-cache",
+    "dockerignore"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Fast Rebuilds and a Clean Image",
+    "brief": "Fast Rebuilds and a Clean Image",
+    "solution": "# Solution — Fast Rebuilds and a Clean Image\n\nTwo problems with one cause: `COPY . .` copies **everything** in the folder, before anything else.\n\n- **Slow:** every edit to `app.py` changes that `COPY` layer, so every layer after it (including `pip install`) runs again.\n- **Dirty:** `.git`, logs, tests, bytecode and `.env` (with a live payment key!) end up inside the image, where anyone who pulls it can read them.\n\nDocs: [.dockerignore](https://docs.docker.com/build/concepts/context/#dockerignore-files) · [Build cache](https://docs.docker.com/build/cache/)\n\n## See the problem\n\n```bash\ncd ~/order-processor\nls -A                                   # .env .git logs tests __pycache__ wheels ...\ndu -sh .git logs\ndocker build -t quickbyte/order-processor:1.5 .      # \"transferring context: 9MB\"\ndocker run --rm --entrypoint ls quickbyte/order-processor:1.5 -A /app\ndocker run --rm --entrypoint cat quickbyte/order-processor:1.5 /app/.env   # the key, leaked\n```\n\n## .dockerignore\n\n```bash\nnano ~/order-processor/.dockerignore\n```\n\n```text\n.git\n.env\nlogs\ntests\n__pycache__\n*.pyc\nDockerfile\n.dockerignore\n```\n\n`.dockerignore` filters the **build context**, the files the CLI sends to the builder. Excluded files can't be copied by any instruction, and the context upload gets smaller and faster.\n\n## Reorder the Dockerfile\n\n```dockerfile\nFROM python:3.12-slim\n\nWORKDIR /app\n\nCOPY requirements.txt .\nCOPY wheels/ ./wheels/\nRUN pip install --no-cache-dir --no-index --find-links=wheels -r requirements.txt \\\n    && rm -rf wheels\n\nCOPY app.py .\n\nENV APP_VERSION=v1.5\nEXPOSE 8000\n\nCMD [\"gunicorn\", \"--bind\", \"0.0.0.0:8000\", \"--workers\", \"1\", \"--threads\", \"2\", \"app:app\"]\n```\n\n- Things that rarely change (requirements, wheels, the install) go **first**; the code that changes all the time goes **last**.\n- Copy `app.py` by name: `/app` gets exactly what the app needs.\n- `rm -rf wheels` in the **same** `RUN` keeps the wheels out of the final filesystem.\n\n## Build and prove the cache works\n\n```bash\ndocker build -t quickbyte/order-processor:1.5 ~/order-processor\ndocker run --rm --entrypoint ls quickbyte/order-processor:1.5 -A /app      # app.py requirements.txt\necho '# tweak' >> ~/order-processor/app.py\ndocker build --progress=plain -t quickbyte/order-processor:1.5 ~/order-processor 2>&1 | grep -A1 'pip install'\n# #8 CACHED\n```\n\nDocker reuses a layer when its instruction **and everything before it** are unchanged. Only `COPY app.py` and what follows run again: a rebuild in about a second.\n\nThen **Submit**.\n",
+    "idLabel": "04",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 150
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

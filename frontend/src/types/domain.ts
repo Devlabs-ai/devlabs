@@ -20,8 +20,12 @@ export interface ValidationSpec {
   [key: string]: unknown;
 }
 
-/** Play runtime. compose = Docker sandbox; spark-platform = shared batch; kubernetes = per-user Namespace labs. */
-export type SandboxType = 'compose' | 'spark-platform' | 'board' | 'kubernetes';
+/**
+ * Play runtime. compose = Docker sandbox; spark-platform = shared batch; kubernetes = per-user
+ * Namespace labs; linux = per-user Linux machine; docker = the same machine running Docker
+ * (both run on the kubernetes session runtime).
+ */
+export type SandboxType = 'compose' | 'spark-platform' | 'board' | 'kubernetes' | 'linux' | 'docker';
 
 export interface K8sPlatformSpec {
   quota?: { pods?: string; cpu?: string; memory?: string };
@@ -259,7 +263,7 @@ export interface ChallengeFull extends ChallengePublic {
   validationSpec: ValidationSpec | null;
   /** Present when sandboxType === 'spark-platform'. */
   sparkPlatform?: SparkPlatformSpec | null;
-  /** Present when sandboxType === 'kubernetes'. */
+  /** Present when sandboxType is 'kubernetes' or 'linux'. */
   k8sPlatform?: K8sPlatformSpec | null;
   boardSpec?: PublicBoardSpec | null;
 }
@@ -369,6 +373,11 @@ export interface ActiveSession {
    * Theory UI can show; terminal stays disabled until true.
    */
   labReady?: boolean;
+  /**
+   * Cluster labs whose node pool is down: no session exists, the brief stays readable
+   * and the terminal shows this message instead of a shell.
+   */
+  lockedMessage?: string | null;
 }
 
 export interface EndSessionResult {
@@ -398,6 +407,8 @@ export interface AppState {
   onBackToLibrary: () => void;
   onEnd: () => Promise<void>;
   onLogout: () => void;
+  /** Guests browse freely; this opens the sign-in modal. */
+  onRequestLogin: (returnTo?: string) => void;
 }
 
 // ── API / service helpers ─────────────────────────────────────────────────────

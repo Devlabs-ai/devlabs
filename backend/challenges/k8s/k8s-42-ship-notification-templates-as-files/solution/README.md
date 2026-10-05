@@ -45,8 +45,11 @@ spec:
               mountPath: /etc/notification/templates
           resources:
             requests:
-              cpu: "100m"
-              memory: "128Mi"
+              cpu: "20m"
+              memory: "32Mi"
+            limits:
+              cpu: "40m"
+              memory: "64Mi"
       volumes:
         - name: templates
           configMap:

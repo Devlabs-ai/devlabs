@@ -1,0 +1,47 @@
+{
+  "id": "docker-21-lock-down-payment-handler",
+  "number": 421,
+  "finalized": true,
+  "title": "Lock Down Payment Handler",
+  "description": "**SITUATION:**\n\npayment-handler handles card data, and it's running the way someone \"got it working\": as **root**, with extra Linux capabilities, a writable filesystem, and published on every interface. If an attacker finds a bug in it, they get all of that too.\n\n**YOUR TASK:**\n\nRecreate payment-handler with the least privilege it needs to work.\n\n**SPEC:**\n\n- Container `payment-handler`: image `devsetu/payment-handler:v1.1`, **running**\n- Not root, not privileged (the image already runs as UID 1000)\n- **All** Linux capabilities dropped and none added back\n- `no-new-privileges` set\n- Read-only root filesystem, with a tmpfs at `/tmp` (gunicorn needs it)\n- Published on `127.0.0.1:8001` only → `8000`, and `/health` answers\n\n**GOOD PRACTICES:**\n\n- Lock everything down, then open only what `docker logs` says is needed.\n- `grep Cap /proc/1/status` inside the container shows its effective capabilities.\n- These flags map onto a Kubernetes `securityContext`.\n",
+  "difficulty": "L2",
+  "tags": [
+    "docker",
+    "l2",
+    "security",
+    "capabilities",
+    "read-only"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Lock Down Payment Handler",
+    "brief": "Lock Down Payment Handler",
+    "solution": "# Solution — Lock Down Payment Handler\n\npayment-handler handles card data, so it's the container an attacker wants most. If they find a bug in the app, what they can do next depends on how the container runs. **Least privilege**: take away everything the app doesn't need, so a compromise stays small.\n\nDocs: [Runtime privilege and Linux capabilities](https://docs.docker.com/engine/containers/run/#runtime-privilege-and-linux-capabilities) · [Docker security](https://docs.docker.com/engine/security/)\n\n## See what it runs with\n\n```bash\ndocker inspect -f 'user={{.Config.User}} caps={{.HostConfig.CapAdd}} ro={{.HostConfig.ReadonlyRootfs}}' payment-handler\ndocker exec payment-handler id                       # uid=0(root)\ndocker exec payment-handler sh -c 'grep Cap /proc/1/status'\ndocker port payment-handler                          # 0.0.0.0:8001\n```\n\n## Recreate it locked down\n\n```bash\ndocker rm -f payment-handler\ndocker run -d --name payment-handler \\\n  --read-only --tmpfs /tmp \\\n  --cap-drop ALL \\\n  --security-opt no-new-privileges \\\n  -p 127.0.0.1:8001:8000 \\\n  devsetu/payment-handler:v1.1\n```\n\n| Flag | What it takes away |\n|---|---|\n| (no `--user 0`) | Root. The image already says `USER 1000`. |\n| `--cap-drop ALL` | Every Linux **capability**: the pieces root's power is split into (`NET_ADMIN` reconfigures networking, `SYS_PTRACE` reads other processes' memory, `CHOWN`, `NET_RAW`...). A web app on port 8000 needs none. |\n| `--security-opt no-new-privileges` | setuid binaries (`su`, `sudo`, `passwd`) can't gain privileges, even if they're in the image. |\n| `--read-only` | Nobody can drop tools or modify the app on disk. |\n| `--tmpfs /tmp` | The one place gunicorn must write (worker heartbeat files), in memory. |\n| `-p 127.0.0.1:...` | Only the box itself can reach it. |\n\nTry `--read-only` without `--tmpfs /tmp` and read `docker logs`: gunicorn fails because it can't create its temp files. That's the normal workflow: lock everything, then open exactly what the logs say is needed.\n\n## Check\n\n```bash\ndocker exec payment-handler id                       # uid=1000(appuser)\ndocker exec payment-handler sh -c 'grep CapEff /proc/1/status'   # 0000000000000000\ndocker exec payment-handler touch /app/x             # Read-only file system\ncurl http://127.0.0.1:8001/health\n```\n\nThese map one-to-one onto a Kubernetes `securityContext`: `runAsNonRoot`, `capabilities.drop: [ALL]`, `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`.\n\nThen **Submit**.\n",
+    "idLabel": "21",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

@@ -5,41 +5,13 @@ import {
   TracksAnim,
   WhiteboardAnim,
 } from '../components/LandingFeatureAnims';
-import type { UserRecord } from '../types/domain';
+import { Link } from 'react-router-dom';
+import { PRICING_PATH } from '../constants/pricing';
+import { useInView } from '../hooks/useInView';
 
 interface LandingPageProps {
-  onLoggedIn: (user: UserRecord) => void;
-}
-
-/** Adds .is-inview when scrolled into view (for staggered slide-in). */
-function useInView<T extends HTMLElement>(rootMargin = '0px 0px -12% 0px'): {
-  ref: React.RefObject<T>;
-  inView: boolean;
-} {
-  const ref = useRef<T>(null as unknown as T);
-  const [inView, setInView] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || inView) return undefined;
-    if (typeof IntersectionObserver === 'undefined') {
-      setInView(true);
-      return undefined;
-    }
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) {
-          setInView(true);
-          io.disconnect();
-        }
-      },
-      { root: null, rootMargin, threshold: 0.12 },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [inView, rootMargin]);
-
-  return { ref, inView };
+  onSignIn: () => void;
+  onGetStarted: () => void;
 }
 
 type HeroLabLine =
@@ -254,13 +226,12 @@ function HeroPanel(): JSX.Element {
 }
 
 function LandingContent(): JSX.Element {
-  const { openLogin } = useMarketing();
+  const { openLogin, getStarted } = useMarketing();
   const platformReveal = useInView<HTMLElement>();
   const offer1 = useInView<HTMLElement>();
   const offer2 = useInView<HTMLElement>();
   const offer3 = useInView<HTMLElement>();
   const pricingReveal = useInView<HTMLElement>();
-  const [pricingSlide, setPricingSlide] = useState(0);
 
   return (
     <>
@@ -275,12 +246,15 @@ function LandingContent(): JSX.Element {
             Practice hands-on <strong>Tracks</strong> and <strong>Hand-Crafted Projects</strong> in a
             sandboxed environment — fail safely, get graded instantly.
           </p>
-          <div className="landing-cta">
-            <button type="button" className="landing-cta-primary" onClick={openLogin}>
-              Start learning
+          <div className="landing-cta landing-cta--pair">
+            <button type="button" className="landing-cta-primary" onClick={getStarted}>
+              Get started
               <span className="landing-cta-arrow" aria-hidden>
                 →
               </span>
+            </button>
+            <button type="button" className="landing-cta-secondary" onClick={openLogin}>
+              Sign in
             </button>
           </div>
         </div>
@@ -358,118 +332,45 @@ function LandingContent(): JSX.Element {
 
       <section
         ref={pricingReveal.ref}
-        className={`landing-pricing${pricingReveal.inView ? ' is-inview' : ''}`}
+        className={`landing-afford${pricingReveal.inView ? ' is-inview' : ''}`}
         aria-label="Pricing"
       >
-        <div className="landing-pricing-intro">
+        <div className="landing-afford-intro">
           <p className="landing-kicker">The pricing</p>
           <h2 className="landing-section-title landing-section-title--punch">
             <span className="landing-hero-line">Affordable</span>
             <span className="landing-hero-line landing-hero-line--accent">by design</span>
           </h2>
           <p className="landing-section-lead">
-            Running private infra for every learner would price this out of reach. So we run
-            DevSetu on optimized shared infrastructure — real labs, without the cost of going it
-            alone.
+            DevSetu is built for students, early-career engineers, and anyone curious about how
+            real systems actually work — people who learn best by doing, but can&rsquo;t pay for
+            a cloud account per experiment. We run every lab on optimized shared infrastructure, so you
+            get real systems without the real bill.
           </p>
-          <ul className="landing-pricing-reasons">
-            <li>Tracks, Projects, and Whiteboard on one membership</li>
-            <li>Instant grading and fair reclaim so capacity stays sustainable</li>
+          <ul className="landing-afford-reasons">
+            <li>Pay only for what you need. Finish it, then go beyond.</li>
+            <li>No cloud setup, no surprise charges for a cluster you forgot to delete.</li>
+            <li>Priced for a learner&rsquo;s budget, not a company training budget.</li>
           </ul>
         </div>
 
-        <div className="landing-pricing-carousel">
-          <div className="landing-pricing-carousel-viewport">
-            <div
-              className="landing-pricing-carousel-track"
-              style={{ transform: `translateX(-${pricingSlide * 100}%)` }}
-            >
-              <div className="landing-pricing-plan landing-pricing-plan--beta">
-                <p className="landing-pricing-plan-badge">Beta</p>
-                <h3 className="landing-pricing-plan-name">Open for beta access</h3>
-                <p className="landing-pricing-plan-price">
-                  <span className="landing-pricing-plan-amount">Free</span>
-                </p>
-                <p className="landing-pricing-plan-note">
-                  Practice on live shared labs while we grow — Kubernetes and Spark for now.
-                </p>
-                <ul className="landing-pricing-plan-includes">
-                  <li>Kubernetes Track</li>
-                  <li>Spark Track</li>
-                </ul>
-                <button type="button" className="landing-cta-primary" onClick={openLogin}>
-                  Start learning
-                  <span className="landing-cta-arrow" aria-hidden>
-                    →
-                  </span>
-                </button>
-                <p className="landing-pricing-teams">More tracks &amp; projects coming soon.</p>
-              </div>
-
-              <div className="landing-pricing-plan landing-pricing-plan--disabled" aria-disabled="true">
-                <p className="landing-pricing-plan-badge landing-pricing-plan-badge--muted">
-                  Coming soon
-                </p>
-                <h3 className="landing-pricing-plan-name">Individual</h3>
-                <p className="landing-pricing-plan-price">
-                  <span className="landing-pricing-plan-amount">₹499</span>
-                  <span className="landing-pricing-plan-period">/ month</span>
-                </p>
-                <p className="landing-pricing-plan-note">
-                  Full practice floor while we grow — lock in early access pricing.
-                </p>
-                <ul className="landing-pricing-plan-includes">
-                  <li>All Tracks &amp; readings</li>
-                  <li>Hand-crafted Projects</li>
-                  <li>Whiteboard for design drills</li>
-                </ul>
-                <button type="button" className="landing-cta-primary" disabled>
-                  Not available yet
-                </button>
-                <p className="landing-pricing-teams">Teams &amp; campuses — talk to us.</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="landing-pricing-carousel-nav">
-            <button
-              type="button"
-              className="landing-pricing-carousel-btn"
-              aria-label="Previous plan"
-              disabled={pricingSlide === 0}
-              onClick={() => setPricingSlide((s) => Math.max(0, s - 1))}
-            >
-              ←
-            </button>
-            <div className="landing-pricing-carousel-dots" role="tablist" aria-label="Plans">
-              <button
-                type="button"
-                role="tab"
-                aria-label="Beta access"
-                aria-selected={pricingSlide === 0}
-                className={`landing-pricing-carousel-dot${pricingSlide === 0 ? ' is-active' : ''}`}
-                onClick={() => setPricingSlide(0)}
-              />
-              <button
-                type="button"
-                role="tab"
-                aria-label="Individual plan"
-                aria-selected={pricingSlide === 1}
-                className={`landing-pricing-carousel-dot${pricingSlide === 1 ? ' is-active' : ''}`}
-                onClick={() => setPricingSlide(1)}
-              />
-            </div>
-            <button
-              type="button"
-              className="landing-pricing-carousel-btn"
-              aria-label="Next plan"
-              disabled={pricingSlide === 1}
-              onClick={() => setPricingSlide((s) => Math.min(1, s + 1))}
-            >
-              →
-            </button>
-          </div>
-        </div>
+        <aside className="landing-tokens" aria-label="Lab tokens">
+          <p className="landing-tokens-badge">Earn while you learn</p>
+          <h3 className="landing-tokens-title">Every lab you solve pays you back.</h3>
+          <p className="landing-tokens-body">
+            Solving a lab earns you <strong>tokens</strong>. Cash them out into DevSetu credit and
+            spend it on your next track or project — the more you practice, the less you pay.
+          </p>
+          <ol className="landing-tokens-steps">
+            <li><span>1</span>Solve a lab</li>
+            <li><span>2</span>Earn tokens</li>
+            <li><span>3</span>Cash out to credit</li>
+            <li><span>4</span>Unlock more tracks &amp; projects</li>
+          </ol>
+          <Link to={PRICING_PATH} className="landing-tokens-link">
+            View pricing <span aria-hidden>→</span>
+          </Link>
+        </aside>
       </section>
     </>
   );

@@ -25,15 +25,21 @@
     ],
     "overview": "Roll Forward and Undo Order Processor",
     "brief": "Roll Forward and Undo Order Processor",
-    "solution": "# Solution — Roll Forward and Undo Order Processor\n\nStay in your lab namespace. Set RollingUpdate surge settings, roll Order Processor to `v1.2`, then **undo** to the previous revision (`v1.1`).\n\nDocs: [Deployments — rolling update](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment) · [rollout undo](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_undo/)\n\n## Solution YAML\n\nSave as `order-processor-rollout-l40.yaml` (forward change before undo):\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 3\n  strategy:\n    type: RollingUpdate\n    rollingUpdate:\n      maxSurge: 1\n      maxUnavailable: 0\n  selector:\n    matchLabels:\n      app: order-processor\n  template:\n    metadata:\n      labels:\n        app: order-processor\n    spec:\n      containers:\n        - name: order-processor\n          image: devsetu/order-processor:v1.2\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-processor-rollout-l40.yaml\nkubectl rollout status deploy/order-processor-deploy\nkubectl set image deploy/order-processor-deploy order-processor=devsetu/order-processor:v1.2  # if already applied via YAML\nkubectl rollout undo deploy/order-processor-deploy\nkubectl rollout status deploy/order-processor-deploy\nkubectl get deploy order-processor-deploy -o jsonpath='{.spec.template.spec.containers[0].image}{\"\\n\"}'\n```\n\nFinal image must be `devsetu/order-processor:v1.1` with **3/3** Ready. Do not delete the Deployment to “fix” the version.\n",
+    "solution": "# Solution — Roll Forward and Undo Order Processor\n\nStay in your lab namespace. Set RollingUpdate surge settings, roll Order Processor to `v1.2`, then **undo** to the previous revision (`v1.1`).\n\nDocs: [Deployments — rolling update](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment) · [rollout undo](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_undo/)\n\n## Solution YAML\n\nSave as `order-processor-rollout-l40.yaml` (forward change before undo):\n\n```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: order-processor-deploy\nspec:\n  replicas: 3\n  strategy:\n    type: RollingUpdate\n    rollingUpdate:\n      maxSurge: 1\n      maxUnavailable: 0\n  selector:\n    matchLabels:\n      app: order-processor\n  template:\n    metadata:\n      labels:\n        app: order-processor\n    spec:\n      containers:\n        - name: order-processor\n          image: devsetu/order-processor:v1.2\n          ports:\n            - containerPort: 8000\n          resources:\n            requests:\n              cpu: \"20m\"\n              memory: \"32Mi\"\n            limits:\n              cpu: \"40m\"\n              memory: \"64Mi\"\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-processor-rollout-l40.yaml\nkubectl rollout status deploy/order-processor-deploy\nkubectl set image deploy/order-processor-deploy order-processor=devsetu/order-processor:v1.2  # if already applied via YAML\nkubectl rollout undo deploy/order-processor-deploy\nkubectl rollout status deploy/order-processor-deploy\nkubectl get deploy order-processor-deploy -o jsonpath='{.spec.template.spec.containers[0].image}{\"\\n\"}'\n```\n\nFinal image must be `devsetu/order-processor:v1.1` with **3/3** Ready. Do not delete the Deployment to “fix” the version.\n",
     "idLabel": "40",
     "theory": ""
   },
   "platformSpec": {
     "quota": {
-      "pods": "10",
-      "cpu": "900m",
-      "memory": "1024Mi"
+      "pods": "7",
+      "requests": {
+        "cpu": "140m",
+        "memory": "224Mi"
+      },
+      "limits": {
+        "cpu": "280m",
+        "memory": "448Mi"
+      }
     },
     "setup": {
       "script": "setup.sh"
