@@ -65,6 +65,13 @@ html, body, #root {
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.16); background-clip: padding-box; }
 
+/* Touch devices: the 10px custom scrollbar reserves a gutter on the .app scroller,
+   leaving a strip beside the sticky header. */
+@media (hover: none) and (pointer: coarse) {
+  .app { scrollbar-width: none; }
+  .app::-webkit-scrollbar { width: 0; height: 0; }
+}
+
 button {
   font-family: var(--sans);
   font-size: 13px;
