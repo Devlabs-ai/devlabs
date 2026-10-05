@@ -355,7 +355,6 @@ function LandingContent(): JSX.Element {
         </div>
 
         <aside className="landing-tokens" aria-label="Lab tokens">
-          <p className="landing-tokens-badge">Earn while you learn</p>
           <h3 className="landing-tokens-title">Every lab you solve pays you back.</h3>
           <p className="landing-tokens-body">
             Solving a lab earns you <strong>tokens</strong>. Cash them out into DevSetu credit and
