@@ -1,6 +1,6 @@
 'use strict';
 
-import type { GameSession } from '../types/domain';
+import type { BoxFlavor, GameSession, K8sPlatformSpec } from '../types/domain';
 
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../db/pool');
@@ -8,6 +8,9 @@ const sessionStore = require('../db/sessionStore');
 const workspaceStore = require('./workspaceStore');
 const loader = require('../challenges/loader');
 const k8s = require('./k8sCluster');
+const capacity = require('./k8sCapacity');
+const linuxBox = require('./linuxBox');
+const { isClusterLabType, boxFlavor } = require('../challenges/labTypes');
 
 interface StartK8sOpts {
   challengeId: string;
@@ -23,19 +26,46 @@ export type StartK8sResult = {
   provisioned: boolean;
 };
 
-function platformSpecOf(challengeId: string): {
-  quota?: { pods?: string; cpu?: string; memory?: string };
-  setup?: { script?: string };
-  grade?: { script?: string; timeoutSeconds?: number };
-} {
-  const c = loader.getChallenge(challengeId) as {
-    k8sPlatform?: {
-      quota?: { pods?: string; cpu?: string; memory?: string };
-      setup?: { script?: string };
-      grade?: { script?: string; timeoutSeconds?: number };
-    };
-  } | null;
+function platformSpecOf(challengeId: string): K8sPlatformSpec {
+  const c = loader.getChallenge(challengeId) as { k8sPlatform?: K8sPlatformSpec } | null;
   return c?.k8sPlatform || {};
+}
+
+/** linux / docker for box labs (one machine per learner), null for namespace labs. */
+function boxFlavorOf(challengeId: string): BoxFlavor | null {
+  return boxFlavor(loader.getChallenge(challengeId)?.sandboxType);
+}
+
+/**
+ * One learner namespace hosts every lab of that learner, so provision / reset /
+ * park for it run strictly one at a time, whichever lab they belong to. Otherwise
+ * an abandoned open's setup.sh or a closing lab's park can interleave with the
+ * next lab and leak objects into (or wipe) it.
+ */
+const nsLocks = new Map<string, Promise<unknown>>();
+
+function withNsLock<T>(ns: string, fn: () => Promise<T>): Promise<T> {
+  const prev = nsLocks.get(ns) || Promise.resolve();
+  const run = prev.catch(() => undefined).then(fn);
+  const tail = run.catch(() => undefined);
+  nsLocks.set(ns, tail);
+  void tail.then(() => {
+    if (nsLocks.get(ns) === tail) nsLocks.delete(ns);
+  });
+  return run;
+}
+
+/** ns → challenge whose park failed; its objects are still in the namespace. */
+const unparked = new Map<string, string>();
+
+async function park(ns: string, challengeId: string): Promise<void> {
+  try {
+    await k8s.parkChallengeNamespace(ns, challengeId);
+    if (unparked.get(ns) === challengeId) unparked.delete(ns);
+  } catch (err) {
+    unparked.set(ns, challengeId);
+    throw err;
+  }
 }
 
 async function findExistingK8sSession(
@@ -89,29 +119,162 @@ async function findExistingK8sSession(
   return session;
 }
 
-async function ensureProvisioned(
+const LAB_ENV_UNAVAILABLE_MSG =
+  'We could not prepare a clean lab environment right now. Something is down on our side. '
+  + 'Please contact the administrator.';
+
+function labEnvUnavailable(): Error {
+  return Object.assign(new Error(LAB_ENV_UNAVAILABLE_MSG), {
+    status: 503,
+    code: 'LAB_ENV_UNAVAILABLE',
+  });
+}
+
+const LAB_CAPACITY_DOWN_MSG =
+  'The cluster that runs these labs is busy or offline right now, so your lab could not start. '
+  + 'Please try again in a few minutes, and contact the administrator if it keeps happening.';
+
+function labCapacityDown(): Error {
+  return Object.assign(new Error(LAB_CAPACITY_DOWN_MSG), {
+    status: 503,
+    code: 'LAB_ENV_UNAVAILABLE',
+  });
+}
+
+/** Setup failed because pods had no room (pool asleep or full), not because of a lab bug. */
+const CAPACITY_FAILURE = /exceeded quota|Unschedulable|Insufficient (cpu|memory)|Too many pods/i;
+
+/** Whether the challenge's node pool can run labs right now; the message is shown on a locked lab. */
+async function labAvailability(challengeId: string): Promise<{ available: boolean; message: string | null }> {
+  const flavor = boxFlavorOf(challengeId);
+  const available = await capacity.poolUp(flavor ? linuxBox.poolFor(flavor) : undefined);
+  return { available, message: available ? null : LAB_CAPACITY_DOWN_MSG };
+}
+
+async function requirePool(ns: string, challengeId: string, pool?: string): Promise<void> {
+  if (await capacity.poolUp(pool)) return;
+  console.warn(`[k8s] ${ns}: node pool ${pool || 'labs'} has no nodes and cannot add any, refusing to open ${challengeId}`);
+  throw labCapacityDown();
+}
+
+function ensureProvisioned(ns: string, challengeId: string, forceSetup: boolean): Promise<boolean> {
+  const flavor = boxFlavorOf(challengeId);
+  if (flavor) {
+    return withNsLock(ns, () => provisionBox(ns, challengeId, flavor));
+  }
+  return withNsLock(ns, () => provision(ns, challengeId, forceSetup));
+}
+
+/** Box labs never resume a machine: every open (and reset) is a fresh box + setup.sh. */
+async function provisionBox(ns: string, challengeId: string, flavor: BoxFlavor): Promise<boolean> {
+  const spec = platformSpecOf(challengeId);
+  await requirePool(ns, challengeId, linuxBox.poolFor(flavor));
+  try {
+    await linuxBox.recreateBox(ns, challengeId, flavor, spec.box);
+  } catch (err) {
+    console.error(`[${flavor}] ${ns}: could not start a box for ${challengeId}: ${(err as Error).message || err}`);
+    throw labEnvUnavailable();
+  }
+  const result = await k8s.runChallengeScript(ns, challengeId, spec.setup?.script || 'setup.sh', {
+    timeoutMs: 180_000,
+    env: linuxBox.scriptEnv(),
+  });
+  if (result.code !== 0) {
+    const msg = (result.stderr || result.stdout || 'setup failed').trim();
+    throw Object.assign(new Error(`Lab setup failed: ${msg}`), { status: 502 });
+  }
+  return true;
+}
+
+/**
+ * A lab only ever starts on an empty namespace. Leftovers mean an earlier park
+ * or wipe failed; they are never silently deleted here (they may be unsaved
+ * work), so the open is refused until the retry succeeds or an admin clears it.
+ */
+async function ensureCleanSlate(
+  ns: string,
+  challengeId: string,
+  forceSetup: boolean,
+  spec: ReturnType<typeof platformSpecOf>,
+): Promise<void> {
+  try {
+    await k8s.ensureLearnerNamespace(ns, {
+      quota: spec.quota || {},
+      limitRange: spec.limitRange,
+      reconcileLimits: true,
+    });
+    const pending = unparked.get(ns);
+    if (pending) await park(ns, pending);
+    if (forceSetup) {
+      k8s.deleteChallengeSnapshot(ns, challengeId);
+      await k8s.wipeChallengeResources(ns, challengeId);
+    }
+    const left = await k8s.listLeftoverResources(ns);
+    if (left.length) {
+      throw new Error(`${left.length} leftover object(s): ${left.slice(0, 10).join(', ')}`);
+    }
+  } catch (err) {
+    console.error(
+      `[k8s] ${ns} is not a clean slate, refusing to open ${challengeId}: ${(err as Error).message || err}`,
+    );
+    throw labEnvUnavailable();
+  }
+}
+
+async function provision(
   ns: string,
   challengeId: string,
   forceSetup: boolean,
 ): Promise<boolean> {
   const spec = platformSpecOf(challengeId);
-  await k8s.ensureLearnerNamespace(ns, spec.quota || {});
+  await requirePool(ns, challengeId);
+  await ensureCleanSlate(ns, challengeId, forceSetup, spec);
+  // The session is already active, so this reserves the lab's slots before setup runs.
+  if (!(await capacity.waitForReservation(ns))) throw labCapacityDown();
 
-  const already = await k8s.hasChallengeSetup(ns, challengeId);
-  if (already && !forceSetup) return false;
-
-  if (forceSetup) {
-    await k8s.wipeChallengeResources(ns, challengeId);
+  if (!forceSetup) {
+    // Resume: re-apply parked namespace state from last session end.
+    const restored = await k8s.restoreChallengeSnapshot(ns, challengeId);
+    if (restored) {
+      await k8s.markChallengeSetup(ns, challengeId);
+      await capacity.waitForPodsScheduled(ns);
+      return true;
+    }
+    // Do not skip setup just because the NS annotation is set — a prior open can
+    // mark setup complete while prerun workloads are missing (old script, wipe,
+    // or timed-out seed). setup.sh is idempotent (kubectl apply).
   }
 
   const script = spec.setup?.script || 'setup.sh';
-  const result = await k8s.runChallengeScript(ns, challengeId, script);
+  // Postgres image pulls (C9+) often exceed the old 90s default.
+  const result = await k8s.runChallengeScript(ns, challengeId, script, {
+    timeoutMs: 180_000,
+  });
   if (result.code !== 0) {
     const msg = (result.stderr || result.stdout || 'setup failed').trim();
+    if (CAPACITY_FAILURE.test(msg)) {
+      console.warn(`[k8s] ${ns}: setup for ${challengeId} hit a capacity limit: ${msg}`);
+      throw labCapacityDown();
+    }
     throw Object.assign(new Error(`Lab setup failed: ${msg}`), { status: 502 });
   }
   await k8s.markChallengeSetup(ns, challengeId);
+  // The start response (and so the terminal) waits until setup pods have a node.
+  await capacity.waitForPodsScheduled(ns);
   return true;
+}
+
+/** The learner's namespace, as startK8sSession derives it. */
+function namespaceFor(userId: string | null, userName: string | null): string {
+  const owner = workspaceStore.sanitizeOwner(userId || 'anonymous');
+  return k8s.learnerNamespace(userName || owner);
+}
+
+function namespaceForChallenge(challengeId: string, userId: string | null, userName: string | null): string {
+  const flavor = boxFlavorOf(challengeId);
+  if (!flavor) return namespaceFor(userId, userName);
+  const owner = workspaceStore.sanitizeOwner(userId || 'anonymous');
+  return linuxBox.boxNamespace(userName || owner, flavor);
 }
 
 async function startK8sSession({
@@ -128,14 +291,24 @@ async function startK8sSession({
   if (!listed) {
     throw Object.assign(new Error('challenge not found'), { status: 404 });
   }
-  if ((listed.sandboxType || '') !== 'kubernetes') {
+  if (!isClusterLabType(listed.sandboxType)) {
     throw Object.assign(new Error('not a kubernetes lab'), { status: 400 });
   }
 
   const owner = workspaceStore.sanitizeOwner(userId || candidateName || 'anonymous');
-  const ns = k8s.learnerNamespace(userName || candidateName || owner);
+  const ns = namespaceForChallenge(challengeId, userId || candidateName, userName || candidateName);
 
   const existing = await findExistingK8sSession(challengeId, owner);
+  if (existing && existing.status === 'active') {
+    // Still live (another tab, a reload, or leaving without ending): its objects
+    // are in the namespace and not parked, so resume as-is. Waiting on the lock
+    // lets an open that is still provisioning finish first.
+    await withNsLock(ns, async () => undefined);
+    if (existing.status === 'active') {
+      existing.lastActivityAt = Date.now();
+      return { session: existing, created: false, provisioned: false };
+    }
+  }
   if (existing) {
     existing.status = 'active';
     existing.endTime = null;
@@ -146,8 +319,18 @@ async function startK8sSession({
     existing.candidateName = candidateName || existing.candidateName;
     sessionStore.set(existing.id, existing);
 
-    const provisioned = await ensureProvisioned(ns, challengeId, false);
+    let provisioned: boolean;
+    try {
+      provisioned = await ensureProvisioned(ns, challengeId, false);
+    } catch (err) {
+      // Not via endK8sSession: parking now would snapshot whatever blocked the open.
+      existing.status = 'ended';
+      existing.endTime = Date.now();
+      await sessionStore.persistRow(existing).catch(() => {});
+      throw err;
+    }
     await sessionStore.persistRow(existing);
+    existing.lastActivityAt = Date.now();
     return { session: existing, created: false, provisioned };
   }
 
@@ -170,6 +353,7 @@ async function startK8sSession({
 
   sessionStore.set(sessionId, session);
   await sessionStore.persistRow(session);
+  session.lastActivityAt = Date.now();
 
   try {
     const provisioned = await ensureProvisioned(ns, challengeId, false);
@@ -202,18 +386,42 @@ async function resetK8sSession(sessionId: string): Promise<GameSession> {
 }
 
 async function endK8sSession(sessionId: string): Promise<GameSession> {
-  const session = sessionStore.get(sessionId);
+  const session = sessionStore.get(sessionId) as
+    | (GameSession & { k8sNamespace?: string })
+    | null;
   if (!session) {
     throw Object.assign(new Error('session not found'), { status: 404 });
   }
+  if (session.status === 'ended') {
+    return session;
+  }
+  const ns = session.k8sNamespace || session.workspacePrefix;
+  const challengeId = session.challengeId;
+
+  // Mark ended immediately so the client can leave; park/wipe runs in background.
   session.status = 'ended';
   session.endTime = Date.now();
   await sessionStore.persistRow(session);
-  // Keep namespace contents so unfinished labs can resume.
+  void capacity.nudge();
+
+  const flavor = challengeId ? boxFlavorOf(challengeId) : null;
+  if (ns && challengeId && flavor) {
+    void withNsLock(ns, () => linuxBox.deleteBox(ns)).catch((err: unknown) => {
+      console.warn(`[${flavor}] background box delete failed for ${ns}: ${(err as Error).message || err}`);
+    });
+  } else if (ns && challengeId) {
+    void withNsLock(ns, () => park(ns, challengeId)).catch((err: unknown) => {
+      console.warn(
+        `[k8s] background park failed for ${ns}/${challengeId}: ${(err as Error).message || err}`,
+      );
+    });
+  }
   return session;
 }
 
 module.exports = {
+  namespaceFor,
+  labAvailability,
   startK8sSession,
   resetK8sSession,
   endK8sSession,

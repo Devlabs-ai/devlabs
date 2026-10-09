@@ -1,0 +1,47 @@
+{
+  "id": "docker-15-start-the-stack-in-the-right-order",
+  "number": 415,
+  "finalized": true,
+  "title": "Start the Stack in the Right Order",
+  "description": "**SITUATION:**\n\nThe order stack has grown: a `migrate` job sets up the database schema, order-processor now runs a build that warms its cache for **25 seconds** after starting (`/health` returns 503 until it's ready), and notification-service must not start until order-processor can take requests.\n\nToday `docker compose up` starts everything at once: order-processor starts before the schema exists, its healthcheck marks it unhealthy while it's still booting, and notification-service starts regardless.\n\n**YOUR TASK:**\n\nFix `~/order-stack/compose.yaml` so the stack always starts in the right order, then bring it up.\n\n**SPEC:**\n\n- `order-processor` starts only after `migrate` has **completed successfully**\n- `notification-service` starts only once `order-processor` is **healthy**\n- order-processor stays on `devsetu/slow-order-processor:1.0`, and its healthcheck tolerates the 25 s boot\n- `docker compose up -d --wait` brings the stack up from nothing: migrate exited 0, order-processor healthy, notification-service running\n- The grader runs `docker compose down` and `up -d --wait` itself\n\n**GOOD PRACTICES:**\n\n- `depends_on` conditions: `service_started`, `service_healthy`, `service_completed_successfully`.\n- A healthcheck's `start_period` is a grace period for slow starters.\n- `docker inspect --format '{{json .State.Health}}' <container>` shows the last probe results.\n",
+  "difficulty": "L2",
+  "tags": [
+    "docker",
+    "l2",
+    "compose",
+    "depends-on",
+    "healthcheck"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Start the Stack in the Right Order",
+    "brief": "Start the Stack in the Right Order",
+    "solution": "# Solution — Start the Stack in the Right Order\n\nPlain `depends_on: [x]` only waits for container `x` to be **created and started**, not for it to be finished or ready. Compose has two stronger conditions:\n\n| Condition | Waits until | Use it for |\n|---|---|---|\n| `service_started` (the default) | the container has started | almost nothing |\n| `service_healthy` | its healthcheck passes | services that need a *working* dependency |\n| `service_completed_successfully` | it has **exited with code 0** | one-shot jobs: migrations, seeding, config rendering |\n\nDocs: [Control startup order](https://docs.docker.com/compose/how-tos/startup-order/)\n\n## See the problem\n\n```bash\ncd ~/order-stack\ndocker compose up -d\ndocker compose ps -a\ndocker compose logs order-processor | head\ndocker inspect --format '{{json .State.Health}}' order-stack-order-processor-1 | jq '.Log[-1]'\n```\n\n`slow-order-processor` answers `503` on `/health` for its first **25 seconds** (cache warm-up). With `interval: 2s` and `retries: 1`, the first failed probe marks it **unhealthy**. Meanwhile it started while `migrate` was still applying the schema, and notification-service started without waiting for either.\n\n## The fixed compose.yaml\n\n```yaml\nservices:\n  migrate:\n    image: quickbyte/order-migrate:1.0\n    volumes:\n      - schema:/schema\n\n  order-processor:\n    image: devsetu/slow-order-processor:1.0\n    restart: unless-stopped\n    ports:\n      - \"8080:8000\"\n    volumes:\n      - schema:/schema:ro\n    healthcheck:\n      test: [\"CMD\", \"python\", \"-c\", \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)\"]\n      interval: 5s\n      timeout: 3s\n      retries: 3\n      start_period: 40s\n      start_interval: 2s\n    depends_on:\n      migrate:\n        condition: service_completed_successfully\n\n  notification-service:\n    image: devsetu/notification-service:v1.1\n    restart: unless-stopped\n    depends_on:\n      order-processor:\n        condition: service_healthy\n\nvolumes:\n  schema:\n```\n\n- **`start_period: 40s`**: failures during the first 40 s don't count toward `retries`, but the first **success** marks it healthy straight away. Size it to the slowest realistic boot.\n- `start_interval: 2s` probes more often during the start period, so \"healthy\" is noticed quickly.\n- `retries: 3` after that: one slow answer under load shouldn't flip it to unhealthy.\n- `migrate` has no `restart:`. It's a job: run once, exit 0, stay exited.\n\nThe same three ideas exist in Kubernetes as an **init container** (migrate), a **startupProbe** (start_period), and a **readinessProbe** (healthy before traffic).\n\n## Bring it up\n\n```bash\ndocker compose down\ndocker compose up -d --wait        # returns once everything is running/healthy, or fails\ndocker compose ps -a               # migrate Exited (0), order-processor (healthy), notification-service Up\ndocker compose logs migrate\n```\n\n`--wait` is what you'd use in CI or a deploy script: it blocks until the stack is actually ready and exits non-zero if it never gets there.\n\nThen **Submit**. The grader runs `docker compose down` and `up -d --wait` itself.\n",
+    "idLabel": "15",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 240
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

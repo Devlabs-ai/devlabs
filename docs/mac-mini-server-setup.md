@@ -1,6 +1,6 @@
 # Mac Mini M4 home-lab server setup
 
-Guide for running Devlabs managed platforms (Kafka, Spark, Airflow, Postgres) on a dedicated **Mac Mini M4** as an always-on home server, controlled remotely from a MacBook over SSH.
+Guide for running DevSetu managed platforms (Kafka, Spark, Airflow, Postgres) on a dedicated **Mac Mini M4** as an always-on home server, controlled remotely from a MacBook over SSH.
 
 This documents the setup path we validated: **Colima + k3s** (CLI-only, headless). OrbStack was attempted but abandoned due to headless/GUI helper issues on macOS 26.
 
@@ -15,7 +15,7 @@ This documents the setup path we validated: **Colima + k3s** (CLI-only, headless
 | Colima + k3s on Mac Mini (manual start) | Done |
 | **Remote kubectl from MacBook (SSH tunnel)** | **Not yet achieved** |
 | **Colima auto-start after Mac Mini reboot** | **Not yet achieved** |
-| Devlabs platforms deployed | Spark + MinIO + Airflow + Postgres Platform deployed |
+| DevSetu platforms deployed | Spark + MinIO + Airflow + Postgres Platform deployed |
 | UPS / DHCP reservation | Not started |
 
 Until remote kubectl works, run `kubectl` over SSH on the Mac Mini. After every reboot, run `colima start --cpu 6 --memory 12 --kubernetes` manually until auto-start is configured.
@@ -31,7 +31,7 @@ Until remote kubectl works, run `kubectl` over SSH on the Mac Mini. After every 
 | Always-on Mac Mini server | Headless, SSH from MacBook |
 | Container runtime | Docker-compatible (Compose + images) |
 | Kubernetes | Single-node k3s via Colima |
-| Devlabs platforms | Kafka, Spark, Airflow, Postgres (see `sandbox/platforms/`) |
+| DevSetu platforms | Kafka, Spark, Airflow, Postgres (see `sandbox/platforms/`) |
 | Remote control | SSH + optional `kubectl` tunnel from MacBook |
 
 ---
@@ -54,7 +54,7 @@ Until remote kubectl works, run `kubectl` over SSH on the Mac Mini. After every 
 | Always-on platforms | Kafka + Postgres + Airflow ≈ 4–5 GB |
 | Spark | **2 workers on demand** (not 4 workers 24/7) |
 
-Devlabs dev Compose profile caps platforms at ~8 GB total (`sandbox/platforms/docker-compose.dev-*.yml`). Spark images are **linux/amd64** and run under emulation on Apple Silicon — slower and more RAM-hungry than on x86.
+DevSetu dev Compose profile caps platforms at ~8 GB total (`sandbox/platforms/docker-compose.dev-*.yml`). Spark images are **linux/amd64** and run under emulation on Apple Silicon — slower and more RAM-hungry than on x86.
 
 ---
 
@@ -65,7 +65,7 @@ Devlabs dev Compose profile caps platforms at ~8 GB total (`sandbox/platforms/do
 Create a server account (e.g. `devlabs`) — not your daily Mac account.
 
 ```bash
-sudo sysadminctl -addUser devlabs -fullName "Devlabs Server" -password "STRONG_PASSWORD" -admin
+sudo sysadminctl -addUser devlabs -fullName "DevSetu Server" -password "STRONG_PASSWORD" -admin
 ```
 
 Log in once as `devlabs` to create `/Users/devlabs`.
@@ -398,7 +398,7 @@ Optional terminal UI: `brew install k9s`
 
 ---
 
-## Devlabs platforms
+## DevSetu platforms
 
 Platform Kubernetes deploy trees live in **separate git repos** under the `devlabs-ai` org folder (sibling to `devlabs/`). This repo keeps Compose stacks under `sandbox/platforms/` for local dev.
 
@@ -565,7 +565,7 @@ colima stop
 colima delete
 colima start --cpu 4 --memory 8 --kubernetes
 
-# Mac Mini — Devlabs Compose
+# Mac Mini — DevSetu Compose
 make platforms-up
 make platforms-ps
 make platforms-down
@@ -661,7 +661,7 @@ Uses official **`postgres:16-alpine`** — no Bitnami. Default password: `devlab
 
 ---
 
-## Devlabs Platform Dashboard
+## DevSetu Platform Dashboard
 
 | URL | Purpose |
 |-----|---------|

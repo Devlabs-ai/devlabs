@@ -21,5 +21,19 @@
     "overview": "PVC mounts",
     "brief": "Claim storage with a PVC and mount it into Guestbook at the required path \u2014 data must survive a recreate."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "5",
+      "requests": {
+        "cpu": "100m",
+        "memory": "160Mi"
+      },
+      "limits": {
+        "cpu": "200m",
+        "memory": "320Mi"
+      }
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

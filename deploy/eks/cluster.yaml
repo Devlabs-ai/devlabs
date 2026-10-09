@@ -1,0 +1,86 @@
+# Optional eksctl ClusterConfig for the DevSetu lab cluster.
+# Prefer the AWS CLI scripts in this folder (sleep/wake/recreate) for day-to-day.
+# Use this if you install eksctl and want a declarative recreate:
+#   eksctl create cluster -f deploy/eks/cluster.yaml
+#
+# IAM roles are expected to already exist (AmazonEKSClusterRole / AmazonEKSNodeRole).
+
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: devlabs
+  region: ap-south-2
+  version: "1.36"
+
+vpc:
+  id: "vpc-0ea19acfd53ef3bdf"
+  subnets:
+    public:
+      ap-south-2a:
+        id: "subnet-09dd7f7d88b80ce1e"
+      ap-south-2b:
+        id: "subnet-081dce215dedd106f"
+      ap-south-2c:
+        id: "subnet-0aa47c67af1a96192"
+
+iam:
+  withOIDC: true
+  serviceRoleARN: "arn:aws:iam::204098850303:role/AmazonEKSClusterRole"
+
+managedNodeGroups:
+  - name: system-k8s
+    instanceType: t4g.medium
+    amiFamily: AmazonLinux2023
+    desiredCapacity: 0
+    minSize: 0
+    maxSize: 2
+    volumeSize: 25
+    privateNetworking: false
+    labels:
+      devlabs.io/pool: system
+    # Keeps learner pods off; EKS add-ons tolerate CriticalAddonsOnly.
+    taints:
+      - key: CriticalAddonsOnly
+        value: "true"
+        effect: NoSchedule
+    iam:
+      instanceRoleARN: "arn:aws:iam::204098850303:role/AmazonEKSNodeRole"
+  # Learner workloads, always-on base. Graviton only: lab images are built
+  # multi-arch (images/build-all.sh). Dev: t4g.small, go-live: t4g.medium.
+  - name: labs-k8s
+    instanceType: t4g.small
+    amiFamily: AmazonLinux2023
+    # Needs vpc-cni prefix delegation (below). CLI path uses launch template
+    # devlabs-labs-k8s with explicit kubeReserved (eks-recreate.sh).
+    maxPodsPerNode: 20
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 2
+    volumeSize: 25
+    privateNetworking: false
+    labels:
+      devlabs.io/pool: labs
+    iam:
+      instanceRoleARN: "arn:aws:iam::204098850303:role/AmazonEKSNodeRole"
+
+# Add-on Deployments pinned to system nodes (CLI path: eks-addon-placement.sh).
+addons:
+  - name: vpc-cni
+    configurationValues: '{"env":{"ENABLE_PREFIX_DELEGATION":"true","WARM_PREFIX_TARGET":"1"}}'
+  - name: coredns
+    configurationValues: '{"nodeSelector":{"devlabs.io/pool":"system"}}'
+  - name: kube-proxy
+  - name: eks-pod-identity-agent
+  - name: metrics-server
+    configurationValues: '{"nodeSelector":{"devlabs.io/pool":"system"}}'
+  - name: snapshot-controller
+    configurationValues: '{"nodeSelector":{"devlabs.io/pool":"system"}}'
+  # Requires AmazonEKSPodIdentityAmazonEBSCSIDriverRole + eks-pod-identity-agent.
+  # CLI recreate wires this via create-addon --pod-identity-associations / ensure association.
+  - name: aws-ebs-csi-driver
+    configurationValues: '{"controller":{"nodeSelector":{"devlabs.io/pool":"system"}}}'
+    podIdentityAssociations:
+      - namespace: kube-system
+        serviceAccountName: ebs-csi-controller-sa
+        roleARN: arn:aws:iam::204098850303:role/AmazonEKSPodIdentityAmazonEBSCSIDriverRole

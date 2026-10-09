@@ -1,0 +1,47 @@
+{
+  "id": "docker-16-dev-and-prod-from-one-compose-file",
+  "number": 416,
+  "finalized": true,
+  "title": "Dev and Prod from One Compose File",
+  "description": "**SITUATION:**\n\nDevelopers want order-processor with **DEBUG** logs. Production wants **WARNING** logs, `restart: always`, and **no published ports** (production traffic arrives through a load balancer on the network). Sometimes someone needs a toolbox container in the stack for debugging, but it should never run by default.\n\nCopying `compose.yaml` three times would drift within a week. `~/order-stack/compose.yaml` is the shared base.\n\n**YOUR TASK:**\n\n1. Add a dev override that Compose applies automatically.\n2. Add a prod file that's applied explicitly.\n3. Add a toolbox service that only runs when asked for.\n4. Run the dev stack.\n\n**SPEC:**\n\n- `compose.yaml` on its own is unchanged for order-processor (LOG_LEVEL `INFO`, port `8080`)\n- `compose.override.yaml`: order-processor gets `LOG_LEVEL=DEBUG` (MIN_ORDER_VALUE stays)\n- `compose.prod.yaml` (with `-f compose.yaml -f compose.prod.yaml`): LOG_LEVEL `WARNING`, `restart: always` for order-processor and payment-handler, **no** published ports for order-processor\n- Service `toolbox` in `compose.yaml`: image `alpine:3.20`, in profile `debug`; not part of the stack by default\n- The dev stack is running (`docker compose up -d`): order-processor with LOG_LEVEL=DEBUG on 8080, no toolbox\n\n**GOOD PRACTICES:**\n\n- `docker compose config` shows the merged result; check it before trusting a merge.\n- Maps merge key by key; lists like `ports` are **appended**. `!reset []` clears an inherited list.\n- `--profile debug` enables services in that profile.\n",
+  "difficulty": "L2",
+  "tags": [
+    "docker",
+    "l2",
+    "compose",
+    "overrides",
+    "profiles"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Dev and Prod from One Compose File",
+    "brief": "Dev and Prod from One Compose File",
+    "solution": "# Solution — Dev and Prod from One Compose File\n\nCopying `compose.yaml` into `compose-dev.yaml` and `compose-prod.yaml` works for about a week, until someone changes one copy and not the others. Compose can instead **merge** several files: a shared base plus small files that only say what's different.\n\nDocs: [Merge Compose files](https://docs.docker.com/compose/how-tos/multiple-compose-files/merge/) · [Profiles](https://docs.docker.com/compose/how-tos/profiles/)\n\n## compose.override.yaml: dev, automatic\n\n```yaml\nservices:\n  order-processor:\n    environment:\n      LOG_LEVEL: DEBUG\n```\n\n`docker compose` with no `-f` reads `compose.yaml` **and** `compose.override.yaml` if it exists. Maps like `environment` merge key by key, so `MIN_ORDER_VALUE` from the base stays.\n\n## compose.prod.yaml: prod, explicit\n\n```yaml\nservices:\n  order-processor:\n    restart: always\n    ports: !reset []\n    environment:\n      LOG_LEVEL: WARNING\n  payment-handler:\n    restart: always\n```\n\n- Used with `docker compose -f compose.yaml -f compose.prod.yaml ...`. Naming files with `-f` **disables** the automatic override, so dev settings never leak into prod.\n- Single values (`restart`) are replaced. **Lists like `ports` are appended**, so an override can't remove a port by leaving it out. `!reset []` clears the inherited list.\n\n## A debug toolbox, off by default\n\nAdd to `compose.yaml`:\n\n```yaml\n  toolbox:\n    image: alpine:3.20\n    command: [\"sleep\", \"infinity\"]\n    profiles: [debug]\n```\n\nServices with `profiles` only start when that profile is enabled: `docker compose --profile debug up -d`. Everything without a profile always starts.\n\n## Compare the variants\n\n```bash\ncd ~/order-stack\ndocker compose config | grep -A3 environment                                   # DEBUG\ndocker compose -f compose.yaml -f compose.prod.yaml config | grep -E 'LOG_LEVEL|restart|published'\ndocker compose config --services                                               # no toolbox\ndocker compose --profile debug config --services                               # + toolbox\n```\n\n`docker compose config` is the merged result: always check it before trusting a merge.\n\n## Run dev\n\n```bash\ndocker compose up -d\ndocker compose exec order-processor env | grep LOG_LEVEL      # DEBUG\ndocker compose ps                                             # no toolbox\n```\n\nThen **Submit**.\n",
+    "idLabel": "16",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

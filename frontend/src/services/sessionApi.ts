@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type { ChallengePublic } from '../types/domain';
 import { getAuthHeader } from './authApi';
+import { labClientId } from './labTabLease';
 
 interface RawSessionPayload {
   terminalWsUrl?: string | null;
@@ -97,10 +98,13 @@ export async function endSession(id: string): Promise<unknown> {
   return data;
 }
 
-export async function startBoardSession(challengeId: string): Promise<SessionStartResult> {
+export async function startBoardSession(
+  challengeId: string,
+  opts: { force?: boolean } = {},
+): Promise<SessionStartResult> {
   const { data } = await axios.post(
     '/api/session/board/start',
-    { challengeId },
+    { challengeId, clientId: labClientId(), force: Boolean(opts.force) },
     { headers: getAuthHeader() },
   );
   return data as SessionStartResult;
@@ -130,6 +134,47 @@ export async function saveBoardGraph(
     { headers: getAuthHeader() },
   );
   return (data as { boardState: import('../types/domain').BoardState }).boardState;
+}
+
+export async function checkBoardStep(
+  sessionId: string,
+  body: { slotId: string; pieceId: string },
+): Promise<{
+  correct: boolean;
+  detail: string;
+  clue: string | null;
+  grade: import('../types/domain').BoardGradeResult | null;
+  boardState: import('../types/domain').BoardState;
+}> {
+  const { data } = await axios.post(`/api/session/${sessionId}/board/check`, body, {
+    headers: getAuthHeader(),
+  });
+  return data;
+}
+
+export async function judgeBoardClaims(
+  sessionId: string,
+  verdicts: Record<string, boolean>,
+): Promise<{ wrong: number; boardState: import('../types/domain').BoardState }> {
+  const { data } = await axios.post(`/api/session/${sessionId}/board/claims`, { verdicts }, {
+    headers: getAuthHeader(),
+  });
+  return data;
+}
+
+export async function answerBoardFinale(
+  sessionId: string,
+  optionId: string,
+): Promise<{
+  correct: boolean;
+  explanation: string;
+  grade: import('../types/domain').BoardGradeResult;
+  boardState: import('../types/domain').BoardState;
+}> {
+  const { data } = await axios.post(`/api/session/${sessionId}/board/finale`, { optionId }, {
+    headers: getAuthHeader(),
+  });
+  return data;
 }
 
 export async function submitBoard(

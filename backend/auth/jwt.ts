@@ -13,20 +13,27 @@ function getSecret(): string {
 function signUserToken({
   userId,
   email,
+  admin = false,
+  role = 'learner',
+  reviewTracks = [],
 }: {
   userId: string;
   email: string;
+  admin?: boolean;
+  role?: string;
+  reviewTracks?: string[];
 }): string {
   return jwt.sign(
-    { sub: userId, email },
+    {
+      sub: userId,
+      email,
+      admin: Boolean(admin),
+      role: role || 'learner',
+      reviewTracks: Array.isArray(reviewTracks) ? reviewTracks : [],
+    },
     getSecret(),
     { expiresIn: EXPIRES_IN },
   );
-}
-
-/** Legacy username/password login helper. */
-function signInterviewerToken(sub = 'admin'): string {
-  return jwt.sign({ sub }, getSecret(), { expiresIn: EXPIRES_IN });
 }
 
 function verifyToken(token: string): JwtPayload | null {
@@ -37,4 +44,4 @@ function verifyToken(token: string): JwtPayload | null {
   }
 }
 
-module.exports = { signUserToken, signInterviewerToken, verifyToken };
+module.exports = { signUserToken, verifyToken };

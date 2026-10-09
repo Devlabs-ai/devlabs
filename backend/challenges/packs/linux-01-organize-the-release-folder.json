@@ -1,0 +1,47 @@
+{
+  "id": "linux-01-organize-the-release-folder",
+  "number": 301,
+  "finalized": true,
+  "title": "Organize the Release Folder",
+  "description": "**SITUATION:**\n\nA new version of **order-processor** service, v1.3, is ready to ship. Normally the release pipeline, the automated system that packages each new version, lays out the files for you. Today it's down.\n\nSo a teammate uploaded the build by hand into `~/incoming`, and it's a mess: the program itself (the binary), its config files, logs, scratch files and an empty folder, all in one place. One config even has a space in its name.\n\nBefore v1.3 can go out, sort everything into a clean release folder, so whoever deploys it knows exactly where each file lives.\n\n**YOUR TASK:**\n\n1. Look at what's in `~/incoming`.\n2. Create `~/release` with three folders: `bin`, `config`, `logs`.\n3. Move every `.conf` file into `~/release/config` and every `.log` file into `~/release/logs`.\n4. **Copy** the `order-processor` binary into `~/release/bin`. The original stays in `~/incoming` for the checksum audit.\n5. Move `README` to `~/release/README.md`.\n6. Delete the `.tmp` scratch files and the empty `old` folder.\n\n**WHEN YOU'RE DONE:**\n\n- `~/release/config`: `order-processor.conf`, `payment handler.conf`, `queue.conf`, and nothing else\n- `~/release/logs`: the three `orders-*.log` files, and nothing else\n- `~/release/bin/order-processor`: executable, identical to the original\n- `~/release/README.md`: the release notes\n- `~/incoming`: only `order-processor` remains\n- Everything under `~/release` is owned by `learner`\n\n**GOOD PRACTICES:**\n\n- Use globs (`*.conf`, `*.log`) instead of typing every name.\n- No `sudo` needed. These are your files.\n",
+  "difficulty": "L0",
+  "tags": [
+    "linux",
+    "l0",
+    "shell",
+    "files"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine — plain shell work, no sudo needed.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Organize the Release Folder",
+    "brief": "Organize the Release Folder",
+    "solution": "# Solution — Organize the Release Folder\n\nEverything here is `mkdir`, `cp`, `mv`, `rm` and shell globs (`*.conf` matches every name ending in `.conf`). Work as `learner`, no `sudo`.\n\nDocs: `man mkdir` · `man cp` · `man mv` · `man rm` · `man 7 glob`\n\n## Look first\n\n```bash\ncd ~/incoming\nls -la\n```\n\n## Build the layout\n\n`-p` creates parents and doesn't complain if a folder exists. Braces expand to three names:\n\n```bash\nmkdir -p ~/release/{bin,config,logs}\n```\n\n## Move configs and logs\n\nThe glob catches `payment handler.conf` even though it has a space. When you type that name yourself, quote it: `'payment handler.conf'`.\n\n```bash\nmv *.conf ~/release/config/\nmv *.log  ~/release/logs/\n```\n\n## Copy the binary, move the README\n\n```bash\ncp -p order-processor ~/release/bin/      # -p keeps the executable mode and timestamps\nmv README ~/release/README.md              # mv also renames\n```\n\n## Clean up\n\n```bash\nrm *.tmp\nrmdir old            # rmdir only removes empty folders — a safe habit\nls -A                # only order-processor left\nls -R ~/release\n```\n\nThen **Submit**.\n",
+    "idLabel": "01",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box",
+      "unprivileged": true
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 5
+}

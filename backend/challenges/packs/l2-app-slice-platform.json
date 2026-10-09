@@ -21,5 +21,19 @@
     "overview": "End-to-end platform slice",
     "brief": "Ship Guestbook end-to-end: Deployment, config/secret, probes, Service, NetworkPolicy, PVC \u2014 grade checks the whole slice."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "7",
+      "requests": {
+        "cpu": "140m",
+        "memory": "224Mi"
+      },
+      "limits": {
+        "cpu": "280m",
+        "memory": "448Mi"
+      }
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

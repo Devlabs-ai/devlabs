@@ -1,0 +1,47 @@
+{
+  "id": "docker-11-live-templates-with-bind-mounts-and-tmpfs",
+  "number": 411,
+  "finalized": true,
+  "title": "Live Templates with Bind Mounts and tmpfs",
+  "description": "**SITUATION:**\n\nThe content team edits notification templates in `~/notify/templates` and wants to preview them in a browser **as they type**, with no rebuilds and no copying. Security wants the preview server locked down: it should never be able to change the templates, or anything else on its own filesystem.\n\n**YOUR TASK:**\n\n1. Serve `~/notify/templates` with nginx so that edits show up instantly.\n2. Make the container's own filesystem read-only, giving nginx only the scratch space it needs.\n\n**SPEC:**\n\n- Container `notify-preview`: image `nginx:1.27-alpine`, **running**, host port `8086` → `80`\n- `~/notify/templates` **bind-mounted read-only** at `/usr/share/nginx/html`\n- Read-only root filesystem\n- A **tmpfs** at `/var/cache/nginx` (plus whatever else nginx needs to write)\n- `http://127.0.0.1:8086/order-confirmed.txt` serves the file from `~/notify/templates`, and edits appear without restarting\n\n**GOOD PRACTICES:**\n\n- A bind mount shares a host folder; a volume is storage Docker manages; tmpfs lives in memory.\n- With `--read-only`, `docker logs` tells you every path the app still needs to write.\n- Add `:ro` to mounts the container should only read.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "bind-mounts",
+    "tmpfs",
+    "read-only"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Live Templates with Bind Mounts and tmpfs",
+    "brief": "Live Templates with Bind Mounts and tmpfs",
+    "solution": "# Solution — Live Templates with Bind Mounts and tmpfs\n\nThree kinds of storage you can give a container:\n\n| Mount | Lives in | Use it for |\n|---|---|---|\n| **Volume** (`-v name:/path`) | Docker's storage area | Data the app owns: databases, uploads |\n| **Bind mount** (`-v /host/path:/path`) | A folder you choose on the host | Sharing host files: config, source code, templates |\n| **tmpfs** (`--tmpfs /path`) | Memory only | Scratch files, caches, PID files: fast, never on disk, gone on stop |\n\nDocs: [Bind mounts](https://docs.docker.com/engine/storage/bind-mounts/) · [tmpfs mounts](https://docs.docker.com/engine/storage/tmpfs/)\n\n## Start with the bind mount\n\n```bash\ndocker run -d --name notify-preview -p 8086:80 \\\n  -v ~/notify/templates:/usr/share/nginx/html:ro \\\n  nginx:1.27-alpine\ncurl http://127.0.0.1:8086/order-confirmed.txt\necho \"P.S. thanks for ordering!\" >> ~/notify/templates/order-shipped.txt\ncurl http://127.0.0.1:8086/order-shipped.txt     # the change is there, no restart\n```\n\nA bind mount is the **same files**, not a copy. `:ro` makes it read-only inside the container: nginx serves the templates but can't change them.\n\n## Lock down the rest: --read-only\n\n```bash\ndocker rm -f notify-preview\ndocker run -d --name notify-preview -p 8086:80 --read-only \\\n  -v ~/notify/templates:/usr/share/nginx/html:ro \\\n  nginx:1.27-alpine\ndocker ps -a --filter name=notify-preview      # Exited\ndocker logs notify-preview\n# mkdir() \"/var/cache/nginx/client_temp\" failed (30: Read-only file system)\n```\n\n`--read-only` makes the whole root filesystem read-only, so nothing can modify the image's files at runtime: no dropped malware, no config drift. But nginx needs somewhere to write its cache and PID file. That's what tmpfs is for.\n\n```bash\ndocker rm -f notify-preview\ndocker run -d --name notify-preview -p 8086:80 --read-only \\\n  --tmpfs /var/cache/nginx --tmpfs /run \\\n  -v ~/notify/templates:/usr/share/nginx/html:ro \\\n  nginx:1.27-alpine\ndocker logs notify-preview\ncurl http://127.0.0.1:8086/payment-failed.txt\ndocker exec notify-preview touch /etc/nginx/x          # Read-only file system\n```\n\nOn Alpine `/var/run` is a link to `/run`, where nginx writes `nginx.pid`. Read the error messages: they name each path that needs to be writable.\n\n## The long form\n\n`--mount` says the same thing more explicitly, and is what you'll see in Compose and Kubernetes:\n\n```bash\n--mount type=bind,source=$HOME/notify/templates,target=/usr/share/nginx/html,readonly\n--mount type=tmpfs,target=/var/cache/nginx,tmpfs-size=16m\n```\n\nThen **Submit**.\n",
+    "idLabel": "11",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

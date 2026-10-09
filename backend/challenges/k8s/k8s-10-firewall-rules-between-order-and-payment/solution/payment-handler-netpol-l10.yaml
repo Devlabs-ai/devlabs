@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: payment-handler-allow-orders
+spec:
+  podSelector:
+    matchLabels:
+      app: payment-handler
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: order-processor
+      ports:
+        - protocol: TCP
+          port: 8000

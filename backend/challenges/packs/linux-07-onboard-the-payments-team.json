@@ -1,0 +1,47 @@
+{
+  "id": "linux-07-onboard-the-payments-team",
+  "number": 307,
+  "finalized": true,
+  "title": "Onboard the Payments Team",
+  "description": "**SITUATION:**\n\nTwo engineers, **Priya** and **Marco**, join the payments on-call rotation on Monday. They need logins on the payment box, and they need to be able to restart **payment-handler** at 3am without a full root shell. Meanwhile **olek** left the company last week, and his account still works.\n\n**YOUR TASK:**\n\n1. Create a group `payments-team`.\n2. Create users `priya` and `marco` with home directories and bash as their shell, both in `payments-team`. Marco is also on log duty, so add him to `adm`.\n3. Write a sudoers drop-in that lets members of `payments-team` run **only** `systemctl restart payment-handler` and `systemctl status payment-handler` as root, without a password.\n4. Offboard `olek`: lock his password and set his shell to `nologin`. **Keep** his home directory for the audit.\n\n**SPEC:**\n\n- `priya`, `marco`: home `/home/<name>` (owned by them), shell `/bin/bash`, in `payments-team`\n- `marco` is also in `adm`; neither user is in `sudo`\n- `/etc/sudoers.d/payments-team`: `root:root`, mode `440`, passes `visudo -cf`\n- Members can run exactly `/usr/bin/systemctl restart payment-handler` and `/usr/bin/systemctl status payment-handler` with `sudo -n`; any other `sudo` command is denied\n- `olek`: password locked (`passwd -S` shows `L`), shell `/usr/sbin/nologin`, `/home/olek` kept\n\n**GOOD PRACTICES:**\n\n- Edit sudoers with `visudo -f`. It checks the syntax before saving.\n- Grant groups (`%payments-team`), not individual users, so rotations are one `usermod` away.\n- Use full command paths in sudoers rules.\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "users",
+    "sudo",
+    "security"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Onboard the Payments Team",
+    "brief": "Onboard the Payments Team",
+    "solution": "# Solution — Onboard the Payments Team\n\nUsers and groups decide who can do what on a box. `sudo` rules belong in small drop-in files under `/etc/sudoers.d/`, never in edits to `/etc/sudoers` itself. Offboarding means **locking** an account, not deleting it.\n\nDocs: `man useradd` · `man usermod` · `man sudoers` · `man passwd`\n\n## Group and users\n\n```bash\nsudo groupadd payments-team\nsudo useradd -m -s /bin/bash -G payments-team priya\nsudo useradd -m -s /bin/bash -G payments-team,adm marco\nid priya; id marco\nls -ld /home/priya /home/marco\n```\n\n- `-m`: create the home directory.\n- `-s`: login shell.\n- `-G`: supplementary groups.\n\n## Least-privilege sudo\n\n`visudo -f` edits the file safely: it refuses to save a broken file, which could otherwise lock everyone out of sudo.\n\n```bash\nsudo visudo -f /etc/sudoers.d/payments-team\n```\n\n```\n%payments-team ALL=(root) NOPASSWD: /usr/bin/systemctl restart payment-handler, /usr/bin/systemctl status payment-handler\n```\n\n`%` means a group. Always use full command paths.\n\n```bash\nsudo chmod 440 /etc/sudoers.d/payments-team\nsudo visudo -cf /etc/sudoers.d/payments-team\nsudo -l -U priya\n```\n\nTest as the new user:\n\n```bash\nsudo -u priya sudo -n systemctl restart payment-handler     # works\nsudo -u priya sudo -n cat /etc/shadow                       # \"a password is required\" — denied\n```\n\n## Offboard olek\n\n```bash\nsudo usermod -L -s /usr/sbin/nologin olek     # lock the password, no interactive shell\nsudo passwd -S olek                           # second field: L = locked\n```\n\nKeep `/home/olek`; audits and handovers need it. Then **Submit**.\n",
+    "idLabel": "07",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "payment-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

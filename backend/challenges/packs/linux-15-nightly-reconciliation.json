@@ -1,0 +1,47 @@
+{
+  "id": "linux-15-nightly-reconciliation",
+  "number": 315,
+  "finalized": true,
+  "title": "Nightly Reconciliation",
+  "description": "**SITUATION:**\n\nThree jobs on the order box run only when someone remembers them:\n\n- **Order reconciliation** (`/opt/order-reconciliation/bin/reconcile`) must run every night at **02:30** as the `recon` user. If the box is down at 02:30, it must catch up when the box comes back.\n- **Notification digest** (`/opt/notification-service/bin/digest`) must run every **15 minutes** as the `notify` user.\n- Your **disk report** (`/opt/order-processor/bin/disk-report`) should run every morning at **07:00** as you.\n\nThe team wants reconciliation on a systemd timer (logs in the journal, catch-up after downtime) and the other two on cron.\n\n**YOUR TASK:**\n\n1. Create `order-reconcile.service` and `order-reconcile.timer` in `/etc/systemd/system/`. Enable and start the timer.\n2. Create a system cron file `/etc/cron.d/notification-digest` for the digest.\n3. Add the disk report to **your own** crontab.\n\n**SPEC:**\n\n- `order-reconcile.service`: `Type=oneshot`, `User=recon`, runs the reconcile script, and succeeds when started by hand\n- `order-reconcile.timer`: `OnCalendar=*-*-* 02:30:00`, `Persistent=true`, enabled and active\n- `/etc/cron.d/notification-digest`: owned by root, not group/world-writable; runs `/opt/notification-service/bin/digest` every 15 minutes as `notify`\n- `crontab -l` (as learner) contains `0 7 * * * /opt/order-processor/bin/disk-report`\n\n**GOOD PRACTICES:**\n\n- Enable the **timer**, not the service.\n- `systemd-analyze calendar '...'` checks an `OnCalendar` expression before you use it.\n- Files in `/etc/cron.d` have a user column; personal crontabs (`crontab -e`) don't.\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "cron",
+    "systemd",
+    "scheduling"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Nightly Reconciliation",
+    "brief": "Nightly Reconciliation",
+    "solution": "# Solution — Nightly Reconciliation\n\nThere are two schedulers on every modern Linux box:\n- **cron**: one line per job; simple and everywhere.\n- **systemd timers**: more verbose, but you get logs in the journal, `Persistent=` catch-up after downtime, and `systemctl list-timers`.\n\nDocs: `man 5 crontab` · `man systemd.timer` · `man systemd.time` (CALENDAR EVENTS)\n\n## Timer + service for reconciliation\n\n```bash\nsudo tee /etc/systemd/system/order-reconcile.service >/dev/null <<'EOF'\n[Unit]\nDescription=Reconcile yesterday's orders\n\n[Service]\nType=oneshot\nUser=recon\nExecStart=/opt/order-reconciliation/bin/reconcile\nEOF\n\nsudo tee /etc/systemd/system/order-reconcile.timer >/dev/null <<'EOF'\n[Unit]\nDescription=Nightly order reconciliation\n\n[Timer]\nOnCalendar=*-*-* 02:30:00\nPersistent=true\n\n[Install]\nWantedBy=timers.target\nEOF\n\nsudo systemctl daemon-reload\nsudo systemctl enable --now order-reconcile.timer\nsystemctl list-timers order-reconcile.timer\nsystemd-analyze calendar '*-*-* 02:30:00'       # check the expression\nsudo systemctl start order-reconcile.service     # run once now to test\njournalctl -u order-reconcile.service -n 5\n```\n\nYou enable the **timer**, not the service. The service has no `[Install]` section.\n\n## System cron file for the digest\n\nFiles in `/etc/cron.d/` have an extra **user** column:\n\n```bash\necho '*/15 * * * * notify /opt/notification-service/bin/digest' | sudo tee /etc/cron.d/notification-digest\nsudo chmod 644 /etc/cron.d/notification-digest\n```\n\nThe fields are: minute, hour, day of month, month, day of week, user, command.\n\n## Your own crontab\n\n```bash\ncrontab -e\n```\n\n```\n0 7 * * * /opt/order-processor/bin/disk-report\n```\n\n```bash\ncrontab -l\n```\n\nThen **Submit**.\n",
+    "idLabel": "15",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

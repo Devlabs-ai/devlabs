@@ -1,0 +1,47 @@
+{
+  "id": "linux-05-pipeline-for-the-daily-order-report",
+  "number": 305,
+  "finalized": true,
+  "title": "Pipeline for the Daily Order Report",
+  "description": "**SITUATION:**\n\nThe BI dashboard is down, and the ops manager still needs today's order report by 9am. All the data is in one CSV file, `/srv/orders/orders.csv`, with columns:\n\n```\ndate,order_id,customer,region,status,amount\n```\n\nYou'll build the report from small tools joined with pipes. There's also an exporter, `/opt/order-processor/bin/order-export`, that mixes its data with warnings, and finance wants the two kept apart.\n\n**YOUR TASK:**\n\n1. Find the **top 3 regions** by number of **completed** orders.\n2. Add up the **amount** of all completed orders.\n3. List the **customers** who had at least one **failed** order.\n4. Run `order-export`, saving its normal output and its warnings to separate files.\n\n**SPEC:**\n\nAll reports go in `~/reports/`:\n\n- `top-regions.txt`: 3 lines of `count region`, highest first (the output of `uniq -c` is fine)\n- `completed-total.txt`: the total, e.g. `12345.67`\n- `failed-customers.txt`: one customer per line, no duplicates, sorted\n- `export.csv`: only order-export's **stdout**\n- `export.err`: only order-export's **stderr**\n\n**GOOD PRACTICES:**\n\n- Build pipelines one stage at a time and look at the output after each `|`.\n- `uniq` only merges adjacent lines. Always `sort` first.\n- `>` sends stdout to a file; `2>` sends stderr.\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "text",
+    "pipes",
+    "awk"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Pipeline for the Daily Order Report",
+    "brief": "Pipeline for the Daily Order Report",
+    "solution": "# Solution — Pipeline for the Daily Order Report\n\nEach Unix tool does one thing. A pipe (`|`) feeds one tool's output into the next. `awk -F,` splits CSV lines into fields `$1`, `$2`, and so on.\n\nColumns in `orders.csv`: `date(1) order_id(2) customer(3) region(4) status(5) amount(6)`.\n\nDocs: `man sort` · `man uniq` · `man cut` · `man awk` · `man bash` (REDIRECTION)\n\n```bash\nhead -5 /srv/orders/orders.csv\nmkdir -p ~/reports\ncd /srv/orders\n```\n\n## Top 3 regions by completed orders\n\n```bash\nawk -F, 'NR>1 && $5==\"completed\" {print $4}' orders.csv \\\n  | sort | uniq -c | sort -rn | head -3 > ~/reports/top-regions.txt\n```\n\n`uniq -c` only merges *adjacent* duplicates, so you have to `sort` first. `sort -rn` then sorts numerically, highest first.\n\nWithout awk: `grep ',completed,' orders.csv | cut -d, -f4 | sort | uniq -c | sort -rn | head -3`.\n\n## Total completed amount\n\n```bash\nawk -F, 'NR>1 && $5==\"completed\" {s += $6} END {printf \"%.2f\\n\", s}' orders.csv > ~/reports/completed-total.txt\n```\n\n## Customers with failed orders\n\n```bash\nawk -F, '$5==\"failed\" {print $3}' orders.csv | sort -u > ~/reports/failed-customers.txt\n```\n\n## Split stdout and stderr\n\nEvery program has two output streams: stdout (`1`) for data and stderr (`2`) for errors and warnings.\n\n```bash\n/opt/order-processor/bin/order-export > ~/reports/export.csv 2> ~/reports/export.err\nwc -l ~/reports/export.*\n```\n\nThen **Submit**.\n",
+    "idLabel": "05",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

@@ -209,5 +209,7 @@
     "runScript": "run.sh",
     "jobYaml": "job.yaml",
     "s3Prefix": "challenges/l3-click-attribution-stream-join"
-  }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

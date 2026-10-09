@@ -21,5 +21,19 @@
     "overview": "NetworkPolicies",
     "brief": "Lock the namespace so only allowed clients reach Guestbook; unrelated namespaces stay blocked."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "9",
+      "requests": {
+        "cpu": "180m",
+        "memory": "288Mi"
+      },
+      "limits": {
+        "cpu": "360m",
+        "memory": "576Mi"
+      }
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

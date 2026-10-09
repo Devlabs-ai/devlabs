@@ -1,0 +1,10 @@
+{
+  "storage-driver": "overlay2",
+  "features": {"containerd-snapshotter": false},
+  "registry-mirrors": ["http://registry-mirror.dl-mirror.svc.cluster.local:5000"],
+  "insecure-registries": ["registry-mirror.dl-mirror.svc.cluster.local:5000"],
+  "bip": "10.210.0.1/24",
+  "default-address-pools": [{"base": "10.211.0.0/16", "size": 24}],
+  "log-driver": "json-file",
+  "log-opts": {"max-size": "10m", "max-file": "3"}
+}

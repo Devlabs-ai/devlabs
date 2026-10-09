@@ -21,5 +21,19 @@
     "overview": "securityContext + resources",
     "brief": "Harden Guestbook: non-root (and read-only root FS if required) plus CPU/memory requests and limits that match the brief."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "7",
+      "requests": {
+        "cpu": "140m",
+        "memory": "224Mi"
+      },
+      "limits": {
+        "cpu": "280m",
+        "memory": "448Mi"
+      }
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

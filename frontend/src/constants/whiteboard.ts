@@ -1,6 +1,6 @@
-/** Whiteboard — internals boards, separate from graded Spark labs. */
+/** Whiteboard — data systems theory boards. No cluster; order the mechanism. */
 
-export const WHITEBOARD_PATH = '/play/whiteboard';
+export const WHITEBOARD_PATH = '/track/whiteboard';
 
 export interface WhiteboardSection {
   id: string;
@@ -11,10 +11,46 @@ export interface WhiteboardSection {
 
 export const WHITEBOARD_SECTIONS: WhiteboardSection[] = [
   {
-    id: 'spark',
-    label: 'Spark',
-    blurb: 'Fill empty blocks on the physical plan — operators from Unused, not a DAG from scratch.',
-    matchTags: ['spark'],
+    id: 'storage',
+    label: 'Storage engines',
+    blurb: 'Logs, memtables, SSTables, B-trees — what happens between a write and the disk.',
+    matchTags: ['storage-engines'],
+  },
+  {
+    id: 'replication',
+    label: 'Replication',
+    blurb: 'Leaders, followers, lag and failover — keeping copies in step when nodes die.',
+    matchTags: ['replication'],
+  },
+  {
+    id: 'partitioning',
+    label: 'Partitioning',
+    blurb: 'Spreading data across nodes, and moving it again without downtime.',
+    matchTags: ['partitioning'],
+  },
+  {
+    id: 'transactions',
+    label: 'Transactions',
+    blurb: 'Atomic commit and isolation — all or nothing, even across machines.',
+    matchTags: ['transactions'],
+  },
+  {
+    id: 'consensus',
+    label: 'Consensus',
+    blurb: 'Elections, terms and majorities — getting nodes to agree on one history.',
+    matchTags: ['consensus'],
+  },
+  {
+    id: 'streams',
+    label: 'Stream processing',
+    blurb: 'Checkpoints, barriers and transactional sinks — exactly-once, explained.',
+    matchTags: ['streams'],
+  },
+  {
+    id: 'experiments',
+    label: 'Experiments',
+    blurb: 'Six takes on the LSM write path — different stories, different games. Pick the one that clicks.',
+    matchTags: ['board-experiment'],
   },
 ];
 

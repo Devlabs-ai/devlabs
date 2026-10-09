@@ -1,0 +1,46 @@
+{
+  "id": "linux-10-hunt-the-runaway-process",
+  "number": 310,
+  "finalized": true,
+  "title": "Hunt the Runaway Process",
+  "description": "**SITUATION:**\n\nThe order box is crawling. Checkout latency doubled ten minutes ago, and the CPU graph is pinned at 100%. Something running as the `orders` service account is eating the machine. The on-call note says the nightly **report-builder** is allowed to keep running but must stay out of the way, and **notification-retry** must not be touched.\n\n**YOUR TASK:**\n\n1. Find the process burning the CPU and record its PID.\n2. Stop it. If it won't stop politely, make it stop.\n3. Lower the priority of **report-builder** to nice **15** without restarting it.\n4. Leave **notification-retry** running.\n\n**SPEC:**\n\n- `~/answers/runaway-pid`: the PID of the CPU-burning process\n- No `order-reindex` process is left running\n- `report-builder` is still running, at nice value `15`\n- `notification-retry` is still running\n\n**GOOD PRACTICES:**\n\n- Look before you kill: `top` (press `P` to sort by CPU) or `ps ... --sort=-pcpu`.\n- Send `SIGTERM` first. Use `SIGKILL` (`kill -9`) only when a process ignores it.\n- `renice` changes a running process's priority; `nice` starts a new one at a given priority.\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "processes",
+    "signals"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Hunt the Runaway Process",
+    "brief": "Hunt the Runaway Process",
+    "solution": "# Solution — Hunt the Runaway Process\n\n`top` and `ps` show what's running and what it costs. **Signals** tell a process to stop: `SIGTERM` (15) politely, `SIGKILL` (9) unconditionally. **Nice** values (-20 to 19) tell the scheduler who matters less: higher means lower priority.\n\nDocs: `man top` · `man ps` · `man kill` · `man 7 signal` · `man renice`\n\n## Find it\n\n```bash\ntop                 # press P to sort by CPU, q to quit\nps -eo pid,user,ni,pcpu,cmd --sort=-pcpu | head\n```\n\nThe `order-reindex` process owned by `orders` sits at about 100% CPU.\n\n```bash\nmkdir -p ~/answers\npgrep -f order-reindex > ~/answers/runaway-pid\ncat ~/answers/runaway-pid\n```\n\n## Stop it\n\nAlways try `SIGTERM` first: it lets a process clean up after itself.\n\n```bash\nsudo kill \"$(cat ~/answers/runaway-pid)\"\nps -p \"$(cat ~/answers/runaway-pid)\"      # still there: it ignores SIGTERM\nsudo kill -9 \"$(cat ~/answers/runaway-pid)\"\nps -p \"$(cat ~/answers/runaway-pid)\"      # gone\n```\n\n## Deprioritize the report builder\n\n```bash\npgrep -af report-builder\nsudo renice -n 15 -p \"$(pgrep -f report-builder)\"\nps -o pid,ni,cmd -p \"$(pgrep -f report-builder)\"\n```\n\nOnly root can *raise* a process's priority (lower its nice value). Anyone can lower the priority of their own processes. To start something at low priority: `nice -n 15 <command>`.\n\nLeave `notification-retry` running. Then **Submit**.\n",
+    "idLabel": "10",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

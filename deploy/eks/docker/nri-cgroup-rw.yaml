@@ -1,0 +1,53 @@
+# The Linux module's NRI plugin (deploy/eks/linux/nri-cgroup-rw.yaml), on labs-docker nodes.
+# Docker boxes need the writable cgroupfs twice over: systemd boots from it, and dockerd
+# creates a cgroup per learner container under the box's own cgroup.
+#
+# A separate DaemonSet so `eks-linux.sh down` and `eks-docker.sh down` each remove only
+# their own.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dl-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nri-cgroup-rw-docker
+  namespace: dl-system
+spec:
+  selector:
+    matchLabels:
+      app: nri-cgroup-rw-docker
+  template:
+    metadata:
+      labels:
+        app: nri-cgroup-rw-docker
+    spec:
+      priorityClassName: system-node-critical
+      automountServiceAccountToken: false
+      nodeSelector:
+        devlabs.io/pool: docker
+      tolerations:
+        - key: devlabs.io/pool
+          value: docker
+          effect: NoSchedule
+      containers:
+        - name: plugin
+          image: devsetu/nri-cgroup-rw:v0.1
+          securityContext:
+            runAsUser: 0
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {cpu: 50m, memory: 32Mi}
+          volumeMounts:
+            - name: nri
+              mountPath: /var/run/nri
+      volumes:
+        - name: nri
+          hostPath:
+            path: /var/run/nri
+            type: Directory

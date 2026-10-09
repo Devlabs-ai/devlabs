@@ -4,7 +4,7 @@ interface SandboxService {
   envKey: string;
 }
 
-/** Host for URLs opened from the Devlabs UI (matches metrics endpoint links). */
+/** Host for URLs opened from the DevSetu UI (matches metrics endpoint links). */
 export function sandboxHost(): string {
   if (typeof window === 'undefined') return 'localhost';
   return window.location.hostname || 'localhost';
@@ -49,7 +49,7 @@ export function proxiedBrowseUrl(
   return base.endsWith('/') ? base : `${base}/`;
 }
 
-/** Human-readable URL for the address bar (same origin as the Devlabs app). */
+/** Human-readable URL for the address bar (same origin as the DevSetu app). */
 export function displayBrowseUrl(
   sessionId: string | null | undefined,
   service: string | null | undefined,

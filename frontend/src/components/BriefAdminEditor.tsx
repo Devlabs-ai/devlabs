@@ -7,6 +7,7 @@ import {
 
 const EDITABLE_TABS: ChallengeContentTab[] = [
   'description',
+  'theory',
   'data',
   'spec',
   'knobs',
@@ -51,6 +52,7 @@ function draftForTab(
 ): string {
   const ps = asRecord(challenge.problemStatement);
   if (tab === 'description') return challenge.description || '';
+  if (tab === 'theory') return typeof ps.theory === 'string' ? ps.theory : '';
   if (tab === 'moat') return typeof ps.moat === 'string' ? ps.moat : '';
   if (tab === 'data') return JSON.stringify(ps.data ?? { overview: '', datasets: [] }, null, 2);
   if (tab === 'spec') {
@@ -107,7 +109,8 @@ export default function BriefAdminEditor({
     onEditingChange?.(true);
   }, [forceEdit]);
 
-  const formatLabel = tab === 'description' || tab === 'moat' ? 'Markdown' : 'JSON';
+  const markdownTabs = tab === 'description' || tab === 'theory' || tab === 'moat';
+  const formatLabel = markdownTabs ? 'Markdown' : 'JSON';
 
   const cancel = (): void => {
     setDraft(source);
@@ -121,7 +124,7 @@ export default function BriefAdminEditor({
     setError(null);
     try {
       let body: Parameters<typeof saveChallengeContent>[1];
-      if (tab === 'description' || tab === 'moat') {
+      if (markdownTabs) {
         body = { tab, markdown: draft };
       } else {
         let parsed: unknown;
@@ -170,7 +173,7 @@ export default function BriefAdminEditor({
       </div>
       <textarea
         className="spark-brief-admin-editor"
-        spellCheck={tab === 'description'}
+        spellCheck={markdownTabs}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
       />

@@ -1,0 +1,47 @@
+{
+  "id": "docker-23-docker-disk-full-on-the-order-box",
+  "number": 423,
+  "finalized": true,
+  "title": "Docker Disk Full on the Order Box",
+  "description": "**SITUATION:**\n\nDisk alerts on the order box again. This time it's Docker itself: months of stopped batch containers, images left behind by repeated builds, build cache, and old export volumes. Docker never deletes anything on its own.\n\nCareful: the `orders-backup` volume holds the only backup of the orders database, and order-processor must stay up.\n\n**YOUR TASK:**\n\n1. Find out where the space goes, including the biggest volume.\n2. Clean up everything unused, and nothing that matters.\n\n**SPEC:**\n\n- `~/answers/biggest-volume`: the name of the unused volume using the most space\n- No stopped containers left\n- No dangling images left\n- No build cache left\n- No volumes left except `orders-backup`, with its contents untouched\n- `order-processor` still running, and its image still on the box\n\n**GOOD PRACTICES:**\n\n- `docker system df` (and `-v`) shows where the space goes.\n- Prune one kind at a time, and check what a prune will remove first: there's no undo for volumes.\n- `docker volume prune` only removes named volumes with `-a`; `--filter` keeps what's labelled.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "disk",
+    "prune",
+    "volumes"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Docker Disk Full on the Order Box",
+    "brief": "Docker Disk Full on the Order Box",
+    "solution": "# Solution — Docker Disk Full on the Order Box\n\nDocker never deletes anything on its own. Every exited container, every image replaced by a rebuild, every volume and every cached build layer stays on disk until someone removes it. On a busy box that's tens of GB, and then the disk is full. Same skills as the Linux disk-full lab (`df`, `du`, find the big stuff), with Docker's own tools.\n\nDocs: [Prune unused objects](https://docs.docker.com/engine/manage-resources/pruning/)\n\n## Where is the space?\n\n```bash\ndocker system df            # images, containers, volumes, build cache: total and RECLAIMABLE\ndocker system df -v         # the same, item by item\n```\n\n```bash\ndocker system df -v | sed -n '/VOLUME NAME/,/^$/p' | sort -k3 -h | tail -3\necho export-2026-09-2X > ~/answers/biggest-volume       # the one with the largest SIZE\n```\n\n## Clean up, one kind at a time\n\n```bash\ndocker container prune -f                   # every stopped container\ndocker image prune -f                       # dangling images: <none>:<none>, left by rebuilds\ndocker builder prune -af                    # build cache\ndocker volume ls --filter label=com.quickbyte.keep=true     # what's protected\ndocker volume prune -af --filter 'label!=com.quickbyte.keep=true'\ndocker system df\n```\n\n- A **dangling** image is one that lost its tag when a newer build took it (`<none>`). `docker image prune -a` would also delete **unused tagged** images: anything no container uses right now.\n- Since Docker 23, `docker volume prune` removes only **anonymous** volumes; `-a` includes named ones. The label filter keeps `orders-backup`. Always check what a prune will touch **before** running it: volumes are data, and there's no undo.\n- Running containers, and the images and volumes they use, are never pruned.\n\n## The big hammer\n\n```bash\ndocker system prune -a --volumes     # everything unused: containers, networks, images, cache, volumes\n```\n\nFine on a laptop. On a server it would have deleted `orders-backup`. Prefer the targeted commands, with filters (`--filter until=168h` keeps the last week).\n\nThen **Submit**.\n",
+    "idLabel": "23",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

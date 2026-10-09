@@ -237,5 +237,7 @@
       "Functional: candidate Parquet has correct approximate customer counts and percentiles per store",
       "Performance: not specified for this lab"
     ]
-  }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

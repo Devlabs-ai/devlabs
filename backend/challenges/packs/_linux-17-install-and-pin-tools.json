@@ -1,0 +1,46 @@
+{
+  "id": "linux-17-install-and-pin-tools",
+  "number": 317,
+  "finalized": true,
+  "title": "Install and Pin Tools",
+  "description": "**SITUATION:**\n\nThe platform team published the approved tool list for production boxes. The order box needs to match it:\n\n- **ncdu** (interactive disk usage) is approved but missing.\n- **jq** is approved at its current version only. A jq upgrade broke a deploy script last quarter, so it must not change during routine upgrades.\n- **htop** is not on the list. Remove it completely, config included.\n\nThe security team also wants two facts for their inventory.\n\n**YOUR TASK:**\n\n1. Refresh the package lists and install `ncdu`.\n2. Put `jq` on hold.\n3. Purge `htop`.\n4. Find which package provides `/usr/bin/dig`.\n5. Find the installed version of `cron`.\n\n**SPEC:**\n\n- `ncdu` installed and on `PATH`\n- `apt-mark showhold` lists `jq`\n- `htop` fully purged: neither installed nor left in the `rc` (config-files) state\n- `~/answers/dig-package`: the package name only\n- `~/answers/cron-version`: the version exactly as `dpkg` reports it\n\n**GOOD PRACTICES:**\n\n- Run `apt update` before installing on a fresh box.\n- `remove` keeps config files; `purge` doesn't.\n- `dpkg -S <file>` finds which package installed a file; `dpkg -L <pkg>` lists a package's files.\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "packages",
+    "apt"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Install and Pin Tools",
+    "brief": "Install and Pin Tools",
+    "solution": "# Solution — Install and Pin Tools\n\n`apt` installs from online repositories and resolves dependencies. `dpkg` is the lower-level tool that knows what is installed and which files belong to which package.\n\nDocs: `man apt` · `man apt-mark` · `man dpkg-query` · `man dpkg`\n\n## Install ncdu\n\nThe box ships without package lists, so download them first:\n\n```bash\nsudo apt update\napt search ncdu        # or: apt show ncdu\nsudo apt install -y ncdu\nncdu /var/log          # q to quit\n```\n\n## Hold jq\n\nA hold stops `apt upgrade` from changing a package's version:\n\n```bash\nsudo apt-mark hold jq\napt-mark showhold\n```\n\n`sudo apt-mark unhold jq` releases it.\n\n## Purge htop\n\n`remove` deletes the program but keeps its config files (status `rc`). `purge` deletes both.\n\n```bash\nsudo apt purge -y htop\ndpkg -l htop           # no \"ii\" or \"rc\" line left\n```\n\n## Who owns what\n\n```bash\nmkdir -p ~/answers\ndpkg -S /usr/bin/dig                              # bind9-dnsutils: /usr/bin/dig\ndpkg -S /usr/bin/dig | cut -d: -f1 > ~/answers/dig-package\ndpkg -L cron | head                               # files a package installed\ndpkg-query -W -f '${Version}\\n' cron > ~/answers/cron-version\napt policy cron                                   # installed vs candidate version\n```\n\nThen **Submit**.\n",
+    "idLabel": "17",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

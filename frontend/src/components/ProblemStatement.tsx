@@ -1,16 +1,18 @@
 import React from 'react';
 import MarkdownProse from './MarkdownProse';
-import ReadOnlyCodePane from './ReadOnlyCodePane';
 import type { ChallengePublic, ChallengeFull } from '../types/domain';
 
 export type ProblemStatementTab =
   | 'description'
+  | 'theory'
   | 'data'
   | 'spec'
   | 'cluster'
   | 'knobs'
   | 'solution'
   | 'moat'
+  | 'visibility'
+  | 'review'
   | 'submissions'
   | 'notes'
   | 'resources'
@@ -41,6 +43,8 @@ interface ProblemStatementData {
   hints?: string[];
   /** Setter-only design notes (markdown). Omitted for learners. */
   moat?: string;
+  /** Learner-facing concept write-up (markdown). */
+  theory?: string;
   solutionWriteup?: string;
   dbAccess?: string[];
   inputSchema?: Array<{ column: string; type: string }>;
@@ -236,10 +240,15 @@ export default function ProblemStatement({
     ps.overview || ps.yourTask || ps.yourTaskSteps?.length || (ps.symptoms && ps.symptoms.length),
   );
   const rawDescription = challenge.description?.trim() || '';
-  const descriptionText = rawDescription.replace(
-    new RegExp(`^#{1,2}\\s+${escapeRegExp(challenge.title)}\\s*\\n+`, 'i'),
-    '',
-  );
+  const descriptionText = rawDescription
+    .replace(new RegExp(`^#{1,2}\\s+${escapeRegExp(challenge.title)}\\s*\\n+`, 'i'), '')
+    // Drop leading authoring PRE RUN blocks; keep Situation / Task / Spec.
+    .replace(
+      /^(?:\*\*PRE RUN:\*\*|PRE RUN:)[^\n]*(?:\n(?!\s*\*\*(?:SITUATION|YOUR TASK|SPEC|CONSTRAINTS|GOOD PRACTICES)\*\*)[^\n]*)*\n*/i,
+      '',
+    )
+    .replace(/^\(Your lab namespace is already provisioned[^\n]*\)\s*/i, '')
+    .trim();
   const hasDescription = !!descriptionText;
   const inputSchema = Array.isArray(ps.inputSchema) ? ps.inputSchema : [];
   const expectedOutput = Array.isArray(ps.expectedOutput) ? ps.expectedOutput : [];
@@ -277,45 +286,78 @@ export default function ProblemStatement({
     );
   }
 
+  if (tab === 'theory') {
+    const theoryText = typeof ps.theory === 'string' ? ps.theory.trim() : '';
+    return (
+      <div className="statement statement--tab">
+        <h2>Theory</h2>
+        <hr className="statement-rule" aria-hidden="true" />
+        {theoryText ? (
+          <MarkdownProse
+            text={theoryText}
+            className="markdown-prose statement-description"
+            plainCode
+          />
+        ) : (
+          <div className="statement-empty">
+            <p>No theory notes for this lab yet.</p>
+            <p className="dim">
+              Concepts for this challenge will show up here when published.
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (tab === 'solution') {
     const filePaths = solutionFiles
       ? sortSolutionPaths(Object.keys(solutionFiles), solutionEntrypoint)
       : [];
+    // Prefer README when present — it already embeds YAML + apply steps. Listing
+    // sibling .yaml files again duplicates content and loads extra Monaco panes.
+    const readmePath = filePaths.find((p) => /^readme\.md$/i.test(p.replace(/^\/+/, '')));
+    const displayPaths = readmePath ? [readmePath] : filePaths;
+    const showFiles = displayPaths.length > 0;
+    const showWriteup = Boolean(solutionText) && !showFiles;
     return (
       <div className="statement statement--tab">
         <h2>Solution</h2>
         <hr className="statement-rule" aria-hidden="true" />
-        {solutionLoading ? (
-          <p className="dim" style={{ fontSize: 13 }}>Loading reference solution from MinIO…</p>
-        ) : solutionError ? (
+        {solutionLoading && !showFiles && !showWriteup ? (
+          <p className="dim" style={{ fontSize: 13 }}>Loading reference solution…</p>
+        ) : solutionError && !showFiles && !showWriteup ? (
           <div className="statement-empty">
             <p>{solutionError}</p>
           </div>
-        ) : filePaths.length > 0 ? (
+        ) : showFiles ? (
           <div className="statement-solution-files">
-            {filePaths.map((path) => {
+            {displayPaths.map((path) => {
               const body = solutionFiles![path];
               const isMd = /\.md$/i.test(path);
               return (
                 <section key={path} className="statement-section statement-solution-file">
-                  <h4>
-                    <code>{path}</code>
-                  </h4>
                   {isMd ? (
-                    <MarkdownProse text={body} className="markdown-prose statement-solution" />
-                  ) : (
-                    <ReadOnlyCodePane
-                      path={path}
-                      content={body}
-                      className="statement-solution-code-pane"
+                    <MarkdownProse
+                      text={body}
+                      className="markdown-prose statement-solution"
+                      plainCode
                     />
+                  ) : (
+                    <pre className="markdown-pre statement-solution-pre">
+                      <code>{body}</code>
+                    </pre>
                   )}
                 </section>
               );
             })}
           </div>
-        ) : solutionText ? (
-          <MarkdownProse text={solutionText} className="markdown-prose statement-solution" />
+        ) : showWriteup ? (
+          <MarkdownProse
+            text={solutionText}
+            className="markdown-prose statement-solution"
+            plainCode
+          />
         ) : (
           <div className="statement-empty">
             <p>Official solution is not published for this lab yet.</p>
@@ -452,7 +494,11 @@ export default function ProblemStatement({
       <hr className="statement-rule" aria-hidden="true" />
 
       {hasDescription && (
-        <MarkdownProse text={descriptionText} className="markdown-prose statement-description" />
+        <MarkdownProse
+          text={descriptionText}
+          className="markdown-prose statement-description"
+          plainCode
+        />
       )}
 
       {hasBatchStructured ? (

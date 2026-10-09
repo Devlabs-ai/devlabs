@@ -53,18 +53,44 @@ function detectLanguage(filePath: string): string {
   if (ext === 'sql') return 'sql';
   if (ext === 'ts' || ext === 'tsx') return 'typescript';
   if (ext === 'js' || ext === 'jsx') return 'javascript';
+  if (ext === 'csv') return 'csv';
   return 'plaintext';
+}
+
+let csvLanguageRegistered = false;
+
+function ensureCsvLanguage(monaco: typeof Monaco): void {
+  if (csvLanguageRegistered) return;
+  csvLanguageRegistered = true;
+  monaco.languages.register({ id: 'csv' });
+  monaco.languages.setMonarchTokensProvider('csv', {
+    defaultToken: 'string',
+    tokenizer: {
+      root: [
+        [/^(date,cabin,snack,status,cents).*$/, 'type'],
+        [/\b(successful|failed|paid|refund)\b/, 'keyword'],
+        [/\d{4}-\d{2}-\d{2}/, 'number'],
+        [/,(\s*)(\d{2,})\b/, 'number'],
+        [/[,]/, 'operator'],
+        [/[^,\n]+/, 'string'],
+      ],
+    },
+  });
 }
 
 const LINE_HEIGHT_PX = 18;
 const EDITOR_PAD_PX = 20; // Monaco padding top + bottom
-const ONE_LINE_PAD_PX = LINE_HEIGHT_PX;
 
-function heightForContent(content: string): number {
-  // Ignore trailing newlines so a single-line snippet doesn't reserve an empty row.
+function lineCount(content: string): number {
   const trimmed = content.replace(/\n+$/g, '');
-  const lines = Math.max(1, trimmed.length === 0 ? 1 : trimmed.split('\n').length);
-  return Math.min(480, lines * LINE_HEIGHT_PX + EDITOR_PAD_PX + ONE_LINE_PAD_PX);
+  return Math.max(1, trimmed.length === 0 ? 1 : trimmed.split('\n').length);
+}
+
+/** Height from source lines — no Monaco getContentHeight (avoids empty tails / collapsed panes). */
+function heightForContent(content: string, capped = true): number {
+  const height = lineCount(content) * LINE_HEIGHT_PX + EDITOR_PAD_PX;
+  // Capped panes keep a one-line buffer so the last row is not clipped by chrome.
+  return capped ? Math.min(480, height + LINE_HEIGHT_PX) : height;
 }
 
 interface ReadOnlyCodePaneProps {
@@ -73,6 +99,8 @@ interface ReadOnlyCodePaneProps {
   className?: string;
   /** Fill parent height instead of sizing to content. */
   fill?: boolean;
+  /** Grow to full content height (no 480px cap / no vertical scroll). */
+  expand?: boolean;
   /** Override language detection from path (e.g. markdown fences). */
   language?: string;
 }
@@ -82,6 +110,7 @@ export default function ReadOnlyCodePane({
   content,
   className,
   fill = false,
+  expand = false,
   language: languageProp,
 }: ReadOnlyCodePaneProps): JSX.Element {
   const language = useMemo(
@@ -89,11 +118,12 @@ export default function ReadOnlyCodePane({
     [languageProp, path],
   );
   const height = useMemo(
-    () => (fill ? undefined : heightForContent(content)),
-    [content, fill],
+    () => (fill ? undefined : heightForContent(content, !expand)),
+    [content, fill, expand],
   );
 
   function handleMount(editor: MonacoEditorNS.IStandaloneCodeEditor, monaco: typeof Monaco): void {
+    ensureCsvLanguage(monaco);
     defineTheme(monaco);
     monaco.editor.setTheme(THEME_NAME);
     editor.updateOptions({
@@ -113,22 +143,30 @@ export default function ReadOnlyCodePane({
         value={content}
         theme={THEME_NAME}
         onMount={handleMount}
+        loading={
+          <pre className="readonly-code-pane-fallback">
+            <code>{content}</code>
+          </pre>
+        }
         options={{
           readOnly: true,
           domReadOnly: true,
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
-          wordWrap: 'on',
+          wordWrap: 'off',
           lineNumbers: 'on',
           glyphMargin: false,
-          folding: true,
+          folding: false,
           renderLineHighlight: 'none',
           overviewRulerLanes: 0,
           hideCursorInOverviewRuler: true,
           overviewRulerBorder: false,
           scrollbar: {
-            verticalScrollbarSize: 8,
+            vertical: expand ? 'hidden' : 'auto',
+            horizontal: 'auto',
+            verticalScrollbarSize: expand ? 0 : 8,
             horizontalScrollbarSize: 8,
+            alwaysConsumeMouseWheel: false,
           },
           fontSize: 12,
           lineHeight: LINE_HEIGHT_PX,

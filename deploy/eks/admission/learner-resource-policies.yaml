@@ -1,0 +1,250 @@
+# Native ValidatingAdmissionPolicies (CEL, evaluated in the API server — no webhook
+# pod to keep alive) that reject learner workloads which could never fit their lab
+# limits, at apply time instead of as silent ReplicaSet/Job FailedCreate events.
+#
+# Params are the per-namespace objects the backend writes on lab open
+# (backend/workspace/k8sCluster.ts): ResourceQuota dl-lab-quota and LimitRange
+# dl-lab-limits. Namespaces without them (everything but ns-*) are skipped via
+# parameterNotFoundAction: Allow.
+#
+# The ResourceQuota / LimitRange themselves still enforce pods; these policies only
+# cover the controller objects and HPA that admission would otherwise accept.
+#
+# One List document so the template checks can be shared with YAML anchors.
+apiVersion: v1
+kind: List
+items:
+  # --- replicas (and the /scale subresource) ≤ quota pods -------------------------
+  - apiVersion: admissionregistration.k8s.io/v1
+    kind: ValidatingAdmissionPolicy
+    metadata:
+      name: dl-learner-replicas-within-quota
+    spec:
+      failurePolicy: Fail
+      paramKind:
+        apiVersion: v1
+        kind: ResourceQuota
+      matchConstraints:
+        resourceRules:
+          - apiGroups: ["apps"]
+            apiVersions: ["v1"]
+            operations: ["CREATE", "UPDATE"]
+            resources:
+              - deployments
+              - statefulsets
+              - replicasets
+              - deployments/scale
+              - statefulsets/scale
+              - replicasets/scale
+          - apiGroups: [""]
+            apiVersions: ["v1"]
+            operations: ["CREATE", "UPDATE"]
+            resources: ["replicationcontrollers", "replicationcontrollers/scale"]
+      matchConditions:
+        - name: not-kube-controllers
+          expression: "!request.userInfo.username.startsWith('system:serviceaccount:kube-system:')"
+        # Deletes (finalizer updates) and unrelated edits must not be blocked by a
+        # replica count that predates the current lab's quota.
+        - name: replicas-changed
+          expression: >-
+            !has(object.metadata.deletionTimestamp) &&
+            (oldObject == null || !has(oldObject.spec.replicas) ||
+             !has(object.spec.replicas) || object.spec.replicas != oldObject.spec.replicas)
+      variables:
+        - name: podsQuota
+          expression: >-
+            'pods' in params.spec.hard ? quantity(string(params.spec.hard['pods'])).asInteger() : -1
+      validations:
+        - expression: >-
+            variables.podsQuota < 0 || !has(object.spec.replicas) ||
+            object.spec.replicas <= variables.podsQuota
+          messageExpression: >-
+            'replicas ' + string(object.spec.replicas) + ' exceeds this lab\'s pod quota of ' +
+            string(variables.podsQuota) + ' (see: kubectl describe resourcequota dl-lab-quota)'
+          reason: Forbidden
+
+  - apiVersion: admissionregistration.k8s.io/v1
+    kind: ValidatingAdmissionPolicyBinding
+    metadata:
+      name: dl-learner-replicas-within-quota
+    spec:
+      policyName: dl-learner-replicas-within-quota
+      validationActions: [Deny]
+      paramRef: &quotaRef
+        name: dl-lab-quota
+        parameterNotFoundAction: Allow
+
+  # --- HPA maxReplicas ≤ quota pods -----------------------------------------------
+  - apiVersion: admissionregistration.k8s.io/v1
+    kind: ValidatingAdmissionPolicy
+    metadata:
+      name: dl-learner-hpa-within-quota
+    spec:
+      failurePolicy: Fail
+      paramKind:
+        apiVersion: v1
+        kind: ResourceQuota
+      matchConstraints:
+        resourceRules:
+          - apiGroups: ["autoscaling"]
+            apiVersions: ["v2"]
+            operations: ["CREATE", "UPDATE"]
+            resources: ["horizontalpodautoscalers"]
+      matchConditions:
+        - name: not-deleting
+          expression: "!has(object.metadata.deletionTimestamp)"
+      variables:
+        - name: podsQuota
+          expression: >-
+            'pods' in params.spec.hard ? quantity(string(params.spec.hard['pods'])).asInteger() : -1
+      validations:
+        - expression: "variables.podsQuota < 0 || object.spec.maxReplicas <= variables.podsQuota"
+          messageExpression: >-
+            'maxReplicas ' + string(object.spec.maxReplicas) + ' exceeds this lab\'s pod quota of ' +
+            string(variables.podsQuota) + ' (see: kubectl describe resourcequota dl-lab-quota)'
+          reason: Forbidden
+
+  - apiVersion: admissionregistration.k8s.io/v1
+    kind: ValidatingAdmissionPolicyBinding
+    metadata:
+      name: dl-learner-hpa-within-quota
+    spec:
+      policyName: dl-learner-hpa-within-quota
+      validationActions: [Deny]
+      paramRef: *quotaRef
+
+  # --- pod-template containers within LimitRange ----------------------------------
+  # Pods are checked by the LimitRange itself; templates are not, so a Deployment
+  # asking for more than max (or requests above the default limit when no limit is
+  # set) is accepted and then fails every pod create. Reject it up front.
+  - apiVersion: admissionregistration.k8s.io/v1
+    kind: ValidatingAdmissionPolicy
+    metadata:
+      name: dl-learner-template-resources
+    spec:
+      failurePolicy: Fail
+      paramKind: &limitRangeKind
+        apiVersion: v1
+        kind: LimitRange
+      matchConstraints:
+        resourceRules:
+          - apiGroups: ["apps"]
+            apiVersions: ["v1"]
+            operations: ["CREATE", "UPDATE"]
+            resources: ["deployments", "statefulsets", "replicasets", "daemonsets"]
+          - apiGroups: ["batch"]
+            apiVersions: ["v1"]
+            operations: ["CREATE", "UPDATE"]
+            resources: ["jobs"]
+      matchConditions:
+        - name: not-kube-controllers
+          expression: "!request.userInfo.username.startsWith('system:serviceaccount:kube-system:')"
+        - name: template-changed
+          expression: >-
+            !has(object.metadata.deletionTimestamp) &&
+            (oldObject == null || object.spec.template != oldObject.spec.template)
+      variables:
+        - name: podSpec
+          expression: "object.spec.template.spec"
+        - &containersVar
+          name: containers
+          expression: >-
+            variables.podSpec.containers +
+            (has(variables.podSpec.initContainers) ? variables.podSpec.initContainers : [])
+        - &lrVar
+          name: lr
+          expression: "params.spec.limits.filter(l, l.type == 'Container')"
+        - &maxVar
+          name: max
+          expression: >-
+            variables.lr.size() > 0 && has(variables.lr[0].max) ? variables.lr[0].max : {}
+        - &defaultVar
+          name: defaultLimit
+          expression: >-
+            variables.lr.size() > 0 && has(variables.lr[0].default) ? variables.lr[0].default : {}
+        - &overMaxVar
+          name: overMax
+          expression: >-
+            variables.containers.filter(c, has(c.resources) && ['cpu', 'memory'].exists(r,
+              r in variables.max && (
+                (has(c.resources.limits) && r in c.resources.limits &&
+                 quantity(string(c.resources.limits[r])).isGreaterThan(quantity(string(variables.max[r])))) ||
+                (has(c.resources.requests) && r in c.resources.requests &&
+                 quantity(string(c.resources.requests[r])).isGreaterThan(quantity(string(variables.max[r]))))
+              ))).map(c, c.name)
+        - &reqOverLimitVar
+          name: reqOverLimit
+          expression: >-
+            variables.containers.filter(c, has(c.resources) && has(c.resources.requests) &&
+              ['cpu', 'memory'].exists(r, r in c.resources.requests &&
+                (has(c.resources.limits) && r in c.resources.limits
+                  ? quantity(string(c.resources.requests[r])).isGreaterThan(quantity(string(c.resources.limits[r])))
+                  : r in variables.defaultLimit &&
+                    quantity(string(c.resources.requests[r])).isGreaterThan(quantity(string(variables.defaultLimit[r])))
+                ))).map(c, c.name)
+      validations: &templateValidations
+        - expression: "variables.overMax.size() == 0"
+          messageExpression: >-
+            'container(s) ' + variables.overMax.join(', ') +
+            ' exceed the per-container max of ' +
+            ('cpu' in variables.max ? string(variables.max['cpu']) : 'unbounded') + ' CPU / ' +
+            ('memory' in variables.max ? string(variables.max['memory']) : 'unbounded') +
+            ' memory (see: kubectl describe limitrange dl-lab-limits)'
+          reason: Forbidden
+        - expression: "variables.reqOverLimit.size() == 0"
+          messageExpression: >-
+            'container(s) ' + variables.reqOverLimit.join(', ') +
+            ' request more than their limit. Without resources.limits the LimitRange default (' +
+            ('cpu' in variables.defaultLimit ? string(variables.defaultLimit['cpu']) : '?') + ' CPU / ' +
+            ('memory' in variables.defaultLimit ? string(variables.defaultLimit['memory']) : '?') +
+            ' memory) applies; set limits >= requests or lower the requests'
+          reason: Forbidden
+
+  - apiVersion: admissionregistration.k8s.io/v1
+    kind: ValidatingAdmissionPolicyBinding
+    metadata:
+      name: dl-learner-template-resources
+    spec:
+      policyName: dl-learner-template-resources
+      validationActions: [Deny]
+      paramRef: &limitsRef
+        name: dl-lab-limits
+        parameterNotFoundAction: Allow
+
+  - apiVersion: admissionregistration.k8s.io/v1
+    kind: ValidatingAdmissionPolicy
+    metadata:
+      name: dl-learner-cronjob-resources
+    spec:
+      failurePolicy: Fail
+      paramKind: *limitRangeKind
+      matchConstraints:
+        resourceRules:
+          - apiGroups: ["batch"]
+            apiVersions: ["v1"]
+            operations: ["CREATE", "UPDATE"]
+            resources: ["cronjobs"]
+      matchConditions:
+        - name: template-changed
+          expression: >-
+            !has(object.metadata.deletionTimestamp) &&
+            (oldObject == null || object.spec.jobTemplate != oldObject.spec.jobTemplate)
+      variables:
+        - name: podSpec
+          expression: "object.spec.jobTemplate.spec.template.spec"
+        - *containersVar
+        - *lrVar
+        - *maxVar
+        - *defaultVar
+        - *overMaxVar
+        - *reqOverLimitVar
+      validations: *templateValidations
+
+  - apiVersion: admissionregistration.k8s.io/v1
+    kind: ValidatingAdmissionPolicyBinding
+    metadata:
+      name: dl-learner-cronjob-resources
+    spec:
+      policyName: dl-learner-cronjob-resources
+      validationActions: [Deny]
+      paramRef: *limitsRef

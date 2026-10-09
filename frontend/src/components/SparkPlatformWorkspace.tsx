@@ -7,6 +7,7 @@ import {
 } from '../fixtures/dailyProductSalesL1';
 import { buildSparkPlaygroundPlatform, buildSparkPlaygroundStarter } from '../fixtures/sparkPlaygroundStarter';
 import { SPARK_PLAYGROUND_CHALLENGE_ID } from '../constants/playgroundDatasets';
+import { readMigrating, writeMigrating } from '../utils/storageMigrate';
 import {
   PLAYGROUND_DRIVER_CORES,
   PLAYGROUND_EXECUTOR_CORES,
@@ -33,9 +34,16 @@ import {
 } from '../constants/sparkKnobs';
 import BriefAdminEditor, { isEditableBriefTab } from './BriefAdminEditor';
 import ClusterSettingsPanel from './ClusterSettingsPanel';
+import ChallengeVisibilityPanel from './ChallengeVisibilityPanel';
+import ChallengeReviewPanel from './ChallengeReviewPanel';
+import SolutionGateModal, { hasAcknowledgedSolution } from './SolutionGateModal';
+import BriefBackButton from './BriefBackButton';
+import WorkspaceMobileSwitcher, { type WorkspaceMobilePane } from './WorkspaceMobileSwitcher';
+import DesktopOnlyNotice from './DesktopOnlyNotice';
 import { useAppState } from '../context/AppStateContext';
-import { isAdminUser, getCurrentUser } from '../services/authApi';
+import { isAdminUser, isReviewStaff, getCurrentUser } from '../services/authApi';
 import { IconPen, IconPlay, IconStop, IconSubmit } from './ChromeIcons';
+import { useIsNarrowUi } from '../hooks/useMediaQuery';
 import { useWorkspaceSync } from '../hooks/useWorkspaceSync';
 import {
   fetchSparkJob,
@@ -428,6 +436,7 @@ export default function SparkPlatformWorkspace({
 }: SparkPlatformWorkspaceProps): JSX.Element | null {
   const { currentUser } = useAppState();
   const isAdmin = isAdminUser(currentUser) || isAdminUser(getCurrentUser());
+  const showReviewTab = isReviewStaff(currentUser) || isReviewStaff(getCurrentUser());
   const [authored, setAuthored] = useState<ChallengeFull | null>(null);
   const [adminEditing, setAdminEditing] = useState(false);
   const [adminWantEdit, setAdminWantEdit] = useState(false);
@@ -448,16 +457,19 @@ export default function SparkPlatformWorkspace({
     return buildSparkPlaygroundPlatform();
   }, [basePlatform, isPlayground]);
   const notesStorageKey = session?.id
+    ? `devsetu.sparkPlayground.notes.${session.id}`
+    : null;
+  const legacyNotesStorageKey = session?.id
     ? `devlabs.sparkPlayground.notes.${session.id}`
     : null;
   const readNotes = useCallback((): string => {
-    if (!session?.id) return '';
+    if (!session?.id || !notesStorageKey || !legacyNotesStorageKey) return '';
     try {
-      return sessionStorage.getItem(`devlabs.sparkPlayground.notes.${session.id}`) || '';
+      return readMigrating(sessionStorage, notesStorageKey, legacyNotesStorageKey) || '';
     } catch {
       return '';
     }
-  }, [session?.id]);
+  }, [session?.id, notesStorageKey, legacyNotesStorageKey]);
   const [notesDraft, setNotesDraft] = useState(readNotes);
   const [notesSaved, setNotesSaved] = useState(readNotes);
   const [notesSaveFlash, setNotesSaveFlash] = useState(false);
@@ -514,15 +526,15 @@ export default function SparkPlatformWorkspace({
 
   const savePlaygroundNotes = useCallback(() => {
     setNotesSaved(notesDraft);
-    if (notesStorageKey) {
+    if (notesStorageKey && legacyNotesStorageKey) {
       try {
-        sessionStorage.setItem(notesStorageKey, notesDraft);
+        writeMigrating(sessionStorage, notesStorageKey, legacyNotesStorageKey, notesDraft);
       } catch {
         /* ignore */
       }
     }
     setNotesSaveFlash(true);
-  }, [notesDraft, notesStorageKey]);
+  }, [notesDraft, notesStorageKey, legacyNotesStorageKey]);
 
   useEffect(() => {
     if (!trailSaveFlash) return;
@@ -553,6 +565,7 @@ export default function SparkPlatformWorkspace({
   const [solutionEntrypoint, setSolutionEntrypoint] = useState<string | null>(null);
   const [solutionLoading, setSolutionLoading] = useState(false);
   const [solutionError, setSolutionError] = useState<string | null>(null);
+  const [solutionGateOpen, setSolutionGateOpen] = useState(false);
   const [submissions, setSubmissions] = useState<SparkJobRecord[]>([]);
   const [submissionsPage, setSubmissionsPage] = useState(0);
   const [resultsOpen, setResultsOpen] = useState(false);
@@ -568,6 +581,8 @@ export default function SparkPlatformWorkspace({
   const [briefWidth, setBriefWidth] = useState(() =>
     typeof window !== 'undefined' ? defaultBriefWidth(window.innerWidth) : 480,
   );
+  const isNarrow = useIsNarrowUi();
+  const [mobilePane, setMobilePane] = useState<WorkspaceMobilePane>('brief');
   const [briefCollapsed, setBriefCollapsed] = useState(false);
   const [workspaceLoadError, setWorkspaceLoadError] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
@@ -577,6 +592,18 @@ export default function SparkPlatformWorkspace({
   const shellRef = useRef<HTMLDivElement | null>(null);
   const ideBodyRef = useRef<HTMLDivElement | null>(null);
   const pollTimers = useRef<Map<string, number>>(new Map());
+  const showBrief = isNarrow ? mobilePane === 'brief' : !briefCollapsed;
+  const showWorkspace = isNarrow ? mobilePane === 'workspace' : true;
+  const showResize = !isNarrow && !briefCollapsed;
+
+  const openBriefTab = useCallback(
+    (tab: ProblemStatementTab) => {
+      if (isNarrow) setMobilePane('brief');
+      else setBriefCollapsed(false);
+      setBriefTab(tab);
+    },
+    [isNarrow],
+  );
 
   const syncEnabled = Boolean(session?.id && session.runtime === 'spark-platform');
   const {
@@ -1078,31 +1105,48 @@ export default function SparkPlatformWorkspace({
         ...(hasKnobs ? [['knobs', 'Knobs'] as [ProblemStatementTab, string]] : []),
         ['solution', 'Solution'],
         ...(isAdmin ? [['moat', 'Moat'] as [ProblemStatementTab, string]] : []),
+        ...(isAdmin ? [['visibility', 'Visibility'] as [ProblemStatementTab, string]] : []),
+        ...(showReviewTab ? [['review', 'Review'] as [ProblemStatementTab, string]] : []),
         ['submissions', 'Submissions'],
       ];
 
   return (
     <div
       ref={shellRef}
-      className={`workspace sandbox-workspace spark-platform-workspace${briefCollapsed ? ' spark-brief-collapsed' : ''}`}
+      className={`workspace sandbox-workspace spark-platform-workspace${
+        !isNarrow && briefCollapsed ? ' spark-brief-collapsed' : ''
+      }${isNarrow ? ` workspace--mobile workspace--mobile-pane-${mobilePane}` : ''}`}
       style={
-        briefCollapsed
+        isNarrow || briefCollapsed
           ? { gridTemplateColumns: 'minmax(0, 1fr)' }
           : { gridTemplateColumns: `${briefWidth}px 6px minmax(0, 1fr)` }
       }
     >
-      {!briefCollapsed && (
+      {isNarrow && (
+        <WorkspaceMobileSwitcher
+          pane={mobilePane}
+          onChange={setMobilePane}
+          briefLabel="Brief"
+          workspaceLabel="Editor"
+        />
+      )}
+      {showBrief && (
         <div className="col spark-brief-col">
           <div className="panel sandbox-brief-panel--solo spark-brief-panel--bare" style={{ flex: 1 }}>
             <div className="spark-brief-tabs" role="tablist" aria-label="Problem sections">
+              <BriefBackButton />
               {briefTabs.map(([id, label]) => (
                 <button
                   key={id}
                   type="button"
                   role="tab"
                   aria-selected={briefTab === id}
-                  className={`spark-brief-tab${briefTab === id ? ' active' : ''}${id === 'moat' || id === 'cluster' ? ' spark-brief-tab--setter' : ''}`}
+                  className={`spark-brief-tab${briefTab === id ? ' active' : ''}${id === 'moat' || id === 'cluster' || id === 'visibility' || id === 'review' ? ' spark-brief-tab--setter' : ''}${id === 'visibility' || id === 'review' ? ' spark-brief-tab--admin-row' : ''}`}
                   onClick={() => {
+                    if (id === 'solution' && !hasAcknowledgedSolution(challenge.id)) {
+                      setSolutionGateOpen(true);
+                      return;
+                    }
                     setBriefTab(id);
                     setAdminWantEdit(false);
                     if (id === 'submissions') refreshSubmissions();
@@ -1125,15 +1169,17 @@ export default function SparkPlatformWorkspace({
                   <IconPen />
                 </button>
               )}
-              <button
-                type="button"
-                className="spark-brief-collapse-btn"
-                title="Collapse problem panel"
-                aria-label="Collapse problem panel"
-                onClick={() => setBriefCollapsed(true)}
-              >
-                ⟨
-              </button>
+              {!isNarrow && (
+                <button
+                  type="button"
+                  className="spark-brief-collapse-btn"
+                  title="Collapse problem panel"
+                  aria-label="Collapse problem panel"
+                  onClick={() => setBriefCollapsed(true)}
+                >
+                  ⟨
+                </button>
+              )}
             </div>
             <div className="panel-body spark-brief-body">
               {isAdmin && !isPlayground && isEditableBriefTab(briefTab) && challenge && (
@@ -1456,6 +1502,23 @@ export default function SparkPlatformWorkspace({
                   isAdmin={isAdmin}
                   onSaved={(next) => setAuthored(next)}
                 />
+              ) : briefTab === 'visibility' && isAdmin && challenge ? (
+                <ChallengeVisibilityPanel
+                  challengeId={challenge.id}
+                  visibleTo={(challenge.visibleTo as 'admin' | 'users' | 'reviewers') || 'admin'}
+                  visibilityNotes={challenge.visibilityNotes || ''}
+                  tokens={typeof challenge.tokens === 'number' ? challenge.tokens : 10}
+                  onSaved={({ visibleTo, visibilityNotes, tokens }) => {
+                    setAuthored({
+                      ...(challenge as ChallengeFull),
+                      visibleTo,
+                      visibilityNotes,
+                      tokens,
+                    });
+                  }}
+                />
+              ) : briefTab === 'review' && showReviewTab && challenge ? (
+                <ChallengeReviewPanel challengeId={challenge.id} />
               ) : briefTab === 'knobs' && hasKnobs ? (
                 <div className="play-playground-trail-pane">
                   <p className="play-playground-trail-help">
@@ -1873,7 +1936,7 @@ export default function SparkPlatformWorkspace({
         </div>
       )}
 
-      {!briefCollapsed && (
+      {showResize && (
         <div
           className="spark-resize-handle"
           role="separator"
@@ -1891,7 +1954,7 @@ export default function SparkPlatformWorkspace({
         />
       )}
 
-      {briefCollapsed && (
+      {!isNarrow && briefCollapsed && (
         <button
           type="button"
           className="spark-brief-reopen-float"
@@ -1903,6 +1966,10 @@ export default function SparkPlatformWorkspace({
         </button>
       )}
 
+      {showWorkspace && isNarrow && (
+        <DesktopOnlyNotice tools="code editor and job runner" onShowBrief={() => setMobilePane('brief')} />
+      )}
+      {showWorkspace && !isNarrow && (
       <div className="col col-main">
         <div className="panel spark-ide-panel" style={{ flex: 1 }}>
           <div className="spark-ide-actionbar">
@@ -1938,10 +2005,7 @@ export default function SparkPlatformWorkspace({
                   type="button"
                   className="play-playground-trail-chip"
                   title="Edit resources"
-                  onClick={() => {
-                    setBriefCollapsed(false);
-                    setBriefTab('resources');
-                  }}
+                  onClick={() => openBriefTab('resources')}
                 >
                   Resources · {formatTrailSummary(trailSaved)}
                 </button>
@@ -2172,6 +2236,17 @@ export default function SparkPlatformWorkspace({
           </div>
         </div>
       </div>
+      )}
+      <SolutionGateModal
+        open={solutionGateOpen}
+        challengeId={challenge.id}
+        onCancel={() => setSolutionGateOpen(false)}
+        onConfirm={() => {
+          setSolutionGateOpen(false);
+          setBriefTab('solution');
+          setAdminWantEdit(false);
+        }}
+      />
     </div>
   );
 }

@@ -4,8 +4,12 @@ export interface UserRecord {
   id: string;
   email: string;
   name?: string | null;
-  /** Authoring / content-edit access (admin login or ADMIN_EMAILS). */
+  /** Authoring / content-edit access (admin role or ADMIN_EMAILS). */
   admin?: boolean;
+  /** Platform role assigned by an admin. Defaults to learner. */
+  role?: 'admin' | 'reviewer' | 'learner';
+  /** Lab tracks a reviewer may review (play panel ids). Empty unless role is reviewer. */
+  reviewTracks?: string[];
 }
 
 export interface ValidationSpec {
@@ -16,13 +20,19 @@ export interface ValidationSpec {
   [key: string]: unknown;
 }
 
-/** Play runtime. compose = Docker sandbox; spark-platform = shared batch; kubernetes = per-user Namespace labs. */
-export type SandboxType = 'compose' | 'spark-platform' | 'board' | 'kubernetes';
+/**
+ * Play runtime. compose = Docker sandbox; spark-platform = shared batch; kubernetes = per-user
+ * Namespace labs; linux = per-user Linux machine; docker = the same machine running Docker
+ * (both run on the kubernetes session runtime).
+ */
+export type SandboxType = 'compose' | 'spark-platform' | 'board' | 'kubernetes' | 'linux' | 'docker';
 
 export interface K8sPlatformSpec {
   quota?: { pods?: string; cpu?: string; memory?: string };
   setup?: { script?: string };
   grade?: { script?: string; timeoutSeconds?: number };
+  /** Hands-on only: no Submit, no grading, no tokens or leaderboard credit. */
+  practice?: boolean;
   [key: string]: unknown;
 }
 
@@ -150,8 +160,27 @@ export interface ChallengePublic {
   tags: string[];
   category: string;
   finalized: boolean;
+  /**
+   * Who may open this lab.
+   * - admin: admins only
+   * - reviewers: reviewers + admin
+   * - users: learners + reviewers + admin
+   */
+  visibleTo?: 'admin' | 'reviewers' | 'users';
+  /** Admin-only notes on the Visibility tab. */
+  visibilityNotes?: string;
+  /** Reward tokens earned when the lab is solved. */
+  tokens?: number;
+  /** Paid subtrack (linux / docker / kubernetes) this lab belongs to, if any. */
+  paidTrack?: string | null;
+  /** True when the user's plan doesn't cover this lab's subtrack and it isn't a free lab. */
+  locked?: boolean;
   /** True when this user has ≥1 submit graded passed. */
   solved?: boolean;
+  /** Tokens this user actually earned (halved if the solution was opened before solving). */
+  earnedTokens?: number;
+  /** When this user first opened the solution (epoch ms), if ever. */
+  solutionViewedAt?: number | null;
   /** Distinct users who have submitted this challenge. */
   submitters?: number;
   sandboxType: SandboxType | string | null;
@@ -176,6 +205,19 @@ export interface PublicBoardPiece {
   title: string;
   blurb: string;
   kind: 'stage' | 'mechanism';
+  speaker?: string | null;
+}
+
+export type BoardGameMode = 'classic' | 'unlock' | 'debate';
+
+export interface BoardGameConfig {
+  mode: BoardGameMode;
+  lives: number | null;
+}
+
+export interface BoardFinaleOption {
+  id: string;
+  label: string;
 }
 
 export interface PublicBoardSlot {
@@ -183,6 +225,7 @@ export interface PublicBoardSlot {
   optional: boolean;
   x: number;
   y: number;
+  prompt?: string | null;
 }
 
 export interface PublicBoardShadow {
@@ -193,6 +236,11 @@ export interface PublicBoardShadow {
 export interface PublicBoardSpec {
   pieces: PublicBoardPiece[];
   shadow: PublicBoardShadow;
+  kicker?: string | null;
+  game?: BoardGameConfig;
+  finale?: { prompt: string; options: BoardFinaleOption[] } | null;
+  trayLabel?: string | null;
+  unlockAfter?: string | null;
 }
 
 export interface BoardGraphNode {
@@ -222,6 +270,27 @@ export interface BoardGradeResult {
   correctRequired: number;
   requiredCount: number;
   trapsPlaced: number;
+  boardPassed?: boolean;
+  needsFinale?: boolean;
+  stars?: number | null;
+}
+
+export interface BoardClaimResult {
+  verdict: boolean;
+  correct: boolean;
+  explanation: string | null;
+}
+
+export interface BoardGameState {
+  lives: number | null;
+  livesMax: number | null;
+  step: number;
+  clues: string[];
+  claims: Record<string, BoardClaimResult> | null;
+  finaleCorrect: boolean;
+  finaleExplanation: string | null;
+  resets: number;
+  over: boolean;
 }
 
 export interface BoardState {
@@ -230,6 +299,7 @@ export interface BoardState {
   nodes?: BoardGraphNode[];
   edges?: BoardGraphEdge[];
   lastGrade?: BoardGradeResult | null;
+  game?: BoardGameState;
 }
 
 export interface ChallengeFull extends ChallengePublic {
@@ -238,7 +308,7 @@ export interface ChallengeFull extends ChallengePublic {
   validationSpec: ValidationSpec | null;
   /** Present when sandboxType === 'spark-platform'. */
   sparkPlatform?: SparkPlatformSpec | null;
-  /** Present when sandboxType === 'kubernetes'. */
+  /** Present when sandboxType is 'kubernetes' or 'linux'. */
   k8sPlatform?: K8sPlatformSpec | null;
   boardSpec?: PublicBoardSpec | null;
 }
@@ -343,6 +413,16 @@ export interface ActiveSession {
   runtime?: SandboxType | string | null;
   /** Learner Namespace when runtime === kubernetes. */
   k8sNamespace?: string | null;
+  /**
+   * Kubernetes labs: false while namespace/snapshot provision is still running.
+   * Theory UI can show; terminal stays disabled until true.
+   */
+  labReady?: boolean;
+  /**
+   * Cluster labs whose node pool is down: no session exists, the brief stays readable
+   * and the terminal shows this message instead of a shell.
+   */
+  lockedMessage?: string | null;
 }
 
 export interface EndSessionResult {
@@ -364,12 +444,18 @@ export interface AppState {
   activeTab: WorkspaceTab;
   setActiveTab: (tab: WorkspaceTab) => void;
   ending: boolean;
+  /** Shown in the slim closing toast over the catalog. */
+  closingLabTitle?: string | null;
   onSelectChallenge: (challenge: ChallengePublic | ChallengeFull) => Promise<void>;
   /** Open freeform Spark Playground (Run-only; no default INPUT_PATH). */
   onOpenSparkPlayground?: () => Promise<void>;
   onBackToLibrary: () => void;
   onEnd: () => Promise<void>;
   onLogout: () => void;
+  /** Guests browse freely; this opens the sign-in modal. */
+  onRequestLogin: (returnTo?: string) => void;
+  /** Reload the lab list (e.g. after a purchase changes which labs are locked). */
+  refreshChallenges: () => Promise<void>;
 }
 
 // ── API / service helpers ─────────────────────────────────────────────────────

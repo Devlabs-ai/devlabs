@@ -1,0 +1,47 @@
+{
+  "id": "linux-06-fix-the-config-with-sed-and-vim",
+  "number": 306,
+  "finalized": true,
+  "title": "Fix the Config with sed and vim",
+  "description": "**SITUATION:**\n\nThe queue cluster moved from `queue-old.internal` to `queue.internal` last night, but **order-processor**'s config still points at the old host. Debug logging was also left on, and the file is full of stale TODOs. There's no config management on this box yet, so you'll edit the file in place: scripted changes with `sed`, and one hand edit in `vim`.\n\nFile: `/etc/order-processor/app.conf`\n\n**YOUR TASK:**\n\n1. Back up the original to `/etc/order-processor/app.conf.bak`.\n2. Replace **every** `queue-old.internal` with `queue.internal`.\n3. Change `log_level` from `debug` to `info`.\n4. Delete every line containing `TODO`.\n5. Uncomment `metrics_port = 9100`.\n6. In `vim`, add `max_retries = 5` inside the `[queue]` section.\n\n**SPEC:**\n\n- `app.conf.bak`: an exact copy of the original\n- `url = amqp://queue.internal:5672` and `fallback = amqp://queue.internal:5673`\n- `endpoint = http://payment-old.internal:9090` is **unchanged** (payments haven't moved)\n- `log_level = info`, no `TODO` lines, `metrics_port = 9100`\n- `max_retries = 5` is in `[queue]`; everything else is untouched\n\n**GOOD PRACTICES:**\n\n- Preview a `sed` command without `-i` before applying it.\n- Escape dots in patterns (`queue-old\\.internal`).\n- Stuck in vim? Press `Esc`, then type `:q!` to quit without saving.\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "text",
+    "sed",
+    "vim"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Fix the Config with sed and vim",
+    "brief": "Fix the Config with sed and vim",
+    "solution": "# Solution — Fix the Config with sed and vim\n\n`sed` edits text from a script, which is ideal for repeatable changes you could run on a hundred servers. `vim` is the editor that's on every server you'll ever SSH into. Use each where it fits.\n\nDocs: `man sed` · `vimtutor` (a 30-minute interactive vim lesson)\n\n## Look, then back up\n\n```bash\ncat -n /etc/order-processor/app.conf\nsudo cp /etc/order-processor/app.conf /etc/order-processor/app.conf.bak\n```\n\n## Scripted edits with sed\n\nPreview without `-i` first. Without `-i`, sed only prints the result:\n\n```bash\nsed 's/queue-old\\.internal/queue.internal/g' /etc/order-processor/app.conf\n```\n\nThen apply all changes in place:\n\n```bash\nsudo sed -i \\\n  -e 's/queue-old\\.internal/queue.internal/g' \\\n  -e 's/^log_level = debug$/log_level = info/' \\\n  -e '/TODO/d' \\\n  -e 's/^#metrics_port/metrics_port/' \\\n  /etc/order-processor/app.conf\n```\n\n- `s/old/new/g`: substitute. `g` replaces every match on the line, not just the first.\n- `\\.` matches a literal dot. A bare `.` matches any character.\n- `/TODO/d`: delete the lines that match.\n- `^`: start of line.\n\n`sed -i.bak ...` would have made the backup for you.\n\n## Interactive edit with vim\n\n```bash\nsudo vim /etc/order-processor/app.conf\n```\n\n1. `/\\[queue\\]` then `Enter` to jump to the section.\n2. `o` to open a new line below and enter insert mode, then type `max_retries = 5`.\n3. `Esc`, then `:wq` and `Enter` to write and quit. (`:q!` quits without saving.)\n\n```bash\ndiff /etc/order-processor/app.conf.bak /etc/order-processor/app.conf\n```\n\nThen **Submit**.\n",
+    "idLabel": "06",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

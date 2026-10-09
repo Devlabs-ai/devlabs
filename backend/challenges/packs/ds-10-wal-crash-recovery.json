@@ -1,0 +1,151 @@
+{
+  "id": "ds-10-wal-crash-recovery",
+  "number": 510,
+  "finalized": true,
+  "title": "Crash recovery from the write-ahead log",
+  "description": "The orders database lost power mid-afternoon. Bring it back with the ARIES recovery passes: analysis, redo and undo.",
+  "difficulty": "L2",
+  "tags": [
+    "data-systems",
+    "storage-engines",
+    "wal",
+    "aries",
+    "crash-recovery",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "At 15:42 the orders database host lost power. Some transactions had committed, but their pages were still only in memory. Others were halfway through, and a few of their changed pages had already been written to disk.\n\nThe data files are now a mix of too old and too new. The write-ahead log is the only complete record. ARIES, the recovery algorithm behind InnoDB, SQL Server and DB2, uses it in three passes: work out what was happening, repeat history exactly, then roll back whatever never committed.\n\nThe outline runs from startup to accepting traffic. Fill the blocks. Traps lose committed orders or keep half-finished ones.",
+    "yourTask": "Order the steps of ARIES-style crash recovery, from detecting the crash to opening for connections.",
+    "yourTaskSteps": [
+      "Read every card.",
+      "Fill each empty block from Unused.",
+      "The dashed block is optional.",
+      "Submit."
+    ],
+    "hints": [
+      "A checkpoint marks how far back in the log recovery has to look.",
+      "ARIES first repeats history, including changes it will later undo.",
+      "Recovery itself can crash. Undo has to be safe to restart."
+    ],
+    "moat": "Setter notes, not shown to learners.\n\nRequired chain: unclean-start → read-checkpoint → analysis-pass → redo-pass → undo-pass → open-connections.\nOptional splice: end-checkpoint on undo-pass → open-connections.\nFive traps. Note: Postgres skips the undo pass because MVCC simply ignores uncommitted tuples; the board uses the ARIES model."
+  },
+  "platformSpec": {
+    "kicker": "Storage engines · Crash recovery",
+    "passMessage": "Analysis, redo, undo. Committed orders survived and half-finished ones are gone.",
+    "pieces": [
+      {
+        "id": "unclean-start",
+        "title": "Startup finds no clean shutdown",
+        "blurb": "The database sees it wasn't shut down cleanly, so it must recover before serving any query.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "read-checkpoint",
+        "title": "Find the last checkpoint",
+        "blurb": "Read the most recent checkpoint record. It lists the dirty pages and active transactions at that moment, so recovery doesn't start from the beginning of time.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "unclean-start",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "analysis-pass",
+        "title": "Analysis: scan forward from the checkpoint",
+        "blurb": "Work out which transactions were still running at the crash and which pages might be out of date on disk.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "read-checkpoint",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "redo-pass",
+        "title": "Redo: repeat history",
+        "blurb": "Replay every logged change, committed or not, to pages that are behind. A page whose LSN is already at or past the record is skipped.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "analysis-pass",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "undo-pass",
+        "title": "Undo: roll back unfinished transactions",
+        "blurb": "Reverse the changes of transactions that never committed, newest first, logging a compensation record for each step.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "redo-pass",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "end-checkpoint",
+        "title": "Take a fresh checkpoint",
+        "blurb": "Flush and checkpoint so the next crash won't need to replay this stretch of log again. Many engines do this; it isn't required for correctness.",
+        "kind": "mechanism",
+        "gold": "optional",
+        "parent": "undo-pass",
+        "child": "open-connections",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "open-connections",
+        "title": "Accept connections",
+        "blurb": "The data is consistent again: every committed order is present and no uncommitted change remains. order-processor reconnects.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "undo-pass",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "redo-committed-only",
+        "title": "Redo only committed transactions",
+        "blurb": "Skip log records from transactions that never committed. There's no point replaying work that will be thrown away.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Some uncommitted changes already reached disk. ARIES repeats all of history so undo starts from the exact pre-crash state."
+      },
+      {
+        "id": "undo-first",
+        "title": "Roll back losers first, then replay",
+        "blurb": "Undo the unfinished transactions before redoing anything, so redo only has good data to work with.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Undo needs pages in their pre-crash state. That only exists after redo has repeated history."
+      },
+      {
+        "id": "replay-from-start",
+        "title": "Replay the log from its very first record",
+        "blurb": "To be safe, ignore checkpoints and replay every log record ever written.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Checkpoints exist so recovery is bounded. Replaying years of log would take hours or days."
+      },
+      {
+        "id": "trust-data-files",
+        "title": "Trust the data files and skip the log",
+        "blurb": "The pages on disk are what the database last wrote, so open for traffic straight away.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Disk pages are missing committed changes and contain uncommitted ones. Only the log can fix both."
+      },
+      {
+        "id": "no-clrs",
+        "title": "Skip compensation records during undo",
+        "blurb": "Undo is just reversing changes, so there's no need to log what recovery itself does.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "If recovery crashes mid-undo, compensation records stop the next attempt from undoing the same change twice."
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

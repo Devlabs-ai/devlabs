@@ -2,10 +2,16 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom';
 import MarkdownProse from '../components/MarkdownProse';
 import SparkProjectEditor from '../components/SparkProjectEditor';
+import WorkspaceMobileSwitcher, {
+  type WorkspaceMobilePane,
+} from '../components/WorkspaceMobileSwitcher';
+import DesktopOnlyNotice from '../components/DesktopOnlyNotice';
 import { MAJORS_PATH, getProject, getProjectModule } from '../constants/projects';
-import { MINORS_PATH, minorsFor } from '../constants/minors';
+import { MINORS_PATH } from '../constants/minors';
 import { getModuleContent } from '../fixtures/projectModules';
 import type { ProjectModuleContent } from '../fixtures/projectModules';
+import { useIsNarrowUi } from '../hooks/useMediaQuery';
+import { readMigrating, removeMigrating, writeMigrating } from '../utils/storageMigrate';
 
 type BriefTab = 'theory' | 'tasks' | 'verify';
 
@@ -18,8 +24,29 @@ function clampBriefWidth(width: number, shellWidth: number): number {
   return Math.min(max, Math.max(BRIEF_MIN, Math.round(width)));
 }
 
-function storageKey(persistId: string): string {
-  return `devlabs.workspace.${persistId}.files`;
+function storageKeys(persistId: string): { next: string; legacy: string } {
+  return {
+    next: `devsetu.workspace.${persistId}.files`,
+    legacy: `devlabs.workspace.${persistId}.files`,
+  };
+}
+
+function theoryStorageKeys(persistId: string): { next: string; legacy: string } {
+  return {
+    next: `devsetu.workspace.${persistId}.theory`,
+    legacy: `devlabs.workspace.${persistId}.theory`,
+  };
+}
+
+function loadSavedTheory(persistId: string, fallback: string): string {
+  try {
+    const { next, legacy } = theoryStorageKeys(persistId);
+    const raw = readMigrating(window.localStorage, next, legacy);
+    if (typeof raw === 'string' && raw.trim()) return raw;
+  } catch {
+    // ignore
+  }
+  return fallback;
 }
 
 /** Edits live in the browser until modules get a backend workspace. */
@@ -28,7 +55,8 @@ function loadSavedFiles(
   starter: Record<string, string>,
 ): Record<string, string> {
   try {
-    const raw = window.localStorage.getItem(storageKey(persistId));
+    const { next, legacy } = storageKeys(persistId);
+    const raw = readMigrating(window.localStorage, next, legacy);
     if (!raw) return starter;
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const restored: Record<string, string> = {};
@@ -45,11 +73,36 @@ function loadSavedFiles(
 interface TheorySection {
   title: string;
   body: string;
+  mode: 'read-only' | 'read-and-implement';
+  taskIds: string[];
+}
+
+const MODE_META =
+  /^<!--\s*mode:\s*(read-only|read-and-implement)(?:\s+tasks:([\d.,\s]+))?\s*-->\s*$/m;
+
+function parseTheoryMode(body: string): {
+  body: string;
+  mode: TheorySection['mode'];
+  taskIds: string[];
+} {
+  const match = body.match(MODE_META);
+  if (!match) {
+    return { body: body.trim(), mode: 'read-only', taskIds: [] };
+  }
+  const mode = match[1] as TheorySection['mode'];
+  const taskIds = (match[2] || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const cleaned = body.replace(MODE_META, '').trim();
+  return { body: cleaned, mode, taskIds };
 }
 
 /**
  * Theory reads as one article but is delivered a section at a time, so a long
  * brief never lands as a single wall of text. Sections break on `##`.
+ * Optional HTML comment under the heading: `<!-- mode: read-only -->` or
+ * `<!-- mode: read-and-implement tasks:1.1,1.2 -->`.
  */
 function splitTheory(text: string): TheorySection[] {
   const sections: TheorySection[] = [];
@@ -58,8 +111,17 @@ function splitTheory(text: string): TheorySection[] {
   let inFence = false;
 
   const flush = (): void => {
-    const body = buffer.join('\n').trim();
-    if (body) sections.push({ title, body });
+    const raw = buffer.join('\n').trim();
+    if (!raw) return;
+    const parsed = parseTheoryMode(raw);
+    const withoutHeading = parsed.body.replace(/^##\s+.+\n?/, '').trim();
+    if (!withoutHeading) return;
+    sections.push({
+      title: title || 'Theory',
+      body: withoutHeading,
+      mode: parsed.mode,
+      taskIds: parsed.taskIds,
+    });
   };
 
   for (const line of text.split('\n')) {
@@ -94,7 +156,6 @@ function taskDone(files: Record<string, string>, file: string, id: string): bool
 interface ModuleWorkspaceProps {
   persistId: string;
   content: ProjectModuleContent;
-  minorIds?: string[];
   trail?: Array<{ to: string; label: string }>;
   title?: string;
 }
@@ -102,16 +163,16 @@ interface ModuleWorkspaceProps {
 export function ModuleWorkspace({
   persistId,
   content,
-  minorIds,
   trail,
   title,
 }: ModuleWorkspaceProps): JSX.Element {
-  const relatedMinors = minorsFor(minorIds);
   const [files, setFiles] = useState<Record<string, string>>(() =>
     loadSavedFiles(persistId, content.files),
   );
   const [briefTab, setBriefTab] = useState<BriefTab>('theory');
   const [theoryPage, setTheoryPage] = useState(0);
+  const isNarrow = useIsNarrowUi();
+  const [mobilePane, setMobilePane] = useState<WorkspaceMobilePane>('brief');
   const [briefCollapsed, setBriefCollapsed] = useState(false);
   const [briefWidth, setBriefWidth] = useState(() =>
     typeof window !== 'undefined'
@@ -119,37 +180,114 @@ export function ModuleWorkspace({
       : 520,
   );
   const [focusFile, setFocusFile] = useState(content.entryFile);
+  const [theoryMarkdown, setTheoryMarkdown] = useState(() =>
+    loadSavedTheory(persistId, content.theory),
+  );
+  const [theoryEditing, setTheoryEditing] = useState(false);
+  const [theoryDraft, setTheoryDraft] = useState(() =>
+    loadSavedTheory(persistId, content.theory),
+  );
+  const [theoryCopyStatus, setTheoryCopyStatus] = useState<string | null>(null);
 
   const shellRef = useRef<HTMLDivElement | null>(null);
   const briefBodyRef = useRef<HTMLDivElement | null>(null);
   const dragging = useRef(false);
+  const showBrief = isNarrow ? mobilePane === 'brief' : !briefCollapsed;
+  const showWorkspace = isNarrow ? mobilePane === 'workspace' : true;
+  const showResize = !isNarrow && !briefCollapsed;
 
-  const theorySections = useMemo(() => splitTheory(content.theory), [content.theory]);
+  const theorySections = useMemo(() => splitTheory(theoryMarkdown), [theoryMarkdown]);
   const section = theorySections[Math.min(theoryPage, theorySections.length - 1)];
+  const theoryDirty = theoryMarkdown !== content.theory;
 
   // Fresh module: reset every piece of per-module state.
   useEffect(() => {
+    const nextTheory = loadSavedTheory(persistId, content.theory);
     setFiles(loadSavedFiles(persistId, content.files));
     setFocusFile(content.entryFile);
     setBriefTab('theory');
     setTheoryPage(0);
+    setTheoryMarkdown(nextTheory);
+    setTheoryDraft(nextTheory);
+    setTheoryEditing(false);
+    setTheoryCopyStatus(null);
   }, [persistId, content]);
+
+  // Keep page in range when theory sections change after an edit.
+  useEffect(() => {
+    if (theoryPage > 0 && theoryPage >= theorySections.length) {
+      setTheoryPage(Math.max(0, theorySections.length - 1));
+    }
+  }, [theorySections.length, theoryPage]);
 
   // A new section starts at its own beginning, not where the last one ended.
   useEffect(() => {
     briefBodyRef.current?.scrollTo({ top: 0 });
-  }, [theoryPage, briefTab]);
+  }, [theoryPage, briefTab, theoryEditing]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
       try {
-        window.localStorage.setItem(storageKey(persistId), JSON.stringify(files));
+        const { next, legacy } = storageKeys(persistId);
+        writeMigrating(window.localStorage, next, legacy, JSON.stringify(files));
       } catch {
         // Quota or private mode — losing autosave is not worth breaking the page.
       }
     }, 400);
     return () => window.clearTimeout(t);
   }, [files, persistId]);
+
+  const applyTheoryDraft = useCallback((): void => {
+    setTheoryMarkdown(theoryDraft);
+    setTheoryPage(0);
+    setTheoryEditing(false);
+    setTheoryCopyStatus(null);
+    try {
+      const { next, legacy } = theoryStorageKeys(persistId);
+      if (theoryDraft === content.theory) {
+        removeMigrating(window.localStorage, next, legacy);
+      } else {
+        writeMigrating(window.localStorage, next, legacy, theoryDraft);
+      }
+    } catch {
+      // ignore quota
+    }
+  }, [theoryDraft, content.theory, persistId]);
+
+  const cancelTheoryEdit = useCallback((): void => {
+    setTheoryDraft(theoryMarkdown);
+    setTheoryEditing(false);
+    setTheoryCopyStatus(null);
+  }, [theoryMarkdown]);
+
+  const resetTheoryToAuthored = useCallback((): void => {
+    if (!window.confirm('Reset theory to the authored fixture? Your local rewrite will be discarded.')) {
+      return;
+    }
+    setTheoryMarkdown(content.theory);
+    setTheoryDraft(content.theory);
+    setTheoryPage(0);
+    setTheoryEditing(false);
+    setTheoryCopyStatus(null);
+    try {
+      const { next, legacy } = theoryStorageKeys(persistId);
+      removeMigrating(window.localStorage, next, legacy);
+    } catch {
+      // ignore
+    }
+  }, [content.theory, persistId]);
+
+  const copyTheoryMarkdown = useCallback(async (): Promise<void> => {
+    const text = theoryEditing ? theoryDraft : theoryMarkdown;
+    try {
+      await navigator.clipboard.writeText(text);
+      setTheoryCopyStatus('Copied');
+      window.setTimeout(() => setTheoryCopyStatus(null), 1600);
+    } catch {
+      setTheoryCopyStatus('Copy failed');
+      window.setTimeout(() => setTheoryCopyStatus(null), 2000);
+    }
+  }, [theoryEditing, theoryDraft, theoryMarkdown]);
 
   const onResizeMove = useCallback((e: MouseEvent) => {
     if (!dragging.current || !shellRef.current) return;
@@ -179,9 +317,21 @@ export function ModuleWorkspace({
 
   function resetModule(): void {
     if (!window.confirm('Reset this module? Your edits will be discarded.')) return;
-    window.localStorage.removeItem(storageKey(persistId));
+    const filesKeys = storageKeys(persistId);
+    const theoryKeys = theoryStorageKeys(persistId);
+    removeMigrating(window.localStorage, filesKeys.next, filesKeys.legacy);
+    try {
+      removeMigrating(window.localStorage, theoryKeys.next, theoryKeys.legacy);
+    } catch {
+      // ignore
+    }
     setFiles(content.files);
     setFocusFile(content.entryFile);
+    setTheoryMarkdown(content.theory);
+    setTheoryDraft(content.theory);
+    setTheoryPage(0);
+    setTheoryEditing(false);
+    setTheoryCopyStatus(null);
   }
 
   return (
@@ -205,15 +355,23 @@ export function ModuleWorkspace({
       <div
         ref={shellRef}
         className={`workspace sandbox-workspace spark-platform-workspace project-module-shell${
-          briefCollapsed ? ' spark-brief-collapsed' : ''
-        }`}
+          !isNarrow && briefCollapsed ? ' spark-brief-collapsed' : ''
+        }${isNarrow ? ` workspace--mobile workspace--mobile-pane-${mobilePane}` : ''}`}
         style={
-          briefCollapsed
+          isNarrow || briefCollapsed
             ? { gridTemplateColumns: 'minmax(0, 1fr)' }
             : { gridTemplateColumns: `${briefWidth}px 6px minmax(0, 1fr)` }
         }
       >
-        {!briefCollapsed && (
+        {isNarrow && (
+          <WorkspaceMobileSwitcher
+            pane={mobilePane}
+            onChange={setMobilePane}
+            briefLabel="Theory"
+            workspaceLabel="Editor"
+          />
+        )}
+        {showBrief && (
           <div className="col spark-brief-col">
             <div
               className="panel sandbox-brief-panel--solo spark-brief-panel--bare"
@@ -242,60 +400,181 @@ export function ModuleWorkspace({
                   </button>
                 ))}
                 <div className="project-module-tab-actions">
-                  {relatedMinors.map((minor) => (
-                    <Link
-                      key={minor.id}
-                      to={`${MINORS_PATH}/${minor.id}`}
-                      className="project-minor-chip"
-                    >
-                      {minor.name}
-                    </Link>
-                  ))}
                   <span className="project-module-progress" title="Blocks with the TODO marker removed">
                     {doneCount}/{content.tasks.length} blocks
                   </span>
+                  {briefTab === 'theory' && !theoryEditing && (
+                    <button
+                      type="button"
+                      className="topnav-pill topnav-action"
+                      title="Edit theory markdown"
+                      onClick={() => {
+                        setTheoryDraft(theoryMarkdown);
+                        setTheoryEditing(true);
+                        setTheoryCopyStatus(null);
+                      }}
+                    >
+                      Edit
+                      {theoryDirty ? ' •' : ''}
+                    </button>
+                  )}
                   <button type="button" className="topnav-pill topnav-action" onClick={resetModule}>
                     Reset
                   </button>
                 </div>
-                <button
-                  type="button"
-                  className="spark-brief-collapse-btn"
-                  title="Collapse theory panel"
-                  aria-label="Collapse theory panel"
-                  onClick={() => setBriefCollapsed(true)}
-                >
-                  ⟨
-                </button>
+                {!isNarrow && (
+                  <button
+                    type="button"
+                    className="spark-brief-collapse-btn"
+                    title="Collapse theory panel"
+                    aria-label="Collapse theory panel"
+                    onClick={() => setBriefCollapsed(true)}
+                  >
+                    ⟨
+                  </button>
+                )}
               </div>
 
-              <div className="panel-body spark-brief-body" ref={briefBodyRef}>
-                {briefTab === 'theory' && section && (
+              <div
+                className={`panel-body spark-brief-body${theoryEditing && briefTab === 'theory' ? ' spark-brief-body--theory-edit' : ''}`}
+                ref={briefBodyRef}
+              >
+                {briefTab === 'theory' && theoryEditing && (
+                  <div className="spark-brief-admin spark-brief-admin--open project-theory-editor">
+                    <div className="spark-brief-admin-bar">
+                      <span className="spark-brief-admin-format">Theory markdown</span>
+                      <button
+                        type="button"
+                        className="spark-ide-btn spark-ide-btn--run"
+                        disabled={theoryDraft === theoryMarkdown}
+                        onClick={applyTheoryDraft}
+                      >
+                        Apply
+                      </button>
+                      <button type="button" className="ghost sm" onClick={cancelTheoryEdit}>
+                        Cancel
+                      </button>
+                      <button type="button" className="ghost sm" onClick={() => void copyTheoryMarkdown()}>
+                        {theoryCopyStatus || 'Copy'}
+                      </button>
+                      {theoryDirty && (
+                        <button type="button" className="ghost sm" onClick={resetTheoryToAuthored}>
+                          Reset authored
+                        </button>
+                      )}
+                    </div>
+                    <p className="project-theory-editor-hint">
+                      Edits apply in this browser. Copy the markdown into{' '}
+                      <code>theory.md</code> when you want it in the repo.
+                    </p>
+                    <textarea
+                      className="spark-brief-admin-editor"
+                      spellCheck={false}
+                      value={theoryDraft}
+                      onChange={(e) => setTheoryDraft(e.target.value)}
+                      aria-label="Theory markdown editor"
+                    />
+                  </div>
+                )}
+
+                {briefTab === 'theory' && !theoryEditing && section && (
                   <div className="theory-reader">
-                    {theorySections.length > 1 && (
-                      <p className="theory-eyebrow">
-                        Part {theoryPage + 1} of {theorySections.length}
-                      </p>
-                    )}
+                    <div className="theory-section-head">
+                      {theorySections.length > 1 && (
+                        <p className="theory-eyebrow">
+                          Part {theoryPage + 1} of {theorySections.length}
+                        </p>
+                      )}
+                      <span
+                        className={`theory-mode-badge theory-mode-badge--${
+                          section.mode === 'read-and-implement' ? 'implement' : 'read'
+                        }`}
+                      >
+                        {section.mode === 'read-and-implement'
+                          ? 'Read and Implement'
+                          : 'Read only'}
+                      </span>
+                    </div>
+
+                    <h2 className="theory-section-title">{section.title}</h2>
 
                     <MarkdownProse text={section.body} className="markdown-prose" />
 
+                    {section.mode === 'read-and-implement' && section.taskIds.length > 0 && (
+                      <div className="theory-implement-callout">
+                        <p className="theory-implement-lead">
+                          Complete these tasks in the repo, then continue.
+                        </p>
+                        <ul className="theory-implement-tasks">
+                          {section.taskIds.map((id) => {
+                            const task = content.tasks.find((t) => t.id === id);
+                            if (!task) return null;
+                            const done = taskDone(files, task.file, task.id);
+                            return (
+                              <li key={id}>
+                                <button
+                                  type="button"
+                                  className={`theory-implement-task${done ? ' is-done' : ''}`}
+                                  onClick={() => {
+                                    setBriefTab('tasks');
+                                    setFocusFile(task.file);
+                                  }}
+                                >
+                                  <span>TODO({task.id})</span>
+                                  <strong>{task.label}</strong>
+                                  <span>{done ? 'done' : 'open'}</span>
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+
                     {theorySections.length > 1 && (
                       <nav className="theory-pager" aria-label="Theory sections">
-                        {theorySections.map((s, index) => (
-                          <button
-                            key={s.title || index}
-                            type="button"
-                            className={`theory-pager-dot${index === theoryPage ? ' active' : ''}`}
-                            title={s.title}
-                            aria-label={s.title}
-                            aria-current={index === theoryPage}
-                            onClick={() => setTheoryPage(index)}
-                          />
-                        ))}
+                        <button
+                          type="button"
+                          className="theory-pager-arrow"
+                          disabled={theoryPage <= 0}
+                          aria-label="Previous section"
+                          title={
+                            theoryPage > 0
+                              ? theorySections[theoryPage - 1]?.title
+                              : undefined
+                          }
+                          onClick={() => setTheoryPage((page) => Math.max(0, page - 1))}
+                        >
+                          <span aria-hidden>‹</span>
+                        </button>
+                        <span className="theory-pager-status">
+                          {theoryPage + 1} / {theorySections.length}
+                        </span>
+                        <button
+                          type="button"
+                          className="theory-pager-arrow"
+                          disabled={theoryPage >= theorySections.length - 1}
+                          aria-label="Next section"
+                          title={
+                            theoryPage < theorySections.length - 1
+                              ? theorySections[theoryPage + 1]?.title
+                              : undefined
+                          }
+                          onClick={() =>
+                            setTheoryPage((page) =>
+                              Math.min(theorySections.length - 1, page + 1),
+                            )
+                          }
+                        >
+                          <span aria-hidden>›</span>
+                        </button>
                       </nav>
                     )}
                   </div>
+                )}
+
+                {briefTab === 'theory' && !theoryEditing && !section && (
+                  <p className="project-task-lead">No theory sections yet. Click Edit to add markdown.</p>
                 )}
 
                 {briefTab === 'tasks' && (
@@ -350,7 +629,7 @@ export function ModuleWorkspace({
           </div>
         )}
 
-        {!briefCollapsed && (
+        {showResize && (
           <div
             className="spark-resize-handle"
             role="separator"
@@ -368,7 +647,7 @@ export function ModuleWorkspace({
           />
         )}
 
-        {briefCollapsed && (
+        {!isNarrow && briefCollapsed && (
           <button
             type="button"
             className="spark-brief-reopen-float"
@@ -380,16 +659,25 @@ export function ModuleWorkspace({
           </button>
         )}
 
-        <div className="col col-main">
-          <div className="panel spark-ide-panel" style={{ flex: 1 }}>
-            <SparkProjectEditor
-              key={`${persistId}:${focusFile}`}
-              files={files}
-              onChangeFiles={setFiles}
-              entryFile={focusFile}
+        {showWorkspace && isNarrow && (
+          <DesktopOnlyNotice
+              tools="code editor and scratch pad"
+              briefLabel="Read the theory"
+              onShowBrief={() => setMobilePane('brief')}
             />
+        )}
+        {showWorkspace && !isNarrow && (
+          <div className="col col-main">
+            <div className="panel spark-ide-panel" style={{ flex: 1 }}>
+              <SparkProjectEditor
+                key={`${persistId}:${focusFile}`}
+                files={files}
+                onChangeFiles={setFiles}
+                entryFile={focusFile}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -415,7 +703,6 @@ export default function ProjectModulePage(): JSX.Element {
     <ModuleWorkspace
       persistId={`${project.id}.${module.id}`}
       content={content}
-      minorIds={module.minors}
     />
   );
 }

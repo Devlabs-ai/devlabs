@@ -1,0 +1,47 @@
+{
+  "id": "docker-08-configure-order-processor-with-env-files",
+  "number": 408,
+  "finalized": true,
+  "title": "Configure Order Processor with an Env File",
+  "description": "**SITUATION:**\n\nOps wrote production settings for order-processor v1.2 in `~/config/order-processor.env`: minimum order value, maximum items per order, log level and the payment key. You need to run it with those settings, but at **WARNING** log level, since INFO is too noisy on this box. Leave the shared file's log level alone.\n\n**YOUR TASK:**\n\n1. Run order-processor v1.2 with its settings from the env file and LOG_LEVEL overridden.\n2. Check that orders follow the configured limits, and fix whatever stops them.\n\n**SPEC:**\n\n- Container `op-config`: image `devsetu/order-processor:v1.2`, **running**, host port `8085` → `8000`\n- `MIN_ORDER_VALUE`, `MAX_ITEMS_PER_ORDER` and `PAYMENT_API_KEY` come from `~/config/order-processor.env`\n- `LOG_LEVEL=WARNING` in the container; the env file still says `LOG_LEVEL=INFO`\n- Orders below the minimum and orders with too many items are **rejected** (HTTP 400); normal orders are accepted (201)\n\n**GOOD PRACTICES:**\n\n- `--env-file` loads many variables at once; `-e` on the command line overrides the file.\n- `docker exec <name> env` shows exactly what the process received.\n- A container's environment is fixed when it's created: recreate it after changing settings.\n",
+  "difficulty": "L0",
+  "tags": [
+    "docker",
+    "l0",
+    "environment",
+    "env-file",
+    "configuration"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Configure Order Processor with an Env File",
+    "brief": "Configure Order Processor with an Env File",
+    "solution": "# Solution — Configure Order Processor with an Env File\n\nThe same image runs in dev, QA and production. What changes between them is **configuration**, and the simplest way to hand it to a container is environment variables: one at a time with `-e`, or many at once from a file with `--env-file`.\n\nDocs: [Set environment variables](https://docs.docker.com/reference/cli/docker/container/run/#env)\n\n## Read the file, run it\n\n```bash\ncat ~/config/order-processor.env\ndocker run -d --name op-config -p 8085:8000 \\\n  --env-file ~/config/order-processor.env \\\n  -e LOG_LEVEL=WARNING \\\n  devsetu/order-processor:v1.2\n```\n\n`-e` on the command line wins over the same variable in `--env-file`: the file holds the defaults, the command line overrides them for one container without touching the shared file.\n\n## The orders don't follow the minimum\n\n```bash\nMIN=$(sed -n 's/^MIN_ORDER_VALUE=//p' ~/config/order-processor.env | tr -d '\"')\ncurl -s -X POST http://127.0.0.1:8085/orders -H 'Content-Type: application/json' \\\n  -d \"{\\\"items\\\":[\\\"chai\\\"],\\\"total\\\":$((MIN - 1))}\"\n# 201 created, but it should have been rejected\n\ndocker exec op-config env | grep MIN_ORDER_VALUE\n# MIN_ORDER_VALUE=\"23\"     <- the quotes are part of the value\n```\n\n`docker --env-file` is **not** a shell file: no quote removal, no `$VAR` expansion, no `export`. Each line is `KEY=everything after the =`. The app tried `float('\"23\"')`, failed, and fell back to 0. (Docker **Compose** env files do strip quotes, which is why this catches people out.)\n\n## Fix the file, recreate the container\n\n```bash\nsed -i 's/^MIN_ORDER_VALUE=\"\\(.*\\)\"$/MIN_ORDER_VALUE=\\1/' ~/config/order-processor.env\ncat ~/config/order-processor.env\ndocker rm -f op-config\ndocker run -d --name op-config -p 8085:8000 \\\n  --env-file ~/config/order-processor.env -e LOG_LEVEL=WARNING \\\n  devsetu/order-processor:v1.2\ndocker exec op-config env | grep -E 'MIN_ORDER|MAX_ITEMS|LOG_LEVEL'\n```\n\nA container's environment is fixed when it's **created**: editing the file changes nothing until you recreate the container.\n\n## Check\n\n```bash\ncurl -s -X POST http://127.0.0.1:8085/orders -H 'Content-Type: application/json' \\\n  -d \"{\\\"items\\\":[\\\"chai\\\"],\\\"total\\\":$((MIN - 1))}\"          # 400 order_total_too_low\ncurl -s -X POST http://127.0.0.1:8085/orders -H 'Content-Type: application/json' \\\n  -d '{\"items\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\"],\"total\":99}'   # 400 too_many_items\n```\n\n`docker inspect op-config` shows every variable, **including the API key**. Anyone who can run `docker` can read it. The next lab moves secrets out of the environment.\n\nThen **Submit**.\n",
+    "idLabel": "08",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

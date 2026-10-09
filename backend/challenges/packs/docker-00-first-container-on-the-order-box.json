@@ -1,0 +1,46 @@
+{
+  "id": "docker-00-first-container-on-the-order-box",
+  "number": 400,
+  "finalized": true,
+  "title": "First Container on the Order Box",
+  "description": "**SITUATION:**\n\nThe order box from the Linux track just got **Docker**. Before the team moves order-processor off systemd and into containers, you need to be at home with the basics: start a container, see what's running, read what a container printed, and clean up after yourself.\n\nThe night shift also left an old batch container behind. Its logs hold the ID of the batch it processed.\n\n**YOUR TASK:**\n\n1. Find out which Docker **Engine** (server) version this machine runs.\n2. Start a long-running container named `scratchpad` in the background.\n3. Run a one-off container named `hello-once` that prints `order box ready` and exits.\n4. Read the logs of the stopped container `old-batch`, note its batch ID, then remove the container.\n\n**SPEC:**\n\n- `~/answers/docker-version`: the Engine (Server) version from `docker version`, e.g. `29.1.0`\n- Container `scratchpad`: image `alpine:3.20`, command `sleep infinity`, **running**\n- Container `hello-once`: image `alpine:3.20`, prints exactly `order box ready`, **exited** with code 0 (don't use `--rm`)\n- `~/answers/batch-id`: the value after `BATCH-ID:` in `old-batch`'s logs, e.g. `B-1234-ABCD`\n- Container `old-batch`: **removed**\n\n**GOOD PRACTICES:**\n\n- `docker ps` lists running containers; `docker ps -a` includes stopped ones.\n- `docker logs <name>` works on stopped containers too, until you `docker rm` them.\n- Every subcommand has `--help`: `docker run --help`.\n",
+  "difficulty": "L0",
+  "tags": [
+    "docker",
+    "l0",
+    "containers",
+    "lifecycle"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "First Container on the Order Box",
+    "brief": "First Container on the Order Box",
+    "solution": "# Solution — First Container on the Order Box\n\nA **container** is a process that Docker starts from an **image** (a read-only bundle of files: a mini filesystem plus a default command). `docker run` creates a container from an image and starts it; when its main process exits, the container stops but stays around until you remove it.\n\nDocs: `docker run --help` · `docker ps --help` · `docker logs --help` (every subcommand has `--help`).\n\n## Which Docker is this?\n\n```bash\ndocker version            # Client: the CLI you type into. Server (Engine): dockerd doing the work.\ndocker version -f '{{.Server.Version}}'\nmkdir -p ~/answers\ndocker version -f '{{.Server.Version}}' > ~/answers/docker-version\ndocker info               # storage driver, how many containers/images, where data lives\n```\n\nThe client and the server are separate programs: the CLI sends requests to `dockerd` over a socket (`/var/run/docker.sock`). Being in the `docker` group is what lets `learner` use that socket without `sudo`.\n\n## A long-running container\n\n```bash\ndocker run -d --name scratchpad alpine:3.20 sleep infinity\ndocker ps                 # STATUS: Up ...\n```\n\n- `-d` (detached): run in the background and print the container ID.\n- `--name`: a name you choose. Without it Docker makes one up (`eager_turing`).\n- Everything after the image is the **command**, replacing the image's default.\n\n## A one-off container\n\n```bash\ndocker run --name hello-once alpine:3.20 echo \"order box ready\"\ndocker ps                 # not listed: it's not running\ndocker ps -a              # STATUS: Exited (0) ...\n```\n\nThe container did its one job and exited with code 0. `docker ps -a` shows stopped containers too. (Add `--rm` when you want Docker to delete it automatically on exit; here the grader needs to see it.)\n\n## Read an old container's logs, then clean up\n\n```bash\ndocker ps -a --filter name=old-batch\ndocker logs old-batch     # everything it printed to stdout/stderr\ndocker logs old-batch | grep BATCH-ID\ndocker logs old-batch | awk '/BATCH-ID/ {print $2}' > ~/answers/batch-id\ndocker rm old-batch\n```\n\nLogs outlive the process: Docker keeps a stopped container's output until the container is removed. That's why `docker rm` is a deliberate step.\n\n## Lifecycle at a glance\n\n```text\ndocker create  ->  created\ndocker start   ->  running   (docker run = create + start)\nprocess exits  ->  exited    (docker stop sends SIGTERM, then SIGKILL)\ndocker rm      ->  gone      (docker rm -f stops and removes in one go)\n```\n\nThen **Submit**.\n",
+    "idLabel": "00",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

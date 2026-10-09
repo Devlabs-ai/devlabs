@@ -3,7 +3,9 @@
 import type { ExpressRequest, ExpressResponse, ExpressNextFunction } from '../types/express';
 
 const express = require('express');
-const { requireInterviewer, requireAdmin, isAdminUser } = require('../auth/middleware');
+const fs = require('fs');
+const path = require('path');
+const { requireInterviewer, optionalAuth, requireAdmin, requireReviewStaff, isAdminUser } = require('../auth/middleware');
 const loader = require('../challenges/loader');
 const {
   hydrateChallengeFromMinio,
@@ -14,26 +16,85 @@ const {
   loadSolutionAsset,
   applyMoatPolicy,
 } = require('../challenges/minioChallengeAssets');
-const { listSolvedChallengeIds, countSubmittersByChallenge } = require('../challenges/userProgress');
+const {
+  listSolvedChallengeIds,
+  listFirstSolveTimes,
+  countSubmittersByChallenge,
+} = require('../challenges/userProgress');
+const {
+  SOLUTION_PENALTY_PCT,
+  penalizedTokens,
+  earnedTokens,
+  recordSolutionView,
+  listSolutionViews,
+} = require('../challenges/solutionViews');
+const { canViewChallenge } = require('../challenges/access');
+const { unlockedTracks, isLabLocked, assertLabUnlocked, paidTrackOf } = require('../billing/labAccess');
+const { isClusterLabType } = require('../challenges/labTypes');
+const { catalogSettingsLocked, writePackSettings } = require('../challenges/catalogSettings');
+const reviewStore = require('../challenges/reviewStore');
 const pool = require('../db/pool');
 
 const router = express.Router();
 
-router.get('/', requireInterviewer, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+function tokensOf(c: { tokens?: unknown }): number {
+  return typeof c.tokens === 'number' && Number.isFinite(c.tokens) ? c.tokens : 10;
+}
+
+function requestUserId(req: ExpressRequest): string | null {
+  const user = req.user as { sub?: string; id?: string } | undefined;
+  return user?.sub || user?.id || null;
+}
+
+/** What opening this lab's solution costs the current user. */
+async function solutionStatus(req: ExpressRequest, c: { id: string; tokens?: unknown; k8sPlatform?: { practice?: boolean } | null }) {
+  const userId = requestUserId(req);
+  const [solveTimes, views] = await Promise.all([listFirstSolveTimes(userId), listSolutionViews(userId)]);
+  const tokens = tokensOf(c);
+  const solvedAt = solveTimes.get(c.id) ?? null;
+  const viewedAt = views.get(c.id) ?? null;
+  const practice = Boolean(c.k8sPlatform?.practice);
+  return {
+    challengeId: c.id,
+    tokens,
+    penaltyPct: SOLUTION_PENALTY_PCT,
+    tokensAfterPenalty: penalizedTokens(tokens),
+    solved: solvedAt != null,
+    viewedAt,
+    /** Opening the solution now would (or already did) cut this lab's tokens. */
+    penalized: !practice && (viewedAt != null ? solvedAt == null || viewedAt < solvedAt : solvedAt == null),
+    practice,
+  };
+}
+
+router.get('/', optionalAuth, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
   try {
     // Shelf stays on thin Postgres rows; attach per-user solved from graded submits.
     const userId = (req.user as { sub?: string; id?: string } | undefined)?.sub
       || (req.user as { sub?: string; id?: string } | undefined)?.id
       || null;
-    const [solvedIds, submitterCounts] = await Promise.all([
-      listSolvedChallengeIds(userId),
+    const [solveTimes, solutionViews, submitterCounts, unlocked] = await Promise.all([
+      listFirstSolveTimes(userId),
+      listSolutionViews(userId),
       countSubmittersByChallenge(),
+      unlockedTracks(req.user),
     ]);
-    const challenges = loader.listPublicChallenges().map((c: { id: string; problemStatement?: unknown }) => ({
-      ...c,
-      solved: solvedIds.has(c.id),
-      submitters: submitterCounts.get(c.id) || 0,
-    }));
+    const challenges = loader
+      .listPublicChallenges()
+      .filter((c: { visibleTo?: string }) => canViewChallenge(req.user, c.visibleTo))
+      .map((c: { id: string; category?: string; tokens?: number; problemStatement?: unknown }) => {
+        const solvedAt = solveTimes.get(c.id) ?? null;
+        const viewedAt = solutionViews.get(c.id) ?? null;
+        return {
+          ...c,
+          locked: isLabLocked(c, unlocked),
+          paidTrack: paidTrackOf(c),
+          solved: solvedAt != null,
+          earnedTokens: earnedTokens(tokensOf(c), solvedAt, viewedAt),
+          solutionViewedAt: viewedAt,
+          submitters: submitterCounts.get(c.id) || 0,
+        };
+      });
     res.json({
       challenges: isAdminUser(req.user)
         ? challenges
@@ -44,11 +105,24 @@ router.get('/', requireInterviewer, async (req: ExpressRequest, res: ExpressResp
   }
 });
 
+router.get('/catalog-settings', requireAdmin, (_req: ExpressRequest, res: ExpressResponse) => {
+  res.json({ locked: catalogSettingsLocked() });
+});
+
 router.get('/:id', requireInterviewer, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
   try {
     // Existence / thin catalog from Postgres; open body from MinIO when contentSource=minio.
     const c = loader.getPublicChallenge(req.params.id);
     if (!c) return res.status(404).json({ error: 'challenge not found' });
+    if (!canViewChallenge(req.user, (c as { visibleTo?: string }).visibleTo)) {
+      return res.status(403).json({ error: 'This lab is not available for your role' });
+    }
+    try {
+      await assertLabUnlocked(req.user, c as { id: string; category?: string });
+    } catch (e) {
+      const err = e as Error & { code?: string; details?: Record<string, unknown> };
+      return res.status(402).json({ error: err.message, code: err.code, ...(err.details || {}) });
+    }
     const hydrated = await hydrateChallengeFromMinio(c);
     const userId = (req.user as { sub?: string; id?: string } | undefined)?.sub
       || (req.user as { sub?: string; id?: string } | undefined)?.id
@@ -66,7 +140,182 @@ router.get('/:id', requireInterviewer, async (req: ExpressRequest, res: ExpressR
   }
 });
 
-const CONTENT_TABS = new Set(['description', 'data', 'spec', 'cluster', 'knobs', 'solution', 'moat']);
+router.put(
+  '/:id/visibility',
+  requireAdmin,
+  express.json({ limit: '32kb' }),
+  async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+    try {
+      const id = String(req.params.id || '');
+      const existing = loader.getChallenge(id);
+      if (!existing) return res.status(404).json({ error: 'challenge not found' });
+
+      const body = (req.body as {
+        visibleTo?: unknown;
+        visibilityNotes?: unknown;
+        tokens?: unknown;
+        bounty?: unknown;
+      }) || {};
+      const visibleTo = String(body.visibleTo || '').trim().toLowerCase();
+      if (visibleTo !== 'admin' && visibleTo !== 'users' && visibleTo !== 'reviewers') {
+        return res.status(400).json({ error: 'visibleTo must be admin, reviewers, or users' });
+      }
+
+      const notes =
+        body.visibilityNotes !== undefined ? String(body.visibilityNotes ?? '') : null;
+      const tokensRaw =
+        body.tokens !== undefined && body.tokens !== null && body.tokens !== ''
+          ? body.tokens
+          : body.bounty !== undefined && body.bounty !== null && body.bounty !== ''
+            ? body.bounty
+            : null;
+      const tokens = tokensRaw != null ? Number(tokensRaw) : null;
+      if (tokens != null && (!Number.isFinite(tokens) || tokens < 0)) {
+        return res.status(400).json({ error: 'tokens must be a non-negative number' });
+      }
+
+      if (catalogSettingsLocked()) {
+        const currentVisibleTo = (existing as { visibleTo?: string }).visibleTo || 'admin';
+        const currentTokens = (existing as { tokens?: number }).tokens ?? 10;
+        const changesVisibility = visibleTo !== currentVisibleTo;
+        const changesTokens = tokens != null && Math.trunc(tokens) !== currentTokens;
+        if (changesVisibility || changesTokens) {
+          return res.status(409).json({
+            error:
+              'Visibility and tokens are managed from local and synced on deploy. Change them locally, then redeploy.',
+          });
+        }
+      }
+
+      const updated = await loader.setVisibleTo(id, visibleTo, notes, tokens);
+      if (!catalogSettingsLocked()) {
+        writePackSettings(id, {
+          visibleTo: updated.visibleTo || visibleTo,
+          tokens: typeof updated.tokens === 'number' ? updated.tokens : undefined,
+        });
+      }
+      res.json({
+        challenge: {
+          id: updated.id,
+          visibleTo: updated.visibleTo || 'admin',
+          visibilityNotes: updated.visibilityNotes || '',
+          tokens: typeof updated.tokens === 'number' ? updated.tokens : 10,
+        },
+      });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.get(
+  '/:id/reviews',
+  requireReviewStaff,
+  async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+    try {
+      const id = String(req.params.id || '');
+      if (!loader.getChallenge(id)) return res.status(404).json({ error: 'challenge not found' });
+      const reviews = await reviewStore.listReviews(id);
+      res.json({ reviews });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  '/:id/reviews',
+  requireReviewStaff,
+  express.json({ limit: '256kb' }),
+  async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+    try {
+      const id = String(req.params.id || '');
+      if (!loader.getChallenge(id)) return res.status(404).json({ error: 'challenge not found' });
+
+      const authorId = String(req.user?.sub || req.user?.userId || '');
+      if (!authorId) return res.status(401).json({ error: 'unauthenticated' });
+
+      const body = String((req.body as { body?: unknown })?.body || '');
+      const review = await reviewStore.createReview({
+        challengeId: id,
+        authorId,
+        authorEmail: req.user?.email || null,
+        authorName: null,
+        body,
+      });
+      res.status(201).json({ review });
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (err.status === 400) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
+      next(e);
+    }
+  },
+);
+
+router.delete(
+  '/:id/reviews/:reviewId',
+  requireReviewStaff,
+  async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+    try {
+      const id = String(req.params.id || '');
+      const reviewId = String(req.params.reviewId || '');
+      if (!loader.getChallenge(id)) return res.status(404).json({ error: 'challenge not found' });
+
+      const reviews = await reviewStore.listReviews(id);
+      const target = reviews.find((r: { id: string }) => r.id === reviewId);
+      if (!target) return res.status(404).json({ error: 'review not found' });
+
+      const authorId = String(req.user?.sub || req.user?.userId || '');
+      if (!isAdminUser(req.user) && target.authorId !== authorId) {
+        return res.status(403).json({ error: 'can only delete your own feedback' });
+      }
+
+      await reviewStore.deleteReview(reviewId, id);
+      res.json({ ok: true });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+const CONTENT_TABS = new Set([
+  'description',
+  'theory',
+  'data',
+  'spec',
+  'cluster',
+  'knobs',
+  'solution',
+  'moat',
+]);
+
+function updatePackJson(
+  id: string,
+  patch: {
+    description?: string;
+    problemStatement?: Record<string, unknown>;
+  },
+): void {
+  const packPath = path.join(__dirname, '../challenges/packs', `${id}.json`);
+  if (!fs.existsSync(packPath)) return;
+  try {
+    const data = JSON.parse(fs.readFileSync(packPath, 'utf8')) as Record<string, unknown>;
+    if (typeof patch.description === 'string') data.description = patch.description;
+    if (patch.problemStatement && typeof patch.problemStatement === 'object') {
+      const prev =
+        data.problemStatement && typeof data.problemStatement === 'object' && !Array.isArray(data.problemStatement)
+          ? (data.problemStatement as Record<string, unknown>)
+          : {};
+      data.problemStatement = { ...prev, ...patch.problemStatement };
+    }
+    fs.writeFileSync(packPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  } catch (e: unknown) {
+    console.warn(`[challenges] pack update skipped for ${id}:`, (e as Error).message);
+  }
+}
 
 async function syncCatalogRow(meta: {
   id: string;
@@ -98,6 +347,7 @@ async function syncCatalogRow(meta: {
 }
 
 // PUT /api/challenges/:id/content — admin authoring of MinIO challenge.json / solution/
+// (Kubernetes pack labs update Postgres + packs/*.json instead of MinIO.)
 router.put(
   '/:id/content',
   requireAdmin,
@@ -109,11 +359,14 @@ router.put(
       if (!base) return res.status(404).json({ error: 'challenge not found' });
       const tab = String((req.body as Record<string, unknown>)?.tab || '');
       if (!CONTENT_TABS.has(tab)) {
-        return res.status(400).json({ error: 'tab must be description, data, spec, cluster, knobs, solution, or moat' });
+        return res.status(400).json({
+          error: 'tab must be description, theory, data, spec, cluster, knobs, solution, or moat',
+        });
       }
 
       const body = (req.body as Record<string, unknown>) || {};
       let solutionFiles: Record<string, string> | null = null;
+      const isK8s = isClusterLabType(base.sandboxType);
 
       if (tab === 'solution') {
         const files = body.solutionFiles;
@@ -125,6 +378,54 @@ router.put(
           map[k] = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
         }
         solutionFiles = await writeSolutionFiles(id, map);
+
+        // Keep pack problemStatement.solution in sync with README when present (k8s brief fallback).
+        if (isK8s && typeof map['README.md'] === 'string') {
+          const ps = {
+            ...((base.problemStatement && typeof base.problemStatement === 'object')
+              ? (base.problemStatement as Record<string, unknown>)
+              : {}),
+            solution: map['README.md'],
+          };
+          await syncCatalogRow({ id, problemStatement: ps });
+          updatePackJson(id, { problemStatement: ps });
+        }
+      } else if (isK8s) {
+        const ps = {
+          ...((base.problemStatement && typeof base.problemStatement === 'object')
+            ? (base.problemStatement as Record<string, unknown>)
+            : {}),
+        };
+        let description: string | undefined;
+        if (tab === 'description') {
+          if (typeof body.markdown !== 'string') {
+            return res.status(400).json({ error: 'markdown string required' });
+          }
+          description = body.markdown.replace(/^\uFEFF/, '');
+        } else if (tab === 'theory') {
+          if (typeof body.markdown !== 'string') {
+            return res.status(400).json({ error: 'markdown string required' });
+          }
+          ps.theory = body.markdown.replace(/^\uFEFF/, '');
+        } else if (tab === 'moat') {
+          if (typeof body.markdown !== 'string') {
+            return res.status(400).json({ error: 'markdown string required' });
+          }
+          ps.moat = body.markdown.replace(/^\uFEFF/, '');
+        } else {
+          return res.status(400).json({
+            error: 'Kubernetes labs support editing description, theory, solution (and moat)',
+          });
+        }
+        await syncCatalogRow({
+          id,
+          description,
+          problemStatement: ps,
+        });
+        updatePackJson(id, {
+          ...(description !== undefined ? { description } : {}),
+          problemStatement: ps,
+        });
       } else {
         const meta = await loadChallengeMeta(id);
         if (!meta) {
@@ -148,6 +449,12 @@ router.put(
             return res.status(400).json({ error: 'markdown string required' });
           }
           meta.description = body.markdown.replace(/^\uFEFF/, '');
+        } else if (tab === 'theory') {
+          if (typeof body.markdown !== 'string') {
+            return res.status(400).json({ error: 'markdown string required' });
+          }
+          ps.theory = body.markdown.replace(/^\uFEFF/, '');
+          meta.problemStatement = ps;
         } else if (tab === 'moat') {
           if (typeof body.markdown !== 'string') {
             return res.status(400).json({ error: 'markdown string required' });
@@ -243,6 +550,29 @@ router.get(
     }
   },
 );
+
+// GET /api/challenges/:id/solution-status — token cost of opening the solution for this user
+router.get('/:id/solution-status', requireInterviewer, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const c = loader.getPublicChallenge(req.params.id);
+    if (!c || !canViewChallenge(req.user, c.visibleTo)) return res.status(404).json({ error: 'challenge not found' });
+    res.json(await solutionStatus(req, c));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/challenges/:id/solution-view — record that the user opened the solution (first view wins)
+router.post('/:id/solution-view', requireInterviewer, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+  try {
+    const c = loader.getPublicChallenge(req.params.id);
+    if (!c || !canViewChallenge(req.user, c.visibleTo)) return res.status(404).json({ error: 'challenge not found' });
+    await recordSolutionView(requestUserId(req), c.id);
+    res.json(await solutionStatus(req, c));
+  } catch (e) {
+    next(e);
+  }
+});
 
 // GET /api/challenges/:id/solution — reference files from MinIO challenges/<id>/solution/
 router.get('/:id/solution', async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {

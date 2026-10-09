@@ -1,0 +1,51 @@
+{
+  "id": "k8s-00-meet-kubectl",
+  "number": 200,
+  "finalized": true,
+  "title": "Meet kubectl",
+  "description": "**SITUATION:**\n\nBefore you deploy anything real, get comfortable with the one tool every Kubernetes lab uses: **kubectl**. It is a command-line client: each command becomes a request to the cluster's **API server**, which reads or changes objects (Pods, Services, …) for you.\n\n**First, what are you managing?** Kubernetes keeps track of **resources** (objects). At a high level here are few resources:\n\n- **Node**: a machine in the cluster that runs your apps.\n- **Pod**: one running copy of your app (a wrapper around its container). This is what `kubectl get pods` lists.\n- **Deployment**: keeps the right number of Pods running and replaces them when they die or when you ship a new version.\n- **Service**: a stable address that sends traffic to your Pods.\n- **ConfigMap / Secret**: settings and passwords handed to your app.\n- **Namespace**: your own folder in the shared cluster, so your objects don't clash with anyone else's.\n\nDon't worry if these are fuzzy right now. Moving forward, each one gets its own lab where you build it for real. For today, the goal is just to learn the tool you'll use to handle all of them: **`kubectl`**.\n\nYour lab namespace already contains two Pods: **`mystery-pod`** and **`delete-me`**. Explore them, create a couple of Pods of your own, and clean up.\n\n**This is a practice lab: there is no Submit and nothing is graded.** Take your time, try things, break things. **Reset** gives you a fresh namespace whenever you want to start over. New to all of this? Read [kubectl: your remote control for the cluster](/play/devops-engineer/kubernetes/read/kubectl-basics) first, or keep it open alongside.\n\n**YOUR TASK:**\n\n1. **Look around.** Run `echo $LEARNER_NS`, `kubectl get nodes`, and `kubectl get pods -o wide`. *Why:* `get` lists objects; it's the first thing you run in any cluster.\n2. **Inspect `mystery-pod`.** Use `kubectl describe pod mystery-pod` and note which **image** it runs. *Why:* `describe` shows details plus the **Events** that explain what happened to an object.\n3. **Read its logs.** Use `kubectl logs mystery-pod` and find the **secret word**. *Why:* logs are how you see what an app is doing, or why it crashed.\n4. **Run a command inside it.** Use `kubectl exec mystery-pod -- cat /tmp/code.txt` to read the **code**. *Why:* `exec` lets you poke around inside a running container.\n5. **Create your own Pod.** Run a Pod named `hello` with image `nginx:1.25` using `kubectl run`, wait until it's Ready, then add the label `stage=warmup`. *Why:* imperative commands are the quickest way to try things.\n6. **Generate YAML, then apply it.** Use `kubectl run web --image=nginx:1.25 --dry-run=client -o yaml` to write `web-pod.yaml`, then create the Pod with `kubectl apply -f web-pod.yaml`. *Why:* every later lab is a YAML file you `apply`; `--dry-run` hands you a correct starting file.\n7. **Clean up.** Delete the Pod `delete-me`.\n8. **Experiment freely.** Try other commands from the blog's cheat sheet, for example `kubectl get pod web -o yaml`, `kubectl explain pod.spec.containers`, or an interactive shell with `kubectl exec -it mystery-pod -- sh` (type `exit` to leave).\n\n**GOOD PRACTICES:**\n\n- Stuck on a command? Add `--help` (for example `kubectl run --help`), or use `kubectl explain pod.spec` to look up a field.\n- Use `kubectl get pods -w` to watch changes live (Ctrl+C to stop).\n- Deleted `mystery-pod` by accident? Click **Reset** to bring it back.\n",
+  "difficulty": "L0",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l0",
+    "kubectl"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Every command is kubectl <verb> <resource> [name] [flags]; your lab namespace is already the default.",
+      "The secret word is in kubectl logs mystery-pod; the code is inside the container at /tmp/code.txt.",
+      "kubectl run web --image=nginx:1.25 --dry-run=client -o yaml > web-pod.yaml prints YAML without creating anything; then kubectl apply -f web-pod.yaml."
+    ],
+    "overview": "Meet kubectl",
+    "brief": "Meet kubectl",
+    "solution": "# Solution — Meet kubectl\n\nA walkthrough of every step in this practice lab. Every command follows the same shape: **`kubectl <verb> <resource> [name] [flags]`**. Your lab namespace is already the default, so you never need `-n`.\n\nDocs: [DevSetu Blog — kubectl: your remote control for the cluster](/play/devops-engineer/kubernetes/read/kubectl-basics) · [kubectl quick reference](https://kubernetes.io/docs/reference/kubectl/quick-reference/)\n\n## 1. Look around\n\n```bash\necho $LEARNER_NS          # the namespace this lab gave you\nkubectl get nodes         # the machines in the cluster\nkubectl get pods          # Pods in your namespace (mystery-pod, delete-me)\nkubectl get pods -o wide  # same list + Pod IP and the node each Pod runs on\n```\n\n`get` is the \"list\" verb: a quick table, one row per object.\n\n## 2. Inspect `mystery-pod`: which image?\n\n```bash\nkubectl describe pod mystery-pod\n```\n\n`describe` is the \"tell me everything\" verb: labels, the container image, ports, and the **Events** at the bottom (scheduling, image pull, start). The image line reads `Image: nginx:1.25`.\n\nThe same value, straight from the object's YAML:\n\n```bash\nkubectl get pod mystery-pod -o yaml               # the full object\nkubectl get pod mystery-pod -o jsonpath='{.spec.containers[0].image}'\n```\n\n## 3. Read the logs: the secret word\n\n```bash\nkubectl logs mystery-pod\n```\n\n`logs` prints what the container wrote to stdout. Look for `The secret word is: ...`. Add `-f` to keep following new lines (Ctrl+C to stop).\n\n## 4. Run a command inside the container: the code\n\n```bash\nkubectl exec mystery-pod -- cat /tmp/code.txt\n```\n\nEverything after `--` runs **inside** the container. For an interactive shell, use `kubectl exec -it mystery-pod -- sh` and type `exit` to leave.\n\n## 5. Create your own Pod, then label it\n\n```bash\nkubectl run hello --image=nginx:1.25 --port=80\nkubectl get pod hello -w                # watch until READY 1/1, then Ctrl+C\nkubectl label pod hello stage=warmup\nkubectl get pods --show-labels\nkubectl get pods -l stage=warmup        # -l filters by label\n```\n\n`kubectl run` is **imperative**: you tell Kubernetes what to do right now, with flags.\n\n## 6. Generate YAML, then apply it\n\n```bash\nkubectl run web --image=nginx:1.25 --port=80 --dry-run=client -o yaml > web-pod.yaml\ncat web-pod.yaml\nkubectl apply -f web-pod.yaml\nkubectl get pod web\n```\n\n`--dry-run=client -o yaml` prints the object **without creating it**, which is the fastest way to get a correct starting manifest. `kubectl apply -f` is **declarative**: the file is the desired state, and you can edit it and apply again. Every later lab works this way.\n\n## 7. Clean up\n\n```bash\nkubectl delete pod delete-me\n```\n\nThat's it: there's nothing to submit. Keep experimenting, and click **Reset** whenever you want a fresh namespace.\n\n## Cheat sheet\n\n| Want to… | Command |\n| --- | --- |\n| List things | `kubectl get pods` · `-o wide` · `--show-labels` · `-l key=value` · `-w` |\n| See details and events | `kubectl describe pod <name>` |\n| See the full object | `kubectl get pod <name> -o yaml` |\n| Read output | `kubectl logs <pod>` · `-f` to follow · `--previous` after a crash |\n| Run inside a container | `kubectl exec <pod> -- <cmd>` · `-it <pod> -- sh` for a shell |\n| Create quickly | `kubectl run` · `kubectl create deployment/configmap/secret ...` |\n| Starter YAML | add `--dry-run=client -o yaml > file.yaml` |\n| Create or update from a file | `kubectl apply -f file.yaml` |\n| Label | `kubectl label pod <name> key=value` |\n| Delete | `kubectl delete pod <name>` · `kubectl delete -f file.yaml` |\n| Look up a field | `kubectl explain pod.spec.containers` |\n",
+    "idLabel": "0",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "7",
+      "requests": {
+        "cpu": "140m",
+        "memory": "224Mi"
+      },
+      "limits": {
+        "cpu": "280m",
+        "memory": "448Mi"
+      }
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "practice": true
+  },
+  "visibleTo": "users",
+  "tokens": 0
+}

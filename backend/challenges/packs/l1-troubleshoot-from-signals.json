@@ -21,5 +21,19 @@
     "overview": "Troubleshoot from signals",
     "brief": "Multi-fault Guestbook stack \u2014 use describe/logs/events/exec only to restore the required Ready state."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "10",
+      "requests": {
+        "cpu": "220m",
+        "memory": "352Mi"
+      },
+      "limits": {
+        "cpu": "440m",
+        "memory": "704Mi"
+      }
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

@@ -1,0 +1,85 @@
+# Elastic learner capacity on top of the labs-k8s base. Nodes carry the same
+# devlabs.io/pool=labs label and shape as labs-k8s (t4g.medium, 42 pods = 38 learner
+# slots), so every node holds the same number of balloon slots. Graviton only.
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: labs
+spec:
+  role: KarpenterNodeRole-devlabs
+  amiSelectorTerms:
+    - alias: al2023@latest
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: devlabs
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: devlabs
+  # Same density as labs-k8s (VPC CNI prefix delegation); keep in sync with
+  # EKS_LABS_MAX_PODS in env.sh. kube-reserved memory = 11 × maxPods + 255 Mi.
+  kubelet:
+    maxPods: 42
+    kubeReserved:
+      cpu: 70m
+      memory: 717Mi
+      ephemeral-storage: 1Gi
+  userData: |
+    MIME-Version: 1.0
+    Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+    --BOUNDARY
+    Content-Type: text/x-shellscript; charset="us-ascii"
+
+    #!/bin/bash
+    # Nothing in the labs uses io_uring, and it is a frequent source of kernel privilege
+    # escalation bugs reachable from containers. Same as the managed groups (nodegroups.sh).
+    printf 'kernel.io_uring_disabled = 2\n' > /etc/sysctl.d/90-devlabs-learner.conf
+    sysctl -p /etc/sysctl.d/90-devlabs-learner.conf
+    --BOUNDARY--
+  # IMDS for the host only: learner pods cannot reach the node role's credentials.
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpPutResponseHopLimit: 1
+    httpTokens: required
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 25Gi
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+  tags:
+    devlabs.io/pool: labs
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: labs-elastic
+spec:
+  template:
+    metadata:
+      labels:
+        devlabs.io/pool: labs
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: labs
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["arm64"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["t4g.medium"]
+      expireAfter: 720h
+  # Cost ceiling across all Karpenter nodes (t4g.medium = 2 vCPU).
+  limits:
+    cpu: "8"
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 2m

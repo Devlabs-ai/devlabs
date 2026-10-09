@@ -1,25 +1,33 @@
-# Solution — Open the Front Desk
+# Solution — Migrate Order Processor
 
-Stay in your lab namespace (kubectl already defaults there). Create Pod `front-desk` with Guestbook frontend labels, an nginx image, and **containerPort 80**.
+Stay in your lab namespace (kubectl already defaults there). Create Pod `order-processor-pod` with container `order-processor`, image `devsetu/order-processor:v1.0`, and **containerPort 8000**.
 
-Docs: [Pods](https://kubernetes.io/docs/concepts/workloads/pods/)
+Docs: [DevSetu Blog — Containers, Runtimes, and Pods](/play/devops-engineer/kubernetes/read/containers-runtimes-pods) · [Pods](https://kubernetes.io/docs/concepts/workloads/pods/)
 
-## Imperative
+## Solution YAML
 
-```bash
-kubectl run front-desk --image=nginx:1.25 --port=80 -l app=guestbook,tier=frontend
-kubectl get pod front-desk
+Save as `order-processor-pod-l1.yaml` (Scratch pad or a file in your lab home):
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: order-processor-pod
+spec:
+  containers:
+    - name: order-processor
+      image: devsetu/order-processor:v1.0
+      ports:
+        - containerPort: 8000
 ```
-
-Wait until `STATUS` is `Running`, then **Submit**.
 
 ## Declarative
 
-Apply `front-desk.yaml` from this folder (or the Scratch pad):
+Apply the manifest, then watch the Pod:
 
 ```bash
-kubectl apply -f front-desk.yaml
-kubectl get pod front-desk -w
+kubectl apply -f order-processor-pod-l1.yaml
+kubectl get pod order-processor-pod -w
 ```
 
-Do not create the Pod in `default`.
+Wait until `STATUS` is `Running` and `READY` is `1/1`, then **Submit**.

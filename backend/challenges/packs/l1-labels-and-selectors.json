@@ -21,5 +21,19 @@
     "overview": "Labels & selectors",
     "brief": "Fix mismatched labels/selectors so the Service or ReplicaSet owns the intended Guestbook pods."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "8",
+      "requests": {
+        "cpu": "160m",
+        "memory": "256Mi"
+      },
+      "limits": {
+        "cpu": "320m",
+        "memory": "512Mi"
+      }
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

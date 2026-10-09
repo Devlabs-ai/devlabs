@@ -1,0 +1,151 @@
+{
+  "id": "ds-07-lsm-read-path",
+  "number": 507,
+  "finalized": true,
+  "title": "Find one key in an LSM tree",
+  "description": "order-processor asks for a single order by ID. Trace the lookup through memtables and SSTables to the newest version.",
+  "difficulty": "L1",
+  "tags": [
+    "data-systems",
+    "storage-engines",
+    "lsm-tree",
+    "bloom-filter",
+    "read-path",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "Writes to an LSM tree are cheap because nothing is updated in place. The cost shows up on reads: the same key may exist in the memtable and in several SSTables, each holding a different version.\n\nThe engine answers that by searching newest to oldest and stopping at the first hit. Bloom filters and block indexes keep it from opening files that can't contain the key.\n\norder-processor just asked for `order_id=88213`. The outline of the lookup is on the board. Fill the blocks. Traps return stale data or read far too much.",
+    "yourTask": "Order the steps of a point lookup in an LSM-tree store, from the memtable to returning a value.",
+    "yourTaskSteps": [
+      "Read every card.",
+      "Fill each empty block from Unused.",
+      "The dashed block is optional.",
+      "Submit."
+    ],
+    "hints": [
+      "Newer data shadows older data. Search in that order.",
+      "A Bloom filter can say 'definitely not here' or 'maybe here'. Never 'definitely here'.",
+      "A delete is a record too."
+    ],
+    "moat": "Setter notes, not shown to learners.\n\nRequired chain: check-memtable → check-immutable → bloom-filter → block-index → read-block → first-hit-wins.\nOptional splice: block-cache on block-index → read-block.\nFive traps."
+  },
+  "platformSpec": {
+    "kicker": "Storage engines · LSM read path",
+    "passMessage": "Newest first, skip what the filters rule out, stop at the first hit.",
+    "pieces": [
+      {
+        "id": "check-memtable",
+        "title": "Check the active memtable",
+        "blurb": "The in-memory memtable holds the most recent writes. If the key is there, as a value or a tombstone, the search ends.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "check-immutable",
+        "title": "Check frozen memtables, newest first",
+        "blurb": "Memtables that are full but not yet flushed to disk are searched next, from newest to oldest.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "check-memtable",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "bloom-filter",
+        "title": "Ask each SSTable's Bloom filter",
+        "blurb": "Walk SSTables from newest to oldest. If a file's Bloom filter says the key is definitely absent, skip that file without reading it.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "check-immutable",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "block-index",
+        "title": "Binary-search the block index",
+        "blurb": "For a file whose filter says 'maybe', the sparse index of first keys per block points to the one block that could hold the key.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "bloom-filter",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "block-cache",
+        "title": "Check the block cache",
+        "blurb": "Recently read blocks are kept in memory. A cache hit skips the disk read entirely. Faster, but not required for a correct answer.",
+        "kind": "mechanism",
+        "gold": "optional",
+        "parent": "block-index",
+        "child": "read-block",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "read-block",
+        "title": "Read the block and search inside it",
+        "blurb": "Load that single data block (a few KB) and look for the key among its sorted entries.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "block-index",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "first-hit-wins",
+        "title": "Return the first version found",
+        "blurb": "The first match is the newest version. Return it, or report 'not found' if it is a tombstone.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "read-block",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "scan-all-max-ts",
+        "title": "Read every SSTable, keep the latest timestamp",
+        "blurb": "Collect the key from every file and return whichever copy has the highest timestamp.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Searching newest first means you can stop at the first hit. Reading every file wastes I/O."
+      },
+      {
+        "id": "oldest-first",
+        "title": "Start with the oldest SSTables",
+        "blurb": "Older files hold most of the data, so search them first to find the key quickly.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "The oldest file might hold a stale version. Searching oldest first returns old data."
+      },
+      {
+        "id": "bloom-definite",
+        "title": "Bloom filter says yes: the key is there",
+        "blurb": "A positive answer from the Bloom filter confirms the key is in that file, so return from it directly.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Bloom filters have false positives. 'Maybe' still means the block must be read and checked."
+      },
+      {
+        "id": "skip-tombstone",
+        "title": "Tombstone found: keep looking in older files",
+        "blurb": "A tombstone carries no value, so continue to older SSTables until a real value turns up.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "A tombstone means the key was deleted. Looking past it would resurrect a deleted order."
+      },
+      {
+        "id": "walk-from-root",
+        "title": "Follow child pointers down from the root page",
+        "blurb": "Start at the root page and follow key-range pointers down to the leaf that holds the key.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "That's a B-tree lookup. An LSM tree searches memtables and sorted files instead."
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

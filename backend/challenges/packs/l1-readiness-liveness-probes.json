@@ -21,5 +21,19 @@
     "overview": "Probes",
     "brief": "Wire readiness and liveness probes so traffic only hits ready pods and stuck processes get restarted."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "7",
+      "requests": {
+        "cpu": "140m",
+        "memory": "224Mi"
+      },
+      "limits": {
+        "cpu": "280m",
+        "memory": "448Mi"
+      }
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

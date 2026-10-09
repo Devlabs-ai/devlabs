@@ -1,0 +1,46 @@
+{
+  "id": "linux-24-loop-over-order-batches",
+  "number": 324,
+  "finalized": true,
+  "title": "Loop Over Order Batches",
+  "description": "**SITUATION:**\n\nPartners drop order batches as CSV files into `/var/spool/orders/incoming/`. Each file has a header row followed by one row per order. Every morning someone counts the orders in each file, writes the numbers in a spreadsheet, and moves the files to `processed/`. Some file names even contain spaces. Script it.\n\n**YOUR TASK:**\n\n1. Write `~/bin/process-batches`. For every `.csv` file in `$ORDER_SPOOL/incoming`, in name order:\n   - print `<file name> <number of orders>` (data rows, not counting the header),\n   - move the file to `$ORDER_SPOOL/processed/`.\n   Then print `TOTAL <sum>`.\n2. If `ORDER_SPOOL` isn't set, default to `/var/spool/orders`.\n3. Use at least one **function**.\n4. In `~/.bashrc`, add `~/bin` to your `PATH` and export `ORDER_SPOOL=/var/spool/orders`.\n5. Run it on the real spool.\n\n**SPEC:**\n\n- `~/bin/process-batches`: executable, owned by learner, defines a function\n- In a new shell, `command -v process-batches` is `/home/learner/bin/process-batches` and `$ORDER_SPOOL` is `/var/spool/orders`\n- Output, for example:\n  ```\n  batch-0001.csv 17\n  batch 0002 (retry).csv 31\n  TOTAL 48\n  ```\n- Only `.csv` files are batches; other files stay in `incoming`\n- With nothing waiting, the output is just `TOTAL 0`\n- The real spool's `incoming` is empty afterwards\n\n**GOOD PRACTICES:**\n\n- Quote every variable that holds a file name.\n- `shopt -s nullglob` stops an unmatched `*.csv` from turning into a literal file name.\n- After editing `~/.bashrc`, run `source ~/.bashrc` to apply it to your current shell.\n",
+  "difficulty": "L2",
+  "tags": [
+    "linux",
+    "l2",
+    "bash",
+    "scripting"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Loop Over Order Batches",
+    "brief": "Loop Over Order Batches",
+    "solution": "# Solution — Loop Over Order Batches\n\nLoops let a script handle any number of files. Functions name a step so the loop stays readable. Environment variables let callers change where a script works without editing it. `~/.bashrc` runs at the start of every interactive shell, which makes it the place for your `PATH` and personal settings.\n\nDocs: `man bash` (Looping Constructs, Shell Functions, Parameter Expansion, INVOCATION)\n\n## The script\n\n```bash\nmkdir -p ~/bin\ncat > ~/bin/process-batches <<'EOF'\n#!/bin/bash\n# process-batches — count and archive order batch CSVs from $ORDER_SPOOL/incoming.\nspool=\"${ORDER_SPOOL:-/var/spool/orders}\"\n\ncount_orders() {\n  local lines\n  lines=$(wc -l < \"$1\")\n  echo $((lines - 1))          # minus the header row\n}\n\nshopt -s nullglob              # no matches → empty list, not a literal \"*.csv\"\ntotal=0\nfor f in \"$spool\"/incoming/*.csv; do\n  n=$(count_orders \"$f\")\n  echo \"$(basename \"$f\") $n\"\n  total=$((total + n))\n  mv \"$f\" \"$spool/processed/\"\ndone\necho \"TOTAL $total\"\nEOF\nchmod +x ~/bin/process-batches\n```\n\n- `${ORDER_SPOOL:-/var/spool/orders}` uses the variable if it's set and the default otherwise.\n- `\"$f\"` in quotes keeps `batch 0002 (retry).csv` as one argument.\n- Globs expand in sorted order.\n\n## PATH and ORDER_SPOOL in ~/.bashrc\n\n```bash\ncat >> ~/.bashrc <<'EOF'\nexport PATH=\"$HOME/bin:$PATH\"\nexport ORDER_SPOOL=/var/spool/orders\nEOF\nsource ~/.bashrc                 # apply to the current shell\ncommand -v process-batches       # /home/learner/bin/process-batches\n```\n\n`export` makes a variable visible to programs you start, not just to the shell itself.\n\n## Run it\n\n```bash\nprocess-batches\nls /var/spool/orders/incoming /var/spool/orders/processed\nprocess-batches                  # TOTAL 0\n```\n\nThen **Submit**.\n",
+    "idLabel": "24",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

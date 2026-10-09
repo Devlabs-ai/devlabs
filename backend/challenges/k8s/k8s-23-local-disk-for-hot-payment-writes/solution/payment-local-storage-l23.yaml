@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: payment-local-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Mi
+  storageClassName: local-storage
+  # Platform PV for this lab — name ends with your namespace ($LEARNER_NS)
+  volumeName: REPLACE_WITH_PLATFORM_PV_ENDING_IN_LEARNER_NS
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-handler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payment-handler
+  template:
+    metadata:
+      labels:
+        app: payment-handler
+    spec:
+      containers:
+        - name: payment-handler
+          image: devsetu/payment-handler:v1.0
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: payment-logs
+              mountPath: /var/log/payments
+      volumes:
+        - name: payment-logs
+          persistentVolumeClaim:
+            claimName: payment-local-pvc

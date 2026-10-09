@@ -21,5 +21,19 @@
     "overview": "Pod debugging",
     "brief": "A CrashLoopBackOff Guestbook pod is already in-cluster \u2014 find the fault and leave one Ready pod."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "5",
+      "requests": {
+        "cpu": "100m",
+        "memory": "160Mi"
+      },
+      "limits": {
+        "cpu": "200m",
+        "memory": "320Mi"
+      }
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

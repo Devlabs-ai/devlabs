@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getAuthHeader } from './authApi';
+import { labClientId } from './labTabLease';
 import type { SparkProjectFiles } from '../fixtures/dailyProductSalesL1';
 import type { SparkJobRecord } from '../types/domain';
 
@@ -26,8 +27,13 @@ export async function startSparkSession(
   challengeId: string,
   starterFiles?: SparkProjectFiles | null,
   entrypoint?: string,
+  opts: { force?: boolean } = {},
 ): Promise<SparkSessionStartResult> {
-  const body: Record<string, unknown> = { challengeId };
+  const body: Record<string, unknown> = {
+    challengeId,
+    clientId: labClientId(),
+    force: Boolean(opts.force),
+  };
   if (starterFiles && Object.keys(starterFiles).length > 0) {
     body.starterFiles = starterFiles;
   }
@@ -218,10 +224,13 @@ function rewriteWsUrl(url: string | null | undefined): string | null {
   }
 }
 
-export async function startK8sSession(challengeId: string): Promise<K8sSessionStartResult> {
+export async function startK8sSession(
+  challengeId: string,
+  opts: { force?: boolean } = {},
+): Promise<K8sSessionStartResult> {
   const { data } = await axios.post(
     '/api/session/k8s/start',
-    { challengeId },
+    { challengeId, clientId: labClientId(), force: Boolean(opts.force) },
     { headers: getAuthHeader() },
   );
   const payload = data as K8sSessionStartResult;
@@ -231,16 +240,38 @@ export async function startK8sSession(challengeId: string): Promise<K8sSessionSt
   };
 }
 
-export async function execK8sCommand(
-  sessionId: string,
-  command: string,
-): Promise<{ code: number; stdout: string; stderr: string; k8sNamespace?: string }> {
-  const { data } = await axios.post(
-    `/api/session/${sessionId}/k8s/exec`,
-    { command },
-    { headers: getAuthHeader() },
-  );
-  return data as { code: number; stdout: string; stderr: string; k8sNamespace?: string };
+export interface K8sLabAvailability {
+  available: boolean;
+  message: string | null;
+}
+
+/** Whether a cluster lab's node pool is up; checked before starting a session. */
+export async function fetchK8sAvailability(challengeId: string): Promise<K8sLabAvailability> {
+  const { data } = await axios.get('/api/session/k8s/availability', {
+    params: { challengeId },
+    headers: getAuthHeader(),
+  });
+  const d = data as Partial<K8sLabAvailability>;
+  return { available: d.available !== false, message: d.message ?? null };
+}
+
+export interface K8sCapacityWait {
+  pod: string;
+  waitingSeconds: number;
+}
+
+export interface K8sCapacityState {
+  /** Learner pods waiting for a node. */
+  waiting: K8sCapacityWait[];
+  /** Seconds the lab open has been held for its reserved capacity, or null. */
+  reservingSeconds: number | null;
+}
+
+/** Capacity waits for the learner's lab (works before the lab has a session id). */
+export async function fetchK8sCapacity(): Promise<K8sCapacityState> {
+  const { data } = await axios.get('/api/session/k8s/capacity', { headers: getAuthHeader() });
+  const d = data as Partial<K8sCapacityState>;
+  return { waiting: d.waiting || [], reservingSeconds: d.reservingSeconds ?? null };
 }
 
 export async function gradeK8sSession(
@@ -288,6 +319,89 @@ export async function fetchK8sSubmissions(sessionId: string): Promise<K8sSubmiss
     headers: getAuthHeader(),
   });
   return ((data as { submissions?: K8sSubmissionRecord[] }).submissions || []);
+}
+
+export interface K8sLabFile {
+  name: string;
+  /** Relative to the lab home, e.g. "manifests/web.yaml". */
+  path: string;
+  size: number;
+  updatedAt: number;
+}
+
+export interface K8sLabDirListing {
+  dir: string;
+  folders: string[];
+  files: K8sLabFile[];
+}
+
+export async function listK8sDir(sessionId: string, dir: string): Promise<K8sLabDirListing> {
+  const { data } = await axios.get(`/api/session/${sessionId}/k8s/files`, {
+    headers: getAuthHeader(),
+    params: { dir },
+  });
+  return data as K8sLabDirListing;
+}
+
+export async function listK8sFolders(sessionId: string): Promise<string[]> {
+  const { data } = await axios.get(`/api/session/${sessionId}/k8s/folders`, {
+    headers: getAuthHeader(),
+  });
+  return ((data as { folders?: string[] }).folders || []);
+}
+
+export async function createK8sFolder(sessionId: string, path: string): Promise<string> {
+  const { data } = await axios.post(
+    `/api/session/${sessionId}/k8s/folders`,
+    { path },
+    { headers: getAuthHeader() },
+  );
+  return (data as { path: string }).path;
+}
+
+export async function readK8sFile(sessionId: string, path: string): Promise<string> {
+  const { data } = await axios.get(`/api/session/${sessionId}/k8s/file`, {
+    headers: getAuthHeader(),
+    params: { path },
+  });
+  return (data as { content: string }).content;
+}
+
+export async function saveK8sFile(sessionId: string, path: string, content: string): Promise<K8sLabFile> {
+  const { data } = await axios.put(
+    `/api/session/${sessionId}/k8s/file`,
+    { path, content },
+    { headers: getAuthHeader() },
+  );
+  return (data as { file: K8sLabFile }).file;
+}
+
+/** Rename or move a file or folder. */
+export async function renameK8sEntry(
+  sessionId: string,
+  from: string,
+  to: string,
+): Promise<{ path: string; kind: 'file' | 'folder' }> {
+  const { data } = await axios.post(
+    `/api/session/${sessionId}/k8s/files/rename`,
+    { from, to },
+    { headers: getAuthHeader() },
+  );
+  return data as { path: string; kind: 'file' | 'folder' };
+}
+
+export async function deleteK8sFolder(sessionId: string, path: string): Promise<void> {
+  await axios.delete(`/api/session/${sessionId}/k8s/folders`, {
+    headers: getAuthHeader(),
+    params: { path },
+  });
+}
+
+export async function deleteK8sFile(sessionId: string, path: string): Promise<void> {
+  await axios.delete(`/api/session/${sessionId}/k8s/file`, {
+    headers: getAuthHeader(),
+    params: { path },
+  });
 }
 
 export async function resetK8sSession(sessionId: string): Promise<void> {

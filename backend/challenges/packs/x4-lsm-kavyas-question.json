@@ -1,0 +1,156 @@
+{
+  "id": "x4-lsm-kavyas-question",
+  "number": 594,
+  "finalized": true,
+  "title": "X4 · Kavya’s question: why are writes so fast?",
+  "description": "A new teammate spots something odd on the dashboard. Answer her on the whiteboard by drawing what happens to each write, now and later.",
+  "difficulty": "L1",
+  "tags": [
+    "data-systems",
+    "board-experiment",
+    "lsm-tree",
+    "story-teammate",
+    "campaign",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "**#orders-eng, Monday 10:14**\n\n> **Kavya** (joined last week): Dumb question. orders-db p99 write latency is a flat **2 ms**, all day. But the disk graph has **huge write bursts every few minutes** and **constant background reads**. If the disk is that busy, why don’t writes slow down?\n\n> **Neha**: Not dumb at all. Whoever’s free, grab the whiteboard and walk her through it.\n\nYou’re free. Draw the life of one write, `PUT order:88213 → status=paid`, so Kavya can see **which part is the 2 ms** and **which parts are the bursts and the background reads**.",
+    "yourTask": "Place six cards so Kavya can see the fast part and the background part of every write.",
+    "yourTaskSteps": [
+      "Each block’s prompt says whether it’s the 2 ms part or the background part.",
+      "One optional block exists.",
+      "Submit when you think Kavya would get it."
+    ],
+    "hints": [
+      "The 2 ms is one sequential append plus a memory insert.",
+      "The bursts are big files being written. The background reads are files being merged."
+    ],
+    "moat": "Classic. Same chain as ds-01. Unlocks X5."
+  },
+  "platformSpec": {
+    "kicker": "Experiment X4 · Teammate question · Unlocks X5",
+    "passMessage": "Kavya: “Oh. The 2 ms is just the log append and the memtable. The bursts are flushes and the reads are compaction. Got it.” X5 is now unlocked.",
+    "pieces": [
+      {
+        "id": "wal-append",
+        "kind": "stage",
+        "title": "Append to the WAL and fsync",
+        "blurb": "One small sequential write at the end of a file. Fast.",
+        "prompt": "The 2 ms · part 1",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "memtable-insert",
+        "kind": "mechanism",
+        "title": "Insert into the memtable, reply OK",
+        "blurb": "A memory insert into a sorted tree. Microseconds.",
+        "prompt": "The 2 ms · part 2",
+        "gold": "required",
+        "parent": "wal-append",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "memtable-freeze",
+        "kind": "stage",
+        "title": "Freeze the full memtable, start a new one",
+        "blurb": "Every 64 MB. New writes go straight to the new memtable, so nobody waits.",
+        "prompt": "Background · every 64 MB",
+        "gold": "required",
+        "parent": "memtable-insert",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "flush-sstable",
+        "kind": "stage",
+        "title": "Flush 64 MB to a new SSTable",
+        "blurb": "One big sequential write. This is a burst on Kavya’s graph.",
+        "prompt": "Background · the write bursts",
+        "gold": "required",
+        "parent": "memtable-freeze",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "bloom-index",
+        "kind": "mechanism",
+        "title": "Write a Bloom filter and index",
+        "blurb": "Small extra file next to the SSTable for faster reads.",
+        "prompt": "Optional · faster reads",
+        "gold": "optional",
+        "parent": "flush-sstable",
+        "child": "wal-discard",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "wal-discard",
+        "kind": "stage",
+        "title": "Delete the WAL segment",
+        "blurb": "Its records are all in the SSTable now.",
+        "prompt": "Background · clean up",
+        "gold": "required",
+        "parent": "flush-sstable",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "compaction",
+        "kind": "mechanism",
+        "title": "Compaction reads and merges SSTables",
+        "blurb": "Reads several files and writes merged ones. These are the constant background reads.",
+        "prompt": "Background · the constant reads",
+        "gold": "required",
+        "parent": "wal-discard",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "update-in-place",
+        "kind": "stage",
+        "title": "Overwrite the order’s page on disk",
+        "blurb": "A random write to wherever the old value lives.",
+        "trapIfPlaced": "That’s a B-tree. If LSM did this, writes would be slow random I/O.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "page-split",
+        "kind": "mechanism",
+        "title": "Split the full page",
+        "blurb": "Rebalance the tree when a page overflows.",
+        "trapIfPlaced": "B-tree behaviour. No pages in an LSM tree.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "ack-before-log",
+        "kind": "stage",
+        "title": "Reply OK first, write the log later",
+        "blurb": "Even lower latency.",
+        "trapIfPlaced": "Faster, but a crash loses acknowledged orders.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "flush-on-every-write",
+        "kind": "stage",
+        "title": "Write an SSTable for every PUT",
+        "blurb": "Keeps the memtable tiny.",
+        "trapIfPlaced": "Thousands of tiny files a second. Writes and reads would both crawl.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "compaction-blocks",
+        "kind": "mechanism",
+        "title": "Pause writes during compaction",
+        "blurb": "Writes wait for the merge.",
+        "trapIfPlaced": "If that happened, Kavya would see latency spikes, not a flat 2 ms.",
+        "gold": "tray",
+        "parent": null
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

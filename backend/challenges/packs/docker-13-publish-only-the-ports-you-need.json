@@ -1,0 +1,47 @@
+{
+  "id": "docker-13-publish-only-the-ports-you-need",
+  "number": 413,
+  "finalized": true,
+  "title": "Publish Only the Ports You Need",
+  "description": "**SITUATION:**\n\nA port scan of the order box found payment-handler (8000) and notification-service (8090) wide open to the whole network. Only order-processor is meant to face customers. Admins on the box still need notification-service's API, but nobody else should reach it.\n\nAll three services run on the `orders-net` network.\n\n**YOUR TASK:**\n\nRepublish the services so each one is reachable only by who needs it.\n\n**SPEC:**\n\n- `order-processor`: published on `8080` on all interfaces (unchanged)\n- `notification-service`: image `devsetu/notification-service:v1.1`, published on **`127.0.0.1:8090` only**\n- `payment-handler`: image `devsetu/payment-handler:v1.1`, **not published at all**\n- All three running on `orders-net`; order-processor still reaches `http://payment-handler:8000`\n- From the box's own network address, only 8080 answers\n\n**GOOD PRACTICES:**\n\n- Containers on the same network reach each other on any port: publishing is only for traffic from outside Docker.\n- `-p 8090:8080` means every interface; `-p 127.0.0.1:8090:8080` means only the box itself.\n- `docker port <name>` and `docker ps` show what's published where.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "networking",
+    "ports",
+    "security"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Publish Only the Ports You Need",
+    "brief": "Publish Only the Ports You Need",
+    "solution": "# Solution — Publish Only the Ports You Need\n\nContainers on the same network talk to each other directly, on any port. **Publishing** (`-p`) is only for traffic coming from **outside** Docker: other machines, or the host itself. Every published port is something that can be scanned and attacked, so publish only what users need, and only on the interface they come from.\n\nDocs: [Published ports](https://docs.docker.com/engine/network/port-publishing/)\n\n## See what's exposed\n\n```bash\ndocker ps --format 'table {{.Names}}\\t{{.Ports}}'\n# payment-handler        0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp\n# notification-service   0.0.0.0:8090->8080/tcp, ...\ndocker port notification-service\nhostname -I                          # the box's own address\ncurl http://$(hostname -I | awk '{print $1}'):8000/health   # payments, open to the network\n```\n\n`-p 8000:8000` means **0.0.0.0** (every interface, IPv4 and IPv6): anyone who can reach the machine can reach the container. Docker also writes its own firewall rules for published ports, so a host firewall like `ufw` often **doesn't** block them.\n\n## Recreate with the right ports\n\nPorts are fixed when a container is created, so recreate the two that are wrong:\n\n```bash\ndocker rm -f payment-handler notification-service\ndocker run -d --name payment-handler --network orders-net devsetu/payment-handler:v1.1\ndocker run -d --name notification-service --network orders-net \\\n  -p 127.0.0.1:8090:8080 devsetu/notification-service:v1.1\n```\n\n- **payment-handler**: no `-p` at all. order-processor reaches it as `payment-handler:8000` over `orders-net`; nothing else needs it.\n- **notification-service**: `127.0.0.1:` binds the published port to the loopback interface only. Admins on the box can use it; other machines can't.\n- **order-processor** keeps `-p 8080:8000`: it's the one service customers call.\n\n## Check from both sides\n\n```bash\nIP=$(hostname -I | awk '{print $1}')\ncurl -s -o /dev/null -w '%{http_code}\\n' http://$IP:8080/health      # 200\ncurl -s -o /dev/null -w '%{http_code}\\n' --max-time 3 http://$IP:8090/health   # 000: refused\ncurl -s -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:8090/health # 200\ndocker exec order-processor python -c \"import urllib.request as u; print(u.urlopen('http://payment-handler:8000/health').read())\"\n```\n\nThis is the same idea as a Kubernetes Service type: `ClusterIP` (internal only) for most services, `NodePort` / `LoadBalancer` for the few that face users.\n\nThen **Submit**.\n",
+    "idLabel": "13",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

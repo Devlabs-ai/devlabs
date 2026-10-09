@@ -1,0 +1,4 @@
+replicaCount: 3
+image:
+  repository: devsetu/notification-service
+  tag: "v1.1"

@@ -1,0 +1,109 @@
+# Elastic Linux-box capacity on top of the labs-linux managed node group (the always-on
+# base, env.sh). Karpenter buys a node only when a box is Pending (base full) and removes it
+# once empty. Same label, taint and shape as the base, so the NRI plugin and boxes treat the
+# two alike; boxes prefer the base (devlabs.io/tier=base, linuxBox.ts). Tainted so
+# Kubernetes-lab pods and balloons never land here.
+#
+# Boxes run user-namespaced (hostUsers: false), which needs containerd 2 and a kernel with
+# idmapped mounts; AL2023 provides both. Graviton only (images are multi-arch).
+#
+# One box requests 25m / 64Mi (limit 250m / 256Mi, backend/workspace/linuxBox.ts). On a
+# t4g.medium, memory requests cap it at ~43 boxes; maxPods 50 leaves 45 slots after the five
+# DaemonSets. kube-reserved memory = 11 × maxPods + 255 Mi.
+# The node allows only ~30k threads in total, so podPidsLimit (set through userData, as the
+# kubelet block has no field for it) keeps one box's fork bomb from starving the others.
+# Keep maxPods / kubeReserved / podPidsLimit / disk in sync with EKS_LINUX_* in env.sh.
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: labs-linux-elastic
+spec:
+  role: KarpenterNodeRole-devlabs
+  amiSelectorTerms:
+    - alias: al2023@latest
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: devlabs
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: devlabs
+  kubelet:
+    maxPods: 50
+    kubeReserved:
+      cpu: 70m
+      memory: 805Mi
+      ephemeral-storage: 1Gi
+  userData: |
+    MIME-Version: 1.0
+    Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+    --BOUNDARY
+    Content-Type: application/node.eks.aws
+
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      kubelet:
+        config:
+          podPidsLimit: 512
+    --BOUNDARY
+    Content-Type: text/x-shellscript; charset="us-ascii"
+
+    #!/bin/bash
+    # Nothing in the labs uses io_uring, and it is a frequent source of kernel privilege
+    # escalation bugs reachable from containers. Same as the managed groups (nodegroups.sh).
+    printf 'kernel.io_uring_disabled = 2\n' > /etc/sysctl.d/90-devlabs-learner.conf
+    sysctl -p /etc/sysctl.d/90-devlabs-learner.conf
+    --BOUNDARY--
+  # IMDS for the host only: learner pods cannot reach the node role's credentials.
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpPutResponseHopLimit: 1
+    httpTokens: required
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 30Gi
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+  tags:
+    devlabs.io/pool: linux
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: labs-linux-elastic
+spec:
+  template:
+    metadata:
+      labels:
+        devlabs.io/pool: linux
+        devlabs.io/tier: elastic
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: labs-linux-elastic
+      taints:
+        - key: devlabs.io/pool
+          value: linux
+          effect: NoSchedule
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["arm64"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["t4g.medium"]
+      expireAfter: 720h
+  # Up to 2 extra t4g.medium (2 vCPU each) on top of the base.
+  limits:
+    cpu: "4"
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 5m

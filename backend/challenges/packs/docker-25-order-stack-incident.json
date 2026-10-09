@@ -1,0 +1,47 @@
+{
+  "id": "docker-25-order-stack-incident",
+  "number": 425,
+  "finalized": true,
+  "title": "Order Stack Incident",
+  "description": "**SITUATION:**\n\n**INC-2041**: after Friday's deploy, the QuickByte order stack on the order box is down. Customers get connection errors on port 8080. The on-call notes are in `~/order-stack/INCIDENT.txt`, and the stack is defined in `~/order-stack/compose.yaml`.\n\nThere's more than one thing wrong.\n\n**YOUR TASK:**\n\nGet the order stack back up from its Compose file, healthy, and taking orders on 8080.\n\n**SPEC:**\n\n- `~/answers/port-thief`: the name of the container that was holding port 8080, which must be **gone**\n- `compose.yaml` is valid; payment-handler runs the version production runs; order-processor still waits for **healthy** payment-handler and notification-service\n- `docker compose up -d --wait` brings the stack up from nothing (the grader recreates it from the file)\n- payment-handler and notification-service are **healthy**; order-processor reaches both by name\n- `http://127.0.0.1:8080` is order-processor, and orders follow `MIN_ORDER_VALUE` from `order-processor.env`\n\n**GOOD PRACTICES:**\n\n- Observe first: `docker ps -a`, `docker compose ps -a`, `docker compose logs`.\n- Fix one error at a time; the next one is often hidden behind it.\n- `docker inspect --format '{{json .State.Health}}'` explains an unhealthy container.\n",
+  "difficulty": "L2",
+  "tags": [
+    "docker",
+    "l2",
+    "capstone",
+    "compose",
+    "troubleshooting"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Order Stack Incident",
+    "brief": "Order Stack Incident",
+    "solution": "# Solution — Order Stack Incident\n\nNo new commands here: this is the whole module in one outage. The habit that matters is the order you work in: **observe, read the error, fix one thing, check again**, instead of changing five things and hoping.\n\n## 1. What's on the box?\n\n```bash\ncd ~/order-stack\ncat INCIDENT.txt\ndocker ps -a\ndocker compose ps -a\n```\n\n`debug-nginx` is up with `0.0.0.0:8080->80/tcp`, and nothing from the order stack is running.\n\n## 2. Try to start the stack and read the first error\n\n```bash\ndocker compose up -d\n# Error response from daemon: manifest for devsetu/payment-handler:v1.3 not found\n```\n\nINCIDENT.txt says production runs **v1.1**. Fix the tag in compose.yaml and try again:\n\n```bash\nsed -i 's#devsetu/payment-handler:v1.3#devsetu/payment-handler:v1.1#' compose.yaml\ndocker compose up -d\n# dependency failed to start: container order-stack-notification-service-1 is unhealthy\n```\n\n## 3. The unhealthy dependency\n\n```bash\ndocker inspect --format '{{json .State.Health.Log}}' order-stack-notification-service-1 | jq '.[-1].Output'\n# ConnectionRefusedError ... 127.0.0.1:8000\n```\n\nnotification-service listens on **8080** (`EXPOSE 8080` in its image, and INCIDENT.txt says so too). Its healthcheck probes 8000. Change the healthcheck URL to `http://127.0.0.1:8080/health`.\n\n## 4. The port\n\n```bash\ndocker compose up -d\n# Bind for 0.0.0.0:8080 failed: port is already allocated\ndocker ps --filter publish=8080        # debug-nginx\necho debug-nginx > ~/answers/port-thief\ndocker rm -f debug-nginx\n```\n\n`docker stop` alone isn't enough: it has `--restart always`, so it would come back on the next Docker restart.\n\n## 5. order-processor can't reach payments\n\n```bash\ndocker compose up -d\ndocker compose exec order-processor python -c \\\n  \"import urllib.request as u; print(u.urlopen('http://payment-handler:8000/health').read())\"\n# Name or service not known\ndocker network inspect order-stack_orders-net -f '{{range .Containers}}{{.Name}} {{end}}'\n```\n\npayment-handler sits alone on `payments-net`. Containers only resolve names of containers on a **shared** network. Put payment-handler on `orders-net` too (or add `payments-net` to order-processor).\n\n## The fixed compose.yaml\n\n```yaml\nservices:\n  payment-handler:\n    image: devsetu/payment-handler:v1.1\n    restart: unless-stopped\n    networks: [orders-net, payments-net]\n    healthcheck:\n      test: [\"CMD\", \"python\", \"-c\", \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)\"]\n      interval: 5s\n      timeout: 3s\n      retries: 3\n\n  notification-service:\n    image: devsetu/notification-service:v1.1\n    restart: unless-stopped\n    networks: [orders-net]\n    healthcheck:\n      test: [\"CMD\", \"python\", \"-c\", \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)\"]\n      interval: 5s\n      timeout: 3s\n      retries: 3\n\n  order-processor:\n    image: devsetu/order-processor:v1.2\n    restart: unless-stopped\n    ports:\n      - \"8080:8000\"\n    env_file: order-processor.env\n    networks: [orders-net]\n    depends_on:\n      payment-handler:\n        condition: service_healthy\n      notification-service:\n        condition: service_healthy\n\nnetworks:\n  orders-net:\n  payments-net:\n```\n\n## 6. Verify like a customer\n\n```bash\ndocker compose up -d --wait\ndocker compose ps\ncurl -s -X POST http://127.0.0.1:8080/orders -H 'Content-Type: application/json' \\\n  -d '{\"items\":[\"masala-dosa\"],\"total\":99}'\n```\n\nFor the post-mortem: four separate causes (a tag that was never published, a probe on the wrong port, a forgotten container, a network mismatch), each one hidden behind the one before it.\n\nThen **Submit**. The grader recreates the stack from compose.yaml.\n",
+    "idLabel": "25",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 240
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

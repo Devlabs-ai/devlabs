@@ -1,0 +1,56 @@
+{
+  "id": "k8s-22-dynamic-disks-via-storageclass",
+  "number": 222,
+  "finalized": true,
+  "title": "Dynamic Disks via StorageClass",
+  "description": "**SITUATION:**\n\nEarlier, someone had to **hand-register** archive disk before an app could use it. That does not scale when every team needs disks every week. A **StorageClass** is the catalog entry: when a PVC asks for that class, the cluster can **provision** a real disk automatically — no static PV YAML.\n\nPlatform has already registered a StorageClass for this lab (you will not create it). Your job is to **request** storage with a PVC that points at that class, mount it in a small helper Pod, and confirm the claim **Binds** without hand-creating a PersistentVolume.\n\n[DevSetu Blog — Volumes, PVs, PVCs, and StorageClasses](/play/devops-engineer/kubernetes/read/volumes-pvs-pvcs-storageclasses)\n\n**YOUR TASK:**\n\n1. The full StorageClass name is intentionally not printed in this brief. **List** StorageClasses in the cluster and select the one whose **name ends with your lab namespace** (`$LEARNER_NS`).\n2. On that class, read its annotations for **size** and **mount path** — use those values in your YAML (do not guess).\n3. Create a **PVC** that uses that class name + size, plus consumer Pod `cache-writer` that mounts at the annotated path.\n4. Verify the claim becomes **Bound** (the provisioner created the disk — you did not hand-create a PV).\n\n**SPEC:**\n\n- StorageClass: name **suffix** is your lab namespace (`$LEARNER_NS`). Shape: `…-<your-namespace>`. Find it with `kubectl get sc` / `describe`.\n- From that StorageClass, use:\n  - `metadata.name` → PVC `storageClassName`\n  - annotation `quickbyte.ai/size-hint` → PVC `resources.requests.storage`\n  - annotation `quickbyte.ai/mount-path` → Pod volume mount path\n- PVC name: `order-cache-pvc`\n- Access modes: `[\"ReadWriteOnce\"]`\n- Consumer Pod `cache-writer`: image `busybox:1.36`, volume name `cache`, command `sleep 3600`, mount path = the SC annotation\n\n**GOOD PRACTICES:**\n\n- Manifest: `order-cache-pvc-l22.yaml` (PVC + consumer Pod).\n- Do **not** create, update, or delete a StorageClass or PersistentVolume in this challenge.\n- Do **not** hand-create a PersistentVolume — let the class provision it.\n- Work only in your lab namespace for namespaced objects.\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "storage"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "kubectl get sc — pick the class whose name ends with $LEARNER_NS, then describe it for size-hint and mount-path.",
+      "Wire those annotation values into the PVC and Pod; do not hard-code guessed paths or sizes.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Dynamic Disks via StorageClass",
+    "brief": "Dynamic Disks via StorageClass",
+    "solution": "# Solution — Dynamic Disks via StorageClass\n\nA StorageClass is already in the cluster for this lab. Find it by **namespace suffix**,\nread its annotated size/mount hints, then create a PVC + consumer Pod. Do not create\nor edit the StorageClass.\n\nDocs: [DevSetu Blog — Volumes, PVs, PVCs, and StorageClasses](/play/devops-engineer/kubernetes/read/volumes-pvs-pvcs-storageclasses) · [StorageClasses](https://kubernetes.io/docs/concepts/storage/storage-classes/)\n\n## 1. Find the StorageClass for this lab\n\n```bash\nkubectl get sc\n# name ends with $LEARNER_NS (e.g. …-ns-admin)\nSC=\"$(kubectl get sc -o jsonpath='{range .items[*]}{.metadata.name}{\"\\n\"}{end}' \\\n  | grep -E -- \"-${LEARNER_NS}$\" | head -1)\"\necho \"SC=$SC\"\nkubectl describe sc \"$SC\"\n```\n\n## 2. Read size and mount path from annotations\n\n```bash\nSIZE=\"$(kubectl get sc \"$SC\" -o jsonpath='{.metadata.annotations.quickbyte\\.ai/size-hint}')\"\nMOUNT=\"$(kubectl get sc \"$SC\" -o jsonpath='{.metadata.annotations.quickbyte\\.ai/mount-path}')\"\necho \"storageClassName=$SC size=$SIZE mountPath=$MOUNT\"\n```\n\n## 3. Solution YAML\n\nSave as `order-cache-pvc-l22.yaml` (substitute the values you found):\n\n```yaml\napiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: order-cache-pvc\nspec:\n  accessModes:\n    - ReadWriteOnce\n  resources:\n    requests:\n      storage: <size-hint from SC>\n  storageClassName: <discovered SC name>\n---\napiVersion: v1\nkind: Pod\nmetadata:\n  name: cache-writer\nspec:\n  containers:\n    - name: writer\n      image: busybox:1.36\n      command: [\"sleep\", \"3600\"]\n      volumeMounts:\n        - name: cache\n          mountPath: <mount-path from SC>\n  volumes:\n    - name: cache\n      persistentVolumeClaim:\n        claimName: order-cache-pvc\n```\n\n## Declarative\n\n```bash\nkubectl apply -f order-cache-pvc-l22.yaml\nkubectl get pvc order-cache-pvc\nkubectl get pod cache-writer\n```\n\nWait for the PVC to become **Bound** when CSI can provision (Pod must schedule first because of `WaitForFirstConsumer`), then **Submit**.\n",
+    "idLabel": "22",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "4",
+      "requests": {
+        "cpu": "80m",
+        "memory": "128Mi"
+      },
+      "limits": {
+        "cpu": "160m",
+        "memory": "256Mi"
+      }
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

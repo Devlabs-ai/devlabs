@@ -1,210 +1,396 @@
 import React, { useEffect, useRef, useState } from 'react';
-import BrandMark from '../components/BrandMark';
 import MarketingPageShell, { useMarketing } from '../components/MarketingPageShell';
-import type { UserRecord } from '../types/domain';
+import {
+  ProjectsAnim,
+  TracksAnim,
+  WhiteboardAnim,
+} from '../components/LandingFeatureAnims';
+import { Link, useLocation } from 'react-router-dom';
+import { LAUNCH_OFFER, PRICING_PATH } from '../constants/pricing';
+import { useInView } from '../hooks/useInView';
+import WaitlistForm from '../components/WaitlistForm';
 
 interface LandingPageProps {
-  onLoggedIn: (user: UserRecord) => void;
+  onSignIn: () => void;
+  onGetStarted: () => void;
 }
 
-/** Adds .is-inview when scrolled into view (for staggered slide-in). */
-function useInView<T extends HTMLElement>(rootMargin = '0px 0px -12% 0px'): {
-  ref: React.RefObject<T>;
-  inView: boolean;
-} {
-  const ref = useRef<T>(null as unknown as T);
-  const [inView, setInView] = useState(false);
+type HeroLabLine =
+  | { kind: 'comment'; text: string }
+  | { kind: 'cmd'; text: string }
+  | { kind: 'flag'; text: string }
+  | { kind: 'blank' }
+  | { kind: 'ok'; text: string };
 
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || inView) return undefined;
-    if (typeof IntersectionObserver === 'undefined') {
-      setInView(true);
-      return undefined;
-    }
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) {
-          setInView(true);
-          io.disconnect();
-        }
-      },
-      { root: null, rootMargin, threshold: 0.12 },
+const HERO_LABS: ReadonlyArray<{
+  id: string;
+  title: string;
+  accent: string;
+  lines: ReadonlyArray<HeroLabLine>;
+}> = [
+  {
+    id: 'spark',
+    title: 'lab · spark-skew-v2',
+    accent: '#38bdf8',
+    lines: [
+      { kind: 'comment', text: '# validate against live cluster' },
+      { kind: 'cmd', text: 'spark-submit --master k8s://... \\' },
+      { kind: 'flag', text: '  --conf spark.executor.memory=4g \\' },
+      { kind: 'flag', text: '  jobs/fix_skew.py' },
+      { kind: 'blank' },
+      { kind: 'ok', text: 'partitions rebalanced' },
+      { kind: 'ok', text: 'shuffle spill ↓ 82%' },
+      { kind: 'ok', text: 'checks passed — 14/14' },
+    ],
+  },
+  {
+    id: 'k8s',
+    title: 'lab · k8s-rollout-safe',
+    accent: '#a78bfa',
+    lines: [
+      { kind: 'comment', text: '# stage canary, then promote' },
+      { kind: 'cmd', text: 'kubectl apply -f canary.yaml' },
+      { kind: 'cmd', text: 'kubectl rollout status deploy/orders' },
+      { kind: 'blank' },
+      { kind: 'ok', text: '2/2 pods Ready' },
+      { kind: 'ok', text: 'error rate < 0.1%' },
+      { kind: 'ok', text: 'promote → stable' },
+    ],
+  },
+  {
+    id: 'distributed',
+    title: 'lab · kafka-rebalance',
+    accent: '#fbbf24',
+    lines: [
+      { kind: 'comment', text: '# watch consumer group lag' },
+      { kind: 'cmd', text: 'kafka-consumer-groups \\' },
+      { kind: 'flag', text: '  --describe --group payments' },
+      { kind: 'blank' },
+      { kind: 'ok', text: 'partitions reassigned' },
+      { kind: 'ok', text: 'lag ↓ 94% in 12s' },
+      { kind: 'ok', text: 'no under-replicated' },
+    ],
+  },
+];
+
+function renderLabLine(line: HeroLabLine, key: number, partialText?: string): React.ReactNode {
+  if (line.kind === 'blank') {
+    return <span key={key} className="landing-term-blank">{'\n'}</span>;
+  }
+  const text = partialText ?? ('text' in line ? line.text : '');
+  if (line.kind === 'ok') {
+    return (
+      <span key={key} className="landing-term-ok">
+        <span className="landing-term-check">✓</span> {text}
+        {partialText === undefined ? '\n' : null}
+      </span>
     );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [inView, rootMargin]);
-
-  return { ref, inView };
+  }
+  return (
+    <span key={key} className={`landing-term-${line.kind}`}>
+      {text}
+      {partialText === undefined ? '\n' : null}
+    </span>
+  );
 }
 
 function HeroPanel(): JSX.Element {
+  const [index, setIndex] = useState(0);
+  const [lineIdx, setLineIdx] = useState(0);
+  const [charIdx, setCharIdx] = useState(0);
+  const [done, setDone] = useState(false);
+  const reduceMotion = useRef(false);
+
+  const lab = HERO_LABS[index] ?? HERO_LABS[0];
+
+  useEffect(() => {
+    reduceMotion.current =
+      typeof window !== 'undefined' &&
+      Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  }, []);
+
+  // Reset typing when lab changes
+  useEffect(() => {
+    setLineIdx(0);
+    setCharIdx(0);
+    setDone(false);
+  }, [index]);
+
+  // Typewriter + cycle
+  useEffect(() => {
+    if (reduceMotion.current) {
+      setLineIdx(lab.lines.length);
+      setCharIdx(0);
+      setDone(true);
+      const hold = window.setTimeout(() => {
+        setIndex((i) => (i + 1) % HERO_LABS.length);
+      }, 3200);
+      return () => window.clearTimeout(hold);
+    }
+
+    if (done) {
+      const hold = window.setTimeout(() => {
+        setIndex((i) => (i + 1) % HERO_LABS.length);
+      }, 2200);
+      return () => window.clearTimeout(hold);
+    }
+
+    if (lineIdx >= lab.lines.length) {
+      setDone(true);
+      return undefined;
+    }
+
+    const line = lab.lines[lineIdx];
+    if (!line) {
+      setDone(true);
+      return undefined;
+    }
+
+    if (line.kind === 'blank') {
+      const t = window.setTimeout(() => {
+        setLineIdx((n) => n + 1);
+        setCharIdx(0);
+      }, 180);
+      return () => window.clearTimeout(t);
+    }
+
+    if (line.kind === 'ok') {
+      const t = window.setTimeout(() => {
+        setLineIdx((n) => n + 1);
+        setCharIdx(0);
+      }, 420);
+      return () => window.clearTimeout(t);
+    }
+
+    if (charIdx < line.text.length) {
+      const delay = line.kind === 'comment' ? 18 : 28;
+      const t = window.setTimeout(() => {
+        setCharIdx((c) => c + 1);
+      }, delay);
+      return () => window.clearTimeout(t);
+    }
+
+    const t = window.setTimeout(() => {
+      setLineIdx((n) => n + 1);
+      setCharIdx(0);
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [index, lineIdx, charIdx, done, lab.lines]);
+
+  const completed = lab.lines.slice(0, lineIdx);
+  const current = !done && lineIdx < lab.lines.length ? lab.lines[lineIdx] : null;
+  const typingLine =
+    current && current.kind !== 'blank' && current.kind !== 'ok' ? current : null;
+  const typingDone = Boolean(typingLine && charIdx >= typingLine.text.length);
+  const partial =
+    typingLine && !typingDone ? typingLine.text.slice(0, charIdx) : undefined;
+
   return (
     <div className="landing-panel" aria-hidden>
-      <div className="landing-panel-glow" />
+      <div
+        className="landing-panel-glow"
+        style={{ background: `radial-gradient(ellipse at center, ${lab.accent}33, transparent 68%)` }}
+      />
       <div className="landing-hero-panel">
         <div className="landing-hero-panel-bar">
           <span />
           <span />
           <span />
-          <em>lab · spark-skew-v2</em>
+          <em className="landing-hero-panel-label" style={{ color: lab.accent }}>
+            {lab.title}
+          </em>
         </div>
-        <pre className="landing-hero-panel-code">{`# validate against live cluster
-spark-submit --master k8s://... \\
-  --conf spark.executor.memory=4g \\
-  jobs/fix_skew.py
-
-✓ partitions rebalanced
-✓ shuffle spill ↓ 82%
-✓ checks passed — 14/14`}</pre>
+        <div className="landing-hero-panel-body">
+          <pre className="landing-hero-panel-code">
+            {completed.map((line, i) => renderLabLine(line, i))}
+            {current && (current.kind === 'ok' || current.kind === 'blank')
+              ? renderLabLine(current, lineIdx)
+              : null}
+            {typingLine
+              ? renderLabLine(typingLine, lineIdx, typingDone ? undefined : partial)
+              : null}
+            {!done ? <span className="landing-term-cursor">▋</span> : null}
+          </pre>
+        </div>
+        <div className="landing-hero-panel-dots">
+          {HERO_LABS.map((item, i) => (
+            <span
+              key={item.id}
+              className={`landing-hero-panel-dot${i === index ? ' is-active' : ''}`}
+              style={i === index ? { background: item.accent } : undefined}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
 }
 
 function LandingContent(): JSX.Element {
-  const { openLogin, openSales } = useMarketing();
-  const intentReveal = useInView<HTMLElement>();
-  const ch1Reveal = useInView<HTMLElement>();
-  const ch2Reveal = useInView<HTMLElement>();
+  const { openLogin, getStarted } = useMarketing();
+  const platformReveal = useInView<HTMLElement>();
+  const offer1 = useInView<HTMLElement>();
+  const offer2 = useInView<HTMLElement>();
+  const offer3 = useInView<HTMLElement>();
+  const pricingReveal = useInView<HTMLElement>();
+
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash !== '#waitlist') return undefined;
+    // Smooth scrolling gets cancelled during a client-side route change, so jump instead.
+    const t = window.setTimeout(() => {
+      document.getElementById('waitlist')?.scrollIntoView({ block: 'center' });
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [hash]);
 
   return (
     <>
-      <section className="landing-screen">
-        <div className="landing-screen-copy">
-          <p className="landing-brand-mark">
-            <BrandMark className="brand-mark brand-mark--hero" />
-            <span className="landing-brand-mark-text">
-              DevLabs <span>v0.2</span>
-            </span>
-          </p>
-          <h1>Hands-on learning for modern engineering</h1>
+      <section className="landing-hero">
+        <div className="landing-hero-copy">
+          <h1 className="landing-hero-title">
+            <span className="landing-hero-line">The bridge</span>
+            <span className="landing-hero-line">to become a</span>
+            <span className="landing-hero-line landing-hero-line--accent">versatile engineer</span>
+          </h1>
           <p className="landing-lead">
-            Master data systems in isolated labs — build pipelines,
-            troubleshoot failures, and validate against automated checks.
+            Practice hands-on <strong>Tracks</strong> and <strong>Hand-Crafted Projects</strong> in a
+            sandboxed environment — fail safely, get graded instantly.
           </p>
-          <div className="landing-cta">
-            <div className="landing-cta-row">
-              <button type="button" onClick={openLogin}>
-                Start learning
-              </button>
-              <button type="button" className="secondary" onClick={openSales}>
-                Contact sales
-              </button>
-            </div>
-            <span className="landing-cta-note">
-              Sign in with any email to open Play.
-            </span>
+          <div className="landing-cta landing-cta--pair">
+            <button type="button" className="landing-cta-primary" onClick={getStarted}>
+              Get started
+              <span className="landing-cta-arrow" aria-hidden>
+                →
+              </span>
+            </button>
+            <button type="button" className="landing-cta-secondary" onClick={openLogin}>
+              Sign in
+            </button>
           </div>
         </div>
         <HeroPanel />
       </section>
 
-      <section className="landing-chapters" aria-label="Platform">
+      <section id="waitlist" className="landing-waitlist" aria-label="Join the waitlist">
+        <div className="landing-waitlist-copy">
+          <p className="landing-kicker">Launching first week of November</p>
+          <h2 className="landing-section-title">Join the waitlist</h2>
+          <p className="landing-section-lead">
+            Get {LAUNCH_OFFER.percentOff}% off your first month at launch, and early access before
+            everyone else.
+          </p>
+        </div>
+        <WaitlistForm />
+      </section>
+
+      <section
+        ref={platformReveal.ref}
+        className={`landing-platform${platformReveal.inView ? ' is-inview' : ''}`}
+        aria-label="What DevSetu offers"
+      >
+        <p className="landing-kicker">The platform</p>
+        <h2 className="landing-section-title landing-section-title--punch">
+          <span className="landing-hero-line">What DevSetu</span>
+          <span className="landing-hero-line landing-hero-line--accent">unlocks</span>
+        </h2>
+      </section>
+
+      <section className="landing-chapters" aria-label="Platform offerings">
         <article
-          ref={intentReveal.ref}
-          className={`landing-intent landing-intent--split${intentReveal.inView ? ' is-inview' : ''}`}
+          id="offer-tracks"
+          ref={offer1.ref}
+          className={`landing-feature${offer1.inView ? ' is-inview' : ''}`}
         >
-          <div className="landing-intent-copy landing-reveal landing-reveal--1">
-            <p className="landing-kicker">Why DevLabs</p>
-            <h2>Because reading about systems is not the same as running them</h2>
+          <div className="landing-feature-copy">
+            <h3>Guided paths through real systems.</h3>
             <p>
-              Distributed systems are learned by failing against them — debugging skew,
-              lag, missed SLAs, and broken schemas under real constraints. DevLabs puts
-              that work in isolated sandboxes with automated proof, so engineers build
-              depth the way production actually demands it.
-            </p>
-            <p className="landing-intent-ai">
-              Agents already operate in parallel and excel at narrow tasks. The goal
-              is not to rely on them blindly, but to grow judgment and resilience —
-              and still handle what remains uniquely human.
+              <strong>Tracks</strong> take you through sequenced labs across Kubernetes, Spark, and
+              data platforms — readings paired with challenges you run yourself. Fail safely, get
+              graded instantly, and leave knowing what broke and why.
             </p>
           </div>
-
-          <aside
-            className="landing-intent-side landing-reveal landing-reveal--2"
-            aria-label="For upcoming engineers"
-          >
-            <p className="landing-kicker">For upcoming engineers</p>
-            <h3>Courage to Approve agent changes — earned, not guessed</h3>
-            <p>
-              With coding agents like Claude, Cursor, and Copilot, fast-moving
-              teams often train only one habit: click Accept or Approve and ship.
-            </p>
-            <p>
-              DevLabs builds the systems skill underneath — so when an agent
-              proposes a change, you understand the blast radius and approve
-              with confidence.
-            </p>
-            <div className="landing-approve" aria-hidden>
-              <div className="landing-approve-dialog">
-                <div className="landing-approve-dialog-head">
-                  <span className="landing-approve-badge">Cursor</span>
-                  <em>Agent edit · spark_job.py</em>
-                </div>
-                <p className="landing-approve-diff">
-                  <span className="landing-approve-diff-add">+ executor.memory = &quot;4g&quot;</span>
-                  <span className="landing-approve-diff-add">+ shuffle.partitions = 200</span>
-                </p>
-                <p className="landing-approve-prompt">
-                  Apply this agent suggestion?
-                </p>
-                <div className="landing-approve-actions">
-                  <span className="landing-approve-ghost">Reject</span>
-                  <span className="landing-approve-btn">
-                    <span className="landing-approve-btn-fill" />
-                    <span className="landing-approve-btn-label landing-approve-btn-label--idle">
-                      Accept
-                    </span>
-                    <span className="landing-approve-btn-label landing-approve-btn-label--done">
-                      Accepted
-                    </span>
-                  </span>
-                </div>
-              </div>
-            </div>
-          </aside>
+          <figure className="landing-feature-media" aria-label="Tracks animation">
+            <TracksAnim />
+          </figure>
         </article>
 
         <article
-          ref={ch1Reveal.ref}
-          className={`landing-chapter landing-reveal landing-reveal--1${ch1Reveal.inView ? ' is-inview' : ''}`}
+          id="offer-projects"
+          ref={offer2.ref}
+          className={`landing-feature landing-feature--flip${offer2.inView ? ' is-inview' : ''}`}
         >
-          <div className="landing-chapter-index" aria-hidden>01</div>
-          <div className="landing-chapter-body">
-            <h2>Shared clusters. Private sandboxes.</h2>
+          <div className="landing-feature-copy">
+            <h3>Build the systems you only read about.</h3>
             <p>
-              Spark, Kafka, Airflow, and storage run as shared infrastructure —
-              sliced per learner with namespaces, quotas, topics, and buckets.
-              It feels like your own production stack, without a cluster per person.
+              <strong>Projects</strong> are hand-crafted majors that take you from an empty repo to
+              a working system — a key-value store, a query engine, a message bus — chapter by
+              chapter, with theory on one side and a live scratch workspace on the other.
             </p>
-            <ul className="landing-chapter-points">
-              <li>Shared compute &amp; messaging</li>
-              <li>Isolated workspace &amp; datasets</li>
-              <li>Personal quotas &amp; dashboards</li>
-            </ul>
           </div>
+          <figure className="landing-feature-media" aria-label="Projects animation">
+            <ProjectsAnim />
+          </figure>
         </article>
 
         <article
-          ref={ch2Reveal.ref}
-          className={`landing-chapter landing-reveal landing-reveal--1${ch2Reveal.inView ? ' is-inview' : ''}`}
+          id="offer-whiteboard"
+          ref={offer3.ref}
+          className={`landing-feature${offer3.inView ? ' is-inview' : ''}`}
         >
-          <div className="landing-chapter-index" aria-hidden>02</div>
-          <div className="landing-chapter-body">
-            <h2>Grade as you go. Scale without waste.</h2>
+          <div className="landing-feature-copy">
+            <h3>Design the requirement before you chase the detail.</h3>
             <p>
-              Automated checks give immediate feedback with metrics and explanations.
-              Workloads queue fairly on shared capacity; idle resources are reclaimed
-              so thousands can learn at sustainable cost.
+              Not every technical idea fits a neat graded lab. On the <strong>Whiteboard</strong>,
+              you sketch the shape of a problem from the statement — blocks, flows, and constraints
+              — so you can reason about the design before (or instead of) spinning up a full
+              challenge.
             </p>
-            <ul className="landing-chapter-points">
-              <li>Continuous evaluation</li>
-              <li>Fair scheduling &amp; limits</li>
-              <li>Reclaim idle capacity</li>
-            </ul>
           </div>
+          <figure className="landing-feature-media" aria-label="Whiteboard animation">
+            <WhiteboardAnim />
+          </figure>
         </article>
+      </section>
+
+      <section
+        ref={pricingReveal.ref}
+        className={`landing-afford${pricingReveal.inView ? ' is-inview' : ''}`}
+        aria-label="Pricing"
+      >
+        <div className="landing-afford-intro">
+          <p className="landing-kicker">The pricing</p>
+          <h2 className="landing-section-title landing-section-title--punch">
+            <span className="landing-hero-line">Affordable</span>
+            <span className="landing-hero-line landing-hero-line--accent">by design</span>
+          </h2>
+          <p className="landing-section-lead">
+            Real systems without the real cloud bill. Every lab runs on our shared infrastructure,
+            so you practise on live machines without paying for a cloud account.
+          </p>
+          <ul className="landing-afford-reasons">
+            <li>Pay only for what you need.</li>
+            <li>No cloud setup, no surprise charges.</li>
+            <li>Priced for a learner&rsquo;s budget.</li>
+          </ul>
+        </div>
+
+        <aside className="landing-tokens" aria-label="Lab tokens">
+          <h3 className="landing-tokens-title">Every lab you solve pays you back.</h3>
+          <p className="landing-tokens-body">
+            Solve labs, earn <strong>tokens</strong>, and turn them into credit. The more you
+            practice, the less you pay.
+          </p>
+          <ol className="landing-tokens-steps">
+            <li><span>1</span>Solve a lab</li>
+            <li><span>2</span>Earn tokens</li>
+            <li><span>3</span>Cash out to credit</li>
+            <li><span>4</span>Unlock more tracks &amp; projects</li>
+          </ol>
+          <Link to={PRICING_PATH} className="landing-tokens-link">
+            View pricing <span aria-hidden>→</span>
+          </Link>
+        </aside>
       </section>
     </>
   );

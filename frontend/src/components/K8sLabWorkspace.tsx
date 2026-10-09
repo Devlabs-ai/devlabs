@@ -1,20 +1,38 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import MonacoEditor, { loader } from '@monaco-editor/react';
-import type * as Monaco from 'monaco-editor';
 import ProblemStatement from './ProblemStatement';
+import K8sLabFileEditor from './K8sLabFileEditor';
+import BriefAdminEditor, { isEditableBriefTab } from './BriefAdminEditor';
+import ChallengeVisibilityPanel from './ChallengeVisibilityPanel';
+import ChallengeReviewPanel from './ChallengeReviewPanel';
 import TerminalPanel from './TerminalPanel';
-import { IconSubmit } from './ChromeIcons';
+import SolutionGateModal, { hasAcknowledgedSolution } from './SolutionGateModal';
+import ConfirmDialog from './ConfirmDialog';
+import BriefBackButton from './BriefBackButton';
+import WorkspaceMobileSwitcher, { type WorkspaceMobilePane } from './WorkspaceMobileSwitcher';
+import DesktopOnlyNotice from './DesktopOnlyNotice';
+import { IconPen, IconSubmit } from './ChromeIcons';
+import { useIsNarrowUi } from '../hooks/useMediaQuery';
 import { fetchChallenge, fetchChallengeSolution } from '../services/challengeApi';
+import { isAdminUser, isReviewStaff, getCurrentUser } from '../services/authApi';
+import { readMigrating, writeMigrating } from '../utils/storageMigrate';
 import {
+  LAB_LEASE_RECLAIMED_EVENT,
+  LAB_LEASE_TAKEN_EVENT,
+  LAB_SESSION_ENDED_EVENT,
+  sendLabHeartbeat,
+  withLabClientId,
+} from '../services/labTabLease';
+import {
+  fetchK8sCapacity,
   fetchK8sSubmissions,
   gradeK8sSession,
   resetK8sSession,
+  type K8sCapacityState,
   type K8sSubmissionRecord,
 } from '../services/workspaceApi';
 import type { ActiveSession, ChallengeFull, ChallengePublic } from '../types/domain';
 import type { ProblemStatementTab } from './ProblemStatement';
-
-loader.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.0/min/vs' } });
+import { useAppState } from '../context/AppStateContext';
 
 interface K8sLabWorkspaceProps {
   challenge: ChallengePublic | ChallengeFull | null;
@@ -22,84 +40,15 @@ interface K8sLabWorkspaceProps {
   onClose: () => void;
 }
 
-const BRIEF_WIDTH_KEY = 'devlabs.k8sLab.briefWidth';
-const SCRATCH_KEY_PREFIX = 'devlabs.k8sLab.scratch.';
-const DEFAULT_BRIEF = 420;
-const MIN_BRIEF = 280;
-const MAX_BRIEF = 720;
+const BRIEF_PCT_KEY = 'devsetu.k8sLab.briefPct.v1';
+const LEGACY_BRIEF_PCT_KEY = 'devlabs.k8sLab.briefPct.v1';
+/** Description share of the workspace shell (terminal gets the rest). */
+const DEFAULT_BRIEF_PCT = 45;
+const MIN_BRIEF_PCT = 22;
+const MAX_BRIEF_PCT = 70;
 
-const DEFAULT_SCRATCH_BY_CHALLENGE: Record<string, string> = {
-  'l1-namespace-and-pod': `apiVersion: v1
-kind: Pod
-metadata:
-  name: front-desk
-  labels:
-    app: guestbook
-    tier: frontend
-spec:
-  containers:
-    - name: front-desk
-      image: nginx:1.25
-      ports:
-        - containerPort: 80
-`,
-  'l1-deployment-basics': `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: front-desk
-  labels:
-    app: guestbook
-    tier: frontend
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: guestbook
-      tier: frontend
-  template:
-    metadata:
-      labels:
-        app: guestbook
-        tier: frontend
-    spec:
-      containers:
-        - name: front-desk
-          image: nginx:1.25
-          ports:
-            - containerPort: 80
-`,
-  'l1-clusterip-service': `apiVersion: v1
-kind: Service
-metadata:
-  name: front-desk
-  labels:
-    app: guestbook
-    tier: frontend
-spec:
-  type: ClusterIP
-  selector:
-    app: guestbook
-    tier: frontend
-  ports:
-    - port: 80
-      targetPort: 80
-`,
-  'l1-imperative-kubectl': `# Notes only — prefer imperative kubectl in the Terminal.
-# Target:
-#   kubectl create deployment pop-up --image=nginx:1.25 --replicas=2
-#   kubectl label deployment pop-up app=guestbook tier=popup --overwrite
-#   kubectl expose deployment pop-up --name=pop-up --port=80 --target-port=80 --type=ClusterIP
-`,
-};
-
-const FALLBACK_SCRATCH = DEFAULT_SCRATCH_BY_CHALLENGE['l1-namespace-and-pod'];
-
-function defaultScratchFor(challengeId: string): string {
-  return DEFAULT_SCRATCH_BY_CHALLENGE[challengeId] || FALLBACK_SCRATCH;
-}
-
-function defaultBriefWidth(shellWidth: number): number {
-  return Math.min(MAX_BRIEF, Math.max(MIN_BRIEF, Math.round(shellWidth * 0.38)));
+function clampBriefPct(pct: number): number {
+  return Math.min(MAX_BRIEF_PCT, Math.max(MIN_BRIEF_PCT, Math.round(pct)));
 }
 
 function k8sTerminalWsUrl(sessionId: string): string {
@@ -107,17 +56,32 @@ function k8sTerminalWsUrl(sessionId: string): string {
   return `${proto}://${window.location.host}/ws/k8s-terminal?sessionId=${sessionId}`;
 }
 
-function scratchStorageKey(sessionId: string, challengeId: string): string {
-  return `${SCRATCH_KEY_PREFIX}${challengeId || 'lab'}.${sessionId}`;
-}
-
+/**
+ * Cluster labs (sandboxType kubernetes, linux or docker) share this workspace and the
+ * kubernetes session runtime; Linux and Docker labs are a single machine with a shell.
+ */
 export function isKubernetesChallenge(
   challenge: ChallengePublic | ChallengeFull | null | undefined,
 ): boolean {
-  return (challenge?.sandboxType || '') === 'kubernetes';
+  const t = challenge?.sandboxType || '';
+  return t === 'kubernetes' || t === 'linux' || t === 'docker';
 }
 
-type MainTab = 'terminal' | 'scratch';
+/** Linux and Docker labs: one machine per learner, no namespace or Editor. */
+export function isBoxChallenge(
+  challenge: ChallengePublic | ChallengeFull | null | undefined,
+): boolean {
+  const t = challenge?.sandboxType || '';
+  return t === 'linux' || t === 'docker';
+}
+
+export function boxMachineLabel(
+  challenge: ChallengePublic | ChallengeFull | null | undefined,
+): string {
+  return challenge?.sandboxType === 'docker' ? 'Docker' : 'Linux';
+}
+
+type MainTab = 'terminal' | 'editor';
 
 type EvalResult = {
   passed: boolean;
@@ -126,6 +90,40 @@ type EvalResult = {
   stderr: string;
   at: number;
 };
+
+const CAPACITY_POLL_MS = 3000;
+/** Typical Karpenter node boot, shown to learners as the expected wait. */
+const NODE_BOOT_SECONDS = 40;
+
+/** Poll capacity waits (lab open held, pods waiting for a node) while the lab is open. */
+function useCapacity(enabled: boolean): K8sCapacityState {
+  const [state, setState] = useState<K8sCapacityState>({ waiting: [], reservingSeconds: null });
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async (): Promise<void> => {
+      try {
+        const next = await fetchK8sCapacity();
+        if (!cancelled) setState(next);
+      } catch {
+        /* keep the last value; the notice is best-effort */
+      }
+      if (!cancelled) timer = window.setTimeout(() => void poll(), CAPACITY_POLL_MS);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [enabled]);
+  return state;
+}
+
+function capacityEta(waitedSeconds: number): string {
+  const left = NODE_BOOT_SECONDS - waitedSeconds;
+  return left > 5 ? `about ${left} s` : 'a few more seconds';
+}
 
 const RESULTS_DRAWER_DEFAULT = 280;
 const RESULTS_DRAWER_MIN = 140;
@@ -136,45 +134,93 @@ export default function K8sLabWorkspace({
   session,
   onClose: _onClose,
 }: K8sLabWorkspaceProps): JSX.Element {
-  const ns = session.k8sNamespace || '—';
-  const challengeId = challenge?.id || session.challengeId || '';
+  const { currentUser, onSelectChallenge } = useAppState();
+  const isAdmin = isAdminUser(currentUser) || isAdminUser(getCurrentUser());
+  const showReviewTab = isReviewStaff(currentUser) || isReviewStaff(getCurrentUser());
+  const labReady = session.labReady !== false;
+  const lockedMessage = session.lockedMessage || null;
+  const notReadyTitle = lockedMessage ? 'Lab is unavailable right now' : 'Lab is still preparing';
+  const challengeId = challenge?.id || '';
+  const box = isBoxChallenge(challenge);
+  const machineLabel = boxMachineLabel(challenge);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const dragging = useRef(false);
+  const isNarrow = useIsNarrowUi();
+  const [mobilePane, setMobilePane] = useState<WorkspaceMobilePane>('brief');
   const [briefCollapsed, setBriefCollapsed] = useState(false);
-  const [briefWidth, setBriefWidth] = useState(() => {
-    const raw = sessionStorage.getItem(BRIEF_WIDTH_KEY);
-    const n = raw ? Number(raw) : NaN;
-    return Number.isFinite(n) ? Math.min(MAX_BRIEF, Math.max(MIN_BRIEF, n)) : DEFAULT_BRIEF;
+  const [adminEditing, setAdminEditing] = useState(false);
+  const [adminWantEdit, setAdminWantEdit] = useState(false);
+  const [briefPct, setBriefPct] = useState(() => {
+    try {
+      const raw = readMigrating(sessionStorage, BRIEF_PCT_KEY, LEGACY_BRIEF_PCT_KEY);
+      const n = raw ? Number(raw) : NaN;
+      return Number.isFinite(n) ? clampBriefPct(n) : DEFAULT_BRIEF_PCT;
+    } catch {
+      return DEFAULT_BRIEF_PCT;
+    }
   });
   const [termEpoch, setTermEpoch] = useState(0);
-  const [mainTab, setMainTab] = useState<MainTab>('terminal');
+  // Editor first so the lab is usable instantly; the terminal connects in the background.
+  // Box labs (Linux, Docker) have no Editor: files are edited on the machine itself.
+  const [mainTab, setMainTab] = useState<MainTab>(box ? 'terminal' : 'editor');
+  const showBrief = isNarrow ? mobilePane === 'brief' : !briefCollapsed;
+  const showWorkspace = isNarrow ? mobilePane === 'workspace' : true;
+  const desktopOnly = isNarrow && challenge?.sandboxType !== 'linux';
+  const showResize = !isNarrow && !briefCollapsed;
   const [briefTab, setBriefTab] = useState<ProblemStatementTab>('description');
   const [briefChallenge, setBriefChallenge] = useState<ChallengePublic | ChallengeFull | null>(challenge);
+  const isPractice = Boolean((briefChallenge || challenge)?.k8sPlatform?.practice);
   const [solutionFiles, setSolutionFiles] = useState<Record<string, string> | null>(null);
   const [solutionEntrypoint, setSolutionEntrypoint] = useState<string | null>(null);
   const [solutionLoading, setSolutionLoading] = useState(false);
+  const [solutionGateOpen, setSolutionGateOpen] = useState(false);
   const [submissions, setSubmissions] = useState<K8sSubmissionRecord[]>([]);
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(null);
   const [resultsOpen, setResultsOpen] = useState(false);
   const [resultsDrawerHeight, setResultsDrawerHeight] = useState(RESULTS_DRAWER_DEFAULT);
   const resizingDrawer = useRef(false);
   const [busy, setBusy] = useState(false);
-  const solutionFetchedFor = useRef<string | null>(null);
-  const scratchEditorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [evalResult, setEvalResult] = useState<EvalResult | null>(null);
-  const [scratch, setScratch] = useState(() => {
-    try {
-      const raw = sessionStorage.getItem(scratchStorageKey(session.id, challengeId));
-      return raw && raw.trim() ? raw : defaultScratchFor(challengeId);
-    } catch {
-      return defaultScratchFor(challengeId);
-    }
-  });
+  const capacity = useCapacity(!box && !lockedMessage);
+  const capacityWaits = capacity.waiting;
+  const capacityWaitedSeconds = Math.max(
+    capacity.reservingSeconds ?? 0,
+    ...capacityWaits.map((w) => w.waitingSeconds),
+  );
+  const openingHeldForCapacity = capacity.reservingSeconds !== null || capacityWaits.length > 0;
 
   const wsUrl = useMemo(() => {
-    const base = session.terminalWsUrl || k8sTerminalWsUrl(session.id);
-    return `${base}${base.includes('?') ? '&' : '?'}v=${termEpoch}`;
-  }, [session.terminalWsUrl, session.id, termEpoch]);
+    if (!labReady || !session.id || session.id.startsWith('pending-k8s-')) return '';
+    const base = withLabClientId(session.terminalWsUrl || k8sTerminalWsUrl(session.id));
+    return `${base}&v=${termEpoch}`;
+  }, [labReady, session.terminalWsUrl, session.id, termEpoch]);
+
+  useEffect(() => {
+    const onReclaimed = (): void => setTermEpoch((n) => n + 1);
+    window.addEventListener(LAB_LEASE_RECLAIMED_EVENT, onReclaimed);
+    return () => window.removeEventListener(LAB_LEASE_RECLAIMED_EVENT, onReclaimed);
+  }, []);
+
+  const onTerminalDisconnect = (): void => {
+    if (!session.id || session.id.startsWith('pending-k8s-')) return;
+    void sendLabHeartbeat(session.id).then((result) => {
+      if (result === 'taken') window.dispatchEvent(new Event(LAB_LEASE_TAKEN_EVENT));
+      if (result === 'ended') window.dispatchEvent(new Event(LAB_SESSION_ENDED_EVENT));
+    });
+  };
+
+  useEffect(() => {
+    if (lockedMessage) setMainTab('terminal');
+  }, [lockedMessage]);
+
+  const prevLabReady = useRef(labReady);
+  useEffect(() => {
+    if (labReady && !prevLabReady.current) {
+      setTermEpoch((n) => n + 1);
+    }
+    prevLabReady.current = labReady;
+  }, [labReady]);
 
   useEffect(() => {
     setBriefChallenge(challenge);
@@ -197,15 +243,17 @@ export default function K8sLabWorkspace({
   }, [challenge?.id]);
 
   useEffect(() => {
-    solutionFetchedFor.current = null;
     setSolutionFiles(null);
     setSolutionEntrypoint(null);
     setSolutionLoading(false);
   }, [challenge?.id]);
 
   useEffect(() => {
+    if (isPractice && briefTab !== 'description') setBriefTab('description');
+  }, [isPractice, briefTab]);
+
+  useEffect(() => {
     if (briefTab !== 'solution' || !challenge?.id) return;
-    if (solutionFetchedFor.current === challenge.id) return;
 
     let cancelled = false;
     setSolutionLoading(true);
@@ -213,12 +261,14 @@ export default function K8sLabWorkspace({
       try {
         const payload = await fetchChallengeSolution(challenge.id);
         if (cancelled) return;
-        solutionFetchedFor.current = challenge.id;
         setSolutionFiles(payload.files);
         setSolutionEntrypoint(payload.entrypoint || null);
       } catch {
         // Pack write-up (problemStatement.solution) still shows — do not blank the tab.
-        if (!cancelled) solutionFetchedFor.current = challenge.id;
+        if (!cancelled) {
+          setSolutionFiles(null);
+          setSolutionEntrypoint(null);
+        }
       } finally {
         if (!cancelled) setSolutionLoading(false);
       }
@@ -242,23 +292,19 @@ export default function K8sLabWorkspace({
   }, [session.id]);
 
   useEffect(() => {
-    sessionStorage.setItem(BRIEF_WIDTH_KEY, String(briefWidth));
-  }, [briefWidth]);
-
-  useEffect(() => {
     try {
-      sessionStorage.setItem(scratchStorageKey(session.id, challengeId), scratch);
+      writeMigrating(sessionStorage, BRIEF_PCT_KEY, LEGACY_BRIEF_PCT_KEY, String(briefPct));
     } catch {
       /* quota */
     }
-  }, [scratch, session.id, challengeId]);
+  }, [briefPct]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (dragging.current && shellRef.current) {
-        const left = shellRef.current.getBoundingClientRect().left;
-        const next = Math.min(MAX_BRIEF, Math.max(MIN_BRIEF, e.clientX - left));
-        setBriefWidth(next);
+        const rect = shellRef.current.getBoundingClientRect();
+        const next = clampBriefPct(((e.clientX - rect.left) / rect.width) * 100);
+        setBriefPct(next);
       }
       if (resizingDrawer.current && shellRef.current) {
         const rect = shellRef.current.getBoundingClientRect();
@@ -331,9 +377,7 @@ export default function K8sLabWorkspace({
   };
 
   const onReset = async () => {
-    if (!window.confirm('Reset this lab? Workloads in your namespace will be wiped (Pods, Deployments, Services, …).')) {
-      return;
-    }
+    setResetConfirmOpen(false);
     setBusy(true);
     try {
       await resetK8sSession(session.id);
@@ -356,71 +400,44 @@ export default function K8sLabWorkspace({
   };
 
   useEffect(() => {
-    if (mainTab !== 'scratch') return;
-    const id = window.requestAnimationFrame(() => {
-      const ed = scratchEditorRef.current;
-      if (!ed) return;
-      try {
-        ed.updateOptions({ readOnly: false, domReadOnly: false });
-        ed.layout();
-        ed.focus();
-      } catch {
-        /* editor disposed */
-      }
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [mainTab, resultsOpen, resultsDrawerHeight]);
+    if (box) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '`' || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      setMainTab((tab) => (tab === 'editor' ? 'terminal' : 'editor'));
+    };
+    // Capture phase: xterm swallows keystrokes once the terminal has focus.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [box]);
 
-  const onMonacoMount = (editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco) => {
-    scratchEditorRef.current = editor;
-    monaco.editor.defineTheme('devlabs-k8s-scratch', {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [
-        { token: 'comment', foreground: '4a5273', fontStyle: 'italic' },
-        { token: 'string', foreground: '6ee7b7' },
-        { token: 'number', foreground: 'fb923c' },
-        { token: 'type', foreground: '93c5fd' },
-        { token: 'keyword', foreground: '38bdf8' },
-      ],
-      colors: {
-        'editor.background': '#000000',
-        'editor.foreground': '#eef0ff',
-        'editor.lineHighlightBackground': '#0a0a0a',
-        'editorCursor.foreground': '#34d399',
-        'editorIndentGuide.background': '#1a1a1a',
-        'editorIndentGuide.activeBackground': '#333333',
-        'editorLineNumber.foreground': '#444444',
-      },
-    });
-    monaco.editor.setTheme('devlabs-k8s-scratch');
-    editor.updateOptions({ readOnly: false, domReadOnly: false });
-    window.requestAnimationFrame(() => {
-      try {
-        editor.layout();
-        editor.focus();
-      } catch {
-        /* noop */
-      }
-    });
-  };
+  const toggleHint = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘`' : 'Ctrl+`';
 
   return (
     <div
       ref={shellRef}
       className={`workspace sandbox-workspace spark-platform-workspace k8s-lab-workspace${
-        briefCollapsed ? ' spark-brief-collapsed' : ''
-      }`}
+        !isNarrow && briefCollapsed ? ' spark-brief-collapsed' : ''
+      }${isNarrow ? ` workspace--mobile workspace--mobile-pane-${mobilePane}` : ''}`}
       style={
-        briefCollapsed
+        isNarrow || briefCollapsed
           ? { gridTemplateColumns: 'minmax(0, 1fr)' }
-          : { gridTemplateColumns: `${briefWidth}px 6px minmax(0, 1fr)` }
+          : { gridTemplateColumns: `${briefPct}% 6px minmax(0, 1fr)` }
       }
     >
-      {!briefCollapsed && (
+      {isNarrow && (
+        <WorkspaceMobileSwitcher
+          pane={mobilePane}
+          onChange={setMobilePane}
+          briefLabel="Brief"
+          workspaceLabel="Lab"
+        />
+      )}
+      {showBrief && (
         <div className="col spark-brief-col">
           <div className="panel sandbox-brief-panel--solo spark-brief-panel--bare" style={{ flex: 1 }}>
             <div className="spark-brief-tabs" role="tablist" aria-label="Problem sections">
+              <BriefBackButton />
               <button
                 type="button"
                 role="tab"
@@ -430,15 +447,24 @@ export default function K8sLabWorkspace({
               >
                 Description
               </button>
+              {!isPractice && (
               <button
                 type="button"
                 role="tab"
                 aria-selected={briefTab === 'solution'}
                 className={`spark-brief-tab${briefTab === 'solution' ? ' active' : ''}`}
-                onClick={() => setBriefTab('solution')}
+                onClick={() => {
+                  if (hasAcknowledgedSolution(challengeId)) {
+                    setBriefTab('solution');
+                  } else {
+                    setSolutionGateOpen(true);
+                  }
+                }}
               >
                 Solution
               </button>
+              )}
+              {!isPractice && (
               <button
                 type="button"
                 role="tab"
@@ -454,17 +480,92 @@ export default function K8sLabWorkspace({
                   <span className="spark-brief-tab-count">{submissions.length}</span>
                 )}
               </button>
-              <button
-                type="button"
-                className="spark-brief-collapse-btn"
-                title="Collapse problem panel"
-                aria-label="Collapse problem panel"
-                onClick={() => setBriefCollapsed(true)}
-              >
-                ⟨
-              </button>
+              )}
+              {isAdmin ? (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={briefTab === 'visibility'}
+                  className={`spark-brief-tab spark-brief-tab--setter spark-brief-tab--admin-row${briefTab === 'visibility' ? ' active' : ''}`}
+                  onClick={() => setBriefTab('visibility')}
+                >
+                  Visibility
+                </button>
+              ) : null}
+              {showReviewTab ? (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={briefTab === 'review'}
+                  className={`spark-brief-tab spark-brief-tab--setter spark-brief-tab--admin-row${briefTab === 'review' ? ' active' : ''}`}
+                  onClick={() => setBriefTab('review')}
+                >
+                  Review
+                </button>
+              ) : null}
+              {isAdmin && isEditableBriefTab(briefTab) && !adminEditing && (
+                <button
+                  type="button"
+                  className="spark-brief-edit-tab"
+                  title="Edit this tab"
+                  aria-label="Edit this tab"
+                  onClick={() => setAdminWantEdit(true)}
+                >
+                  <IconPen />
+                </button>
+              )}
+              {!isNarrow && (
+                <button
+                  type="button"
+                  className="spark-brief-collapse-btn"
+                  title="Collapse problem panel"
+                  aria-label="Collapse problem panel"
+                  onClick={() => setBriefCollapsed(true)}
+                >
+                  ⟨
+                </button>
+              )}
             </div>
             <div className="panel-body spark-brief-body">
+              {isAdmin && isEditableBriefTab(briefTab) && (briefChallenge || challenge) && (
+                <BriefAdminEditor
+                  tab={briefTab}
+                  challenge={(briefChallenge || challenge)!}
+                  platform={null}
+                  solutionFiles={solutionFiles}
+                  onEditingChange={(editing) => {
+                    setAdminEditing(editing);
+                    if (!editing) setAdminWantEdit(false);
+                  }}
+                  forceEdit={adminWantEdit}
+                  onSaved={({ challenge: next, solutionFiles: files }) => {
+                    setBriefChallenge(next);
+                    if (files) setSolutionFiles(files);
+                  }}
+                />
+              )}
+              {adminEditing ? null : briefTab === 'visibility' && isAdmin && (briefChallenge || challenge) ? (
+                <ChallengeVisibilityPanel
+                  challengeId={(briefChallenge || challenge)!.id}
+                  visibleTo={((briefChallenge || challenge)!.visibleTo as 'admin' | 'users' | 'reviewers') || 'admin'}
+                  visibilityNotes={(briefChallenge || challenge)!.visibilityNotes || ''}
+                  tokens={
+                    typeof (briefChallenge || challenge)!.tokens === 'number'
+                      ? (briefChallenge || challenge)!.tokens
+                      : 10
+                  }
+                  onSaved={({ visibleTo, visibilityNotes, tokens }) => {
+                    setBriefChallenge({
+                      ...(briefChallenge || challenge)!,
+                      visibleTo,
+                      visibilityNotes,
+                      tokens,
+                    } as ChallengeFull);
+                  }}
+                />
+              ) : briefTab === 'review' && showReviewTab && (briefChallenge || challenge) ? (
+                <ChallengeReviewPanel challengeId={(briefChallenge || challenge)!.id} />
+              ) : (
               <ProblemStatement
                 challenge={briefChallenge || challenge}
                 tab={briefTab}
@@ -476,7 +577,7 @@ export default function K8sLabWorkspace({
                     <div className="spark-submissions-list spark-submissions-list--brief">
                       {submissions.length === 0 ? (
                         <p className="dim" style={{ fontSize: 13, margin: 0 }}>
-                          No submissions yet. Submit grades the cluster state for this lab.
+                          No submissions yet. Submit grades the {box ? 'state of your machine' : 'cluster state'} for this lab.
                         </p>
                       ) : (
                         submissions.map((sub) => (
@@ -532,12 +633,13 @@ export default function K8sLabWorkspace({
                   ) : null
                 }
               />
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {!briefCollapsed && (
+      {showResize && (
         <div
           className="spark-resize-handle"
           role="separator"
@@ -549,13 +651,12 @@ export default function K8sLabWorkspace({
             document.body.style.userSelect = 'none';
           }}
           onDoubleClick={() => {
-            const shellWidth = shellRef.current?.getBoundingClientRect().width || window.innerWidth;
-            setBriefWidth(defaultBriefWidth(shellWidth));
+            setBriefPct(DEFAULT_BRIEF_PCT);
           }}
         />
       )}
 
-      {briefCollapsed && (
+      {!isNarrow && briefCollapsed && (
         <button
           type="button"
           className="spark-brief-reopen-float"
@@ -567,33 +668,48 @@ export default function K8sLabWorkspace({
         </button>
       )}
 
+      {showWorkspace && desktopOnly && (
+        <DesktopOnlyNotice tools="terminal and editor" onShowBrief={() => setMobilePane('brief')} />
+      )}
+      {showWorkspace && !desktopOnly && (
       <div className="col col-main">
         <div className="panel spark-ide-panel" style={{ flex: 1 }}>
           <div className="spark-ide-actionbar">
             <div className="spark-ide-actionbar-left">
               <div className="k8s-lab-main-tabs" role="tablist" aria-label="Lab workspace">
+                {!box && !lockedMessage && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mainTab === 'editor'}
+                  className={`k8s-lab-main-tab${mainTab === 'editor' ? ' active' : ''}`}
+                  onClick={() => setMainTab('editor')}
+                  title={`Editor (${toggleHint} to toggle)`}
+                >
+                  Editor
+                </button>
+                )}
                 <button
                   type="button"
                   role="tab"
                   aria-selected={mainTab === 'terminal'}
                   className={`k8s-lab-main-tab${mainTab === 'terminal' ? ' active' : ''}`}
                   onClick={() => setMainTab('terminal')}
+                  title={
+                    lockedMessage
+                      ? 'Terminal is unavailable right now'
+                      : labReady
+                        ? (box ? 'Terminal' : `Terminal (${toggleHint} to toggle)`)
+                        : 'Terminal is connecting in the background'
+                  }
                 >
                   Terminal
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={mainTab === 'scratch'}
-                  className={`k8s-lab-main-tab${mainTab === 'scratch' ? ' active' : ''}`}
-                  onClick={() => setMainTab('scratch')}
-                >
-                  Scratch pad
+                  <span
+                    className={`k8s-lab-term-status${labReady ? ' is-ready' : ''}${lockedMessage ? ' is-locked' : ''}`}
+                    aria-label={lockedMessage ? 'unavailable' : labReady ? 'ready' : 'connecting'}
+                  />
                 </button>
               </div>
-              <span className="k8s-lab-ns-chip" title="Your lab namespace">
-                ns <code>{ns}</code>
-              </span>
               {evalResult && (
                 <span
                   className={`k8s-lab-grade-chip${evalResult.passed ? ' is-pass' : ' is-fail'}`}
@@ -607,22 +723,35 @@ export default function K8sLabWorkspace({
               <button
                 type="button"
                 className="spark-ide-btn spark-ide-btn--run"
-                disabled={busy}
-                onClick={() => void onReset()}
-                title="Reset workloads in your namespace"
+                disabled={busy || !labReady}
+                onClick={() => setResetConfirmOpen(true)}
+                title={
+                  !labReady
+                    ? notReadyTitle
+                    : box ? 'Start over on a fresh machine' : 'Reset workloads in your namespace'
+                }
               >
                 Reset
               </button>
-              <button
-                type="button"
-                className="spark-ide-btn spark-ide-btn--submit"
-                disabled={busy}
-                onClick={() => void onGrade()}
-                title="Submit for grading"
-              >
-                <IconSubmit color="#04120c" />
-                <span>{busy ? 'Submitting…' : 'Submit'}</span>
-              </button>
+              {isPractice ? (
+                <span
+                  className="k8s-lab-practice-chip"
+                  title="Hands-on practice: explore freely, there is nothing to submit"
+                >
+                  Practice lab · no submission
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="spark-ide-btn spark-ide-btn--submit"
+                  disabled={busy || !labReady}
+                  onClick={() => void onGrade()}
+                  title={labReady ? 'Submit for grading' : notReadyTitle}
+                >
+                  <IconSubmit color="#04120c" />
+                  <span>{busy ? 'Submitting…' : 'Submit'}</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -642,46 +771,93 @@ export default function K8sLabWorkspace({
               className={`k8s-lab-term-pane-layer${mainTab === 'terminal' ? ' is-active' : ''}`}
               aria-hidden={mainTab !== 'terminal'}
             >
-              <TerminalPanel wsUrl={wsUrl} isActive={mainTab === 'terminal'} resizeProtocol />
+              {lockedMessage ? (
+                <div className="k8s-lab-locked" role="status" aria-live="polite">
+                  <svg className="k8s-lab-locked-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
+                    <rect x="4.5" y="10.5" width="15" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                    <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                  </svg>
+                  <strong>This lab is locked for now</strong>
+                  <p>{lockedMessage}</p>
+                  <p className="k8s-lab-locked-hint">
+                    You can still read the description and the rest of the brief on the left.
+                  </p>
+                  {challenge && (
+                    <button
+                      type="button"
+                      className="spark-ide-btn k8s-lab-locked-retry"
+                      onClick={() => void onSelectChallenge(challenge)}
+                    >
+                      Try again
+                    </button>
+                  )}
+                </div>
+              ) : !labReady ? (
+                <div className="k8s-lab-terminal-warming" role="status" aria-live="polite">
+                  <span className="spinner" />
+                  <div>
+                    {box ? (
+                      <>
+                        <strong>Starting your {machineLabel} machine…</strong>
+                        <p>
+                          A fresh machine is booting for you. This usually takes a few seconds, and up to
+                          two minutes when a new server has to start first.
+                        </p>
+                      </>
+                    ) : openingHeldForCapacity ? (
+                      <>
+                        <strong>Adding cluster capacity for your lab…</strong>
+                        <p>
+                          The cluster is busy, so a node is starting for your lab&apos;s pods
+                          ({capacityEta(capacityWaitedSeconds)}). The shell opens here as soon as they are placed.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <strong>Preparing your cluster terminal…</strong>
+                        <p>
+                          Keep drafting in the Editor — the shell opens here as soon as your namespace is ready.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {capacityWaits.length > 0 && (
+                    <div className="k8s-lab-capacity-notice" role="status" aria-live="polite">
+                      <span className="spinner" />
+                      <span>
+                        Starting extra capacity for{' '}
+                        <code>{capacityWaits.map((w) => w.pod).join(', ')}</code>
+                        {' '}— {capacityEta(capacityWaitedSeconds)}. Your lab&apos;s reserved pods are in use;
+                        this starts automatically and your other pods are unaffected.
+                      </span>
+                    </div>
+                  )}
+                  <TerminalPanel
+                    wsUrl={wsUrl}
+                    isActive={mainTab === 'terminal'}
+                    resizeProtocol
+                    onDisconnect={onTerminalDisconnect}
+                  />
+                </>
+              )}
             </div>
+            {!box && (
             <div
-              className={`k8s-lab-scratch${mainTab === 'scratch' ? ' is-active' : ''}`}
-              aria-hidden={mainTab !== 'scratch'}
+              className={`k8s-lab-scratch${mainTab === 'editor' ? ' is-active' : ''}`}
+              aria-hidden={mainTab !== 'editor'}
             >
-              <p className="k8s-lab-scratch-hint">
-                Draft YAML here, then in Terminal save and apply — e.g.
-                {' '}
-                <code>cat &gt; manifest.yaml</code>
-                , paste, Ctrl-D, then
-                {' '}
-                <code>kubectl apply -f manifest.yaml</code>
-                .
-              </p>
-              <div className="k8s-lab-scratch-editor">
-                <MonacoEditor
-                  height="100%"
-                  language="yaml"
-                  theme="devlabs-k8s-scratch"
-                  value={scratch}
-                  onChange={(v) => setScratch(v ?? '')}
-                  onMount={onMonacoMount}
-                  options={{
-                    readOnly: false,
-                    domReadOnly: false,
-                    fontSize: 13,
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    wordWrap: 'on',
-                    tabSize: 2,
-                    insertSpaces: true,
-                    automaticLayout: true,
-                    renderWhitespace: 'selection',
-                    padding: { top: 12, bottom: 12 },
-                  }}
-                />
-              </div>
+              <K8sLabFileEditor
+                sessionId={session.id}
+                challengeId={challengeId}
+                labReady={labReady}
+                active={mainTab === 'editor'}
+                toggleHint={toggleHint}
+              />
             </div>
+            )}
 
             {!resultsOpen && evalResult && (
               <button
@@ -778,6 +954,42 @@ export default function K8sLabWorkspace({
           </div>
         </div>
       </div>
+      )}
+      <SolutionGateModal
+        open={solutionGateOpen}
+        challengeId={challengeId}
+        onCancel={() => setSolutionGateOpen(false)}
+        onConfirm={() => {
+          setSolutionGateOpen(false);
+          setBriefTab('solution');
+        }}
+      />
+      <ConfirmDialog
+        open={resetConfirmOpen}
+        title="Reset this lab?"
+        confirmLabel="Reset lab"
+        cancelLabel="Cancel"
+        onCancel={() => setResetConfirmOpen(false)}
+        onConfirm={() => void onReset()}
+      >
+        {box ? (
+          <p>
+            Your machine is replaced with a fresh one and the lab&apos;s starting state is set up again.
+            Everything you changed on it, including files in your home folder, is lost.
+          </p>
+        ) : (
+          <>
+            <p>
+              Everything running in your namespace is wiped (Pods, Deployments, Services, ConfigMaps,
+              volumes, …) and the lab&apos;s starting state is set up again.
+            </p>
+            <p>
+              Your code and config files are <strong>not</strong> touched. Anything you created in the
+              Editor or your home folder stays, so you can <code>kubectl apply -f</code> it again.
+            </p>
+          </>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }

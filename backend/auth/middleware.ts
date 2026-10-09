@@ -17,13 +17,35 @@ function adminEmails(): string[] {
     .filter(Boolean);
 }
 
-function isAdminUser(user: { sub?: string; userId?: string; email?: string } | null | undefined): boolean {
+/**
+ * Fast path from JWT: admin claim (set at login), role claim, or ADMIN_EMAILS allowlist.
+ */
+function isAdminUser(
+  user: {
+    sub?: string;
+    userId?: string;
+    email?: string;
+    admin?: boolean;
+    role?: string;
+  } | null | undefined,
+): boolean {
   if (!user) return false;
-  const id = String(user.sub || user.userId || '');
-  if (id === 'admin') return true;
+  if (user.admin === true || user.role === 'admin') return true;
   const emails = adminEmails();
-  // No allowlist configured → every signed-in user can author (private lab).
-  if (!emails.length) return true;
+  if (!emails.length) return false;
+  const email = String(user.email || '').toLowerCase();
+  return Boolean(email && emails.includes(email));
+}
+
+function resolveAdminFlag(user: {
+  email?: string | null;
+  isAdmin?: boolean;
+  is_admin?: boolean;
+  role?: string | null;
+} | null | undefined): boolean {
+  if (!user) return false;
+  if (user.isAdmin || user.is_admin || user.role === 'admin') return true;
+  const emails = adminEmails();
   const email = String(user.email || '').toLowerCase();
   return Boolean(email && emails.includes(email));
 }
@@ -40,15 +62,73 @@ function requireInterviewer(req: ExpressRequest, res: ExpressResponse, next: Exp
   next();
 }
 
-/** Admin authoring (sub=admin or ADMIN_EMAILS). */
+/** Guests pass through without req.user; a valid JWT still identifies the caller. */
+function optionalAuth(req: ExpressRequest, _res: ExpressResponse, next: ExpressNextFunction): void {
+  const token = bearer(req);
+  const payload = token ? verifyToken(token) : null;
+  if (payload) req.user = payload;
+  next();
+}
+
+/** Admin authoring / dashboard — JWT claim, ADMIN_EMAILS, or users.is_admin. */
 function requireAdmin(req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction): void {
   requireInterviewer(req, res, () => {
     if (res.headersSent) return;
-    if (!isAdminUser(req.user)) {
+    if (isAdminUser(req.user)) {
+      next();
+      return;
+    }
+
+    const userId = String(req.user?.sub || req.user?.userId || '');
+    if (!userId) {
       res.status(403).json({ error: 'admin only' });
       return;
     }
-    next();
+
+    const { findUserById } = require('./companyStore');
+    findUserById(userId)
+      .then((dbUser: { isAdmin?: boolean; email?: string; role?: string } | null) => {
+        if (res.headersSent) return;
+        if (dbUser && resolveAdminFlag(dbUser)) {
+          if (req.user) req.user.admin = true;
+          next();
+          return;
+        }
+        res.status(403).json({ error: 'admin only' });
+      })
+      .catch((e: unknown) => next(e));
+  });
+}
+
+/** Admin or reviewer — for challenge Review tab. */
+function requireReviewStaff(req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction): void {
+  requireInterviewer(req, res, () => {
+    if (res.headersSent) return;
+    const { canAccessReviewTab } = require('../challenges/access');
+    if (canAccessReviewTab(req.user)) {
+      next();
+      return;
+    }
+
+    const userId = String(req.user?.sub || req.user?.userId || '');
+    if (!userId) {
+      res.status(403).json({ error: 'reviewers and admins only' });
+      return;
+    }
+
+    const { findUserById } = require('./companyStore');
+    findUserById(userId)
+      .then((dbUser: { isAdmin?: boolean; email?: string; role?: string } | null) => {
+        if (res.headersSent) return;
+        if (dbUser && canAccessReviewTab({ ...dbUser, admin: resolveAdminFlag(dbUser) })) {
+          if (req.user && dbUser.role) req.user.role = dbUser.role as 'admin' | 'reviewer' | 'learner';
+          if (req.user && resolveAdminFlag(dbUser)) req.user.admin = true;
+          next();
+          return;
+        }
+        res.status(403).json({ error: 'reviewers and admins only' });
+      })
+      .catch((e: unknown) => next(e));
   });
 }
 
@@ -65,4 +145,12 @@ function requireSessionAccess(req: ExpressRequest, res: ExpressResponse, next: E
   res.status(401).json({ error: 'unauthenticated' });
 }
 
-module.exports = { requireInterviewer, requireAdmin, requireSessionAccess, isAdminUser };
+module.exports = {
+  requireInterviewer,
+  optionalAuth,
+  requireAdmin,
+  requireReviewStaff,
+  requireSessionAccess,
+  isAdminUser,
+  resolveAdminFlag,
+};

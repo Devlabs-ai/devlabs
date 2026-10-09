@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Navigate,
   Route,
@@ -8,6 +8,9 @@ import {
   useNavigationType,
 } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
+import GoogleAuthCallbackPage from './pages/GoogleAuthCallbackPage';
+import { getMinor } from './constants/minors';
+import { getProject } from './constants/projects';
 import PlayPage from './pages/PlayPage';
 import QuizPage from './pages/QuizPage';
 import WhitePapersPage from './pages/WhitePapersPage';
@@ -19,14 +22,38 @@ import ProjectModulePage from './pages/ProjectModulePage';
 import MinorsPage from './pages/MinorsPage';
 import SparkPlaygroundPage from './pages/SparkPlaygroundPage';
 import SparkPlaygroundOpenPage from './pages/SparkPlaygroundOpenPage';
+import SparkPrimerPage from './pages/SparkPrimerPage';
+import K8sPrimerPage from './pages/K8sPrimerPage';
+import K8sReadingPage from './pages/K8sReadingPage';
 import ProfilePage from './pages/ProfilePage';
+import AdminPage from './pages/AdminPage';
+import AdminFeedbackPage from './pages/AdminFeedbackPage';
+import AdminWaitlistPage from './pages/AdminWaitlistPage';
 import DbExplorerPage from './pages/DbExplorerPage';
+import TrackLeaderboardPage from './pages/TrackLeaderboardPage';
+import PricingPage from './pages/PricingPage';
+import MonthlyPaperPage from './pages/MonthlyPaperPage';
+import PlatformLeaderboardPage from './pages/PlatformLeaderboardPage';
+import LearnerProfilePage from './pages/LearnerProfilePage';
 import AppLayout from './layouts/AppLayout';
-import { AppStateProvider } from './context/AppStateContext';
-import { getToken, getCurrentUser, logout } from './services/authApi';
+import { AppStateProvider, useAppState } from './context/AppStateContext';
+import { getToken, getCurrentUser, logout, fetchMe, takePostLoginPath } from './services/authApi';
 import { fetchChallenges, fetchChallenge } from './services/challengeApi';
 import { startSession, startBoardSession, endSession, restoreSession } from './services/sessionApi';
-import { startSparkSession, startK8sSession } from './services/workspaceApi';
+import { startSparkSession, startK8sSession, fetchK8sAvailability } from './services/workspaceApi';
+import {
+  LAB_HEARTBEAT_MS,
+  LAB_LEASE_RECLAIMED_EVENT,
+  LAB_LEASE_TAKEN_EVENT,
+  LAB_SESSION_ENDED_EVENT,
+  labConflictFromError,
+  releaseLabLease,
+  sendLabHeartbeat,
+  type LabConflict,
+} from './services/labTabLease';
+import ConfirmDialog from './components/ConfirmDialog';
+import AdminOnlyRoute from './components/AdminOnlyRoute';
+import LoginModal from './components/LoginModal';
 import { buildDailyProductSalesProject } from './fixtures/dailyProductSalesL1';
 import {
   buildSparkPlaygroundChallenge,
@@ -36,8 +63,8 @@ import { isSparkPlatformChallenge } from './components/SparkPlatformWorkspace';
 import { isBoardChallenge } from './components/BoardWorkspace';
 import { isKubernetesChallenge } from './components/K8sLabWorkspace';
 import { SPARK_PLAYGROUND_CHALLENGE_ID } from './constants/playgroundDatasets';
-import { catalogPathForChallenge, isPlayDomainId, looksLikePlaySessionId } from './constants/playCatalog';
-import type {
+import { PRICING_PATH } from './constants/pricing';
+import { catalogPathForChallenge, isPlayDomainId, looksLikePlaySessionId } from './constants/playCatalog';import type {
   AuthMode,
   PlayState,
   WorkspaceTab,
@@ -49,16 +76,62 @@ import type {
   AppState,
 } from './types/domain';
 
-function LegacyMajorsRedirect(): JSX.Element {
-  const { pathname } = useLocation();
-  return <Navigate to={pathname.replace(/^\/play\/projects/, '/play/majors')} replace />;
+const LAB_CLOSING_HOLD_MS = 3000;
+const LAB_LOCKED_FALLBACK_MSG = 'Something is down on our side. Please contact the administrator.';
+
+/** Old /play/* links (bookmarks, published lab solutions) moved to /track, /majors and /minors. */
+function LegacyPlayRedirect(): JSX.Element {
+  const { pathname, search, hash } = useLocation();
+  const rest = pathname.replace(/^\/play/, '');
+  let to = `/track${rest}`;
+  if (/^\/(majors|minors)(\/|$)/.test(rest)) to = rest;
+  else if (/^\/projects(\/|$)/.test(rest)) to = rest.replace(/^\/projects/, '/majors');
+  return <Navigate to={to + search + hash} replace />;
 }
+
+const parentPath = (pathname: string): string => pathname.replace(/\/[^/]+\/?$/, '') || '/track';
+
+/** Set while signing out, so a signed-in-only page does not prompt for login on its way to the landing page. */
+let signingOut = false;
+
+/** Guests are sent to `fallback` with the sign-in modal open, then returned here after signing in. */
+function SignedInOnlyRoute({
+  children,
+  fallback = () => '/track',
+  unopened,
+}: {
+  children: React.ReactElement;
+  fallback?: (pathname: string) => string;
+  /** Items that are not open yet redirect on their own; asking guests to sign in for them is pointless. */
+  unopened?: (pathname: string) => boolean;
+}): React.ReactElement {
+  const { authMode, onRequestLogin } = useAppState();
+  const { pathname, search } = useLocation();
+  const signedIn = authMode === 'interviewer';
+  const pass = signedIn || Boolean(unopened?.(pathname));
+  useEffect(() => {
+    if (!pass && !signingOut) onRequestLogin(pathname + search);
+  }, [pass, onRequestLogin, pathname, search]);
+  if (!pass && signingOut) return <Navigate to="/" replace />;
+  return pass ? children : <Navigate to={fallback(pathname)} replace />;
+}
+
+const minorUnopened = (pathname: string): boolean =>
+  getMinor(pathname.split('/')[2])?.status !== 'ready';
+const majorUnopened = (pathname: string): boolean =>
+  getProject(pathname.split('/')[2])?.status !== 'ready';
 
 export default function App(): React.JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const navigationType = useNavigationType();
   const openingSessionRef = useRef<string | null>(null);
+  /** Bumped per lab start/restore; a superseded attempt must not touch UI state when it resolves. */
+  const startAttemptRef = useRef(0);
+  const pendingStartRef = useRef(false);
+  const pendingStartPathRef = useRef<string | null>(null);
+  const pendingStartChallengeRef = useRef<string | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
 
   const [authMode, setAuthMode] = useState<AuthMode>('resolving');
   const [currentUser, setCurrentUser] = useState<UserRecord | null>(null);
@@ -67,19 +140,51 @@ export default function App(): React.JSX.Element {
 
   const [playState, setPlayState] = useState<PlayState>('library');
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
+  activeSessionIdRef.current = activeSession?.id ?? null;
   const [activeChallenge, setActiveChallenge] = useState<ChallengePublic | ChallengeFull | null>(null);
   const [endResult, setEndResult] = useState<EndSessionResult | null>(null);
   const [ending, setEnding] = useState<boolean>(false);
+  const [closingLabTitle, setClosingLabTitle] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('problem');
+  const [labConflict, setLabConflict] = useState<{
+    challenge: ChallengePublic | ChallengeFull;
+    conflict: LabConflict;
+  } | null>(null);
+  const [labLeaseLost, setLabLeaseLost] = useState<'taken' | 'ended' | null>(null);
+  const [labLeaseBusy, setLabLeaseBusy] = useState<boolean>(false);
+  const [heartbeatEpoch, setHeartbeatEpoch] = useState<number>(0);
+  const [loginOpen, setLoginOpen] = useState<boolean>(false);
+  const [loginReturnTo, setLoginReturnTo] = useState<string | null>(null);
+  const requestLogin = useCallback((returnTo?: string): void => {
+    setLoginReturnTo(typeof returnTo === 'string' ? returnTo : null);
+    setLoginOpen(true);
+  }, []);
 
   useEffect(() => {
-    if (getToken()) {
+    let cancelled = false;
+    async function resolveAuth(): Promise<void> {
+      if (!getToken()) {
+        if (!cancelled) setAuthMode('unauthenticated');
+        return;
+      }
       setCurrentUser(getCurrentUser());
-      setAuthMode('interviewer');
-    } else {
-      setAuthMode('unauthenticated');
+      try {
+        const me = await fetchMe();
+        if (cancelled) return;
+        if (me.user) setCurrentUser(me.user);
+        setAuthMode('interviewer');
+      } catch (_e) {
+        if (cancelled) return;
+        logout();
+        setCurrentUser(null);
+        setAuthMode('unauthenticated');
+      }
     }
+    void resolveAuth();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const refreshChallenges = async (): Promise<void> => {
@@ -94,21 +199,122 @@ export default function App(): React.JSX.Element {
     }
   };
 
+  /** Leaving the UI used to drop client state only — end on the server so K8s can park/wipe. */
+  const endActiveSessionBestEffort = useCallback((session: ActiveSession | null): Promise<void> => {
+    if (!session?.id || session.id.startsWith('pending-k8s-')) return Promise.resolve();
+    return endSession(session.id).then(
+      () => undefined,
+      (err: unknown) => {
+        console.warn('[session] end on leave failed', err);
+      },
+    );
+  }, []);
+
+  const beginStartAttempt = (challengeId: string | null = null): { stale: () => boolean; settle: () => void } => {
+    const attempt = ++startAttemptRef.current;
+    pendingStartRef.current = true;
+    pendingStartPathRef.current = window.location.pathname;
+    pendingStartChallengeRef.current = challengeId;
+    const stale = (): boolean => startAttemptRef.current !== attempt;
+    return {
+      stale,
+      settle: () => {
+        if (!stale()) pendingStartRef.current = false;
+      },
+    };
+  };
+
+  /** User navigated away while a lab was still opening — drop it and return to the catalog. */
+  const abandonPendingStart = (): void => {
+    startAttemptRef.current += 1;
+    pendingStartRef.current = false;
+    pendingStartPathRef.current = null;
+    openingSessionRef.current = null;
+    setPlayState('library');
+    setActiveSession(null);
+    setActiveChallenge(null);
+    setEndResult(null);
+  };
+
+  /**
+   * End a session created by an abandoned start. Reopening the same lab reuses
+   * its session id, so skip it when it is on screen or a newer start for the same
+   * lab is in flight; ending it would park the lab the user just reopened.
+   */
+  const discardStartedSession = (sessionId: string | null | undefined, challengeId: string | null = null): void => {
+    if (!sessionId) return;
+    if (activeSessionIdRef.current === sessionId) return;
+    if (challengeId && pendingStartRef.current && pendingStartChallengeRef.current === challengeId) return;
+    endSession(sessionId).catch((err: unknown) => {
+      console.warn('[session] end of abandoned start failed', err);
+    });
+  };
+
+  /**
+   * Fire-and-forget end/park, keep the lab on screen under a "Closing lab…"
+   * overlay for a beat, then reveal the catalog.
+   */
+  const dismissK8sLabToCatalog = useCallback(async (
+    session: ActiveSession,
+    dest: string,
+    title: string | null,
+  ): Promise<void> => {
+    setClosingLabTitle(title);
+    setEnding(true);
+    void endActiveSessionBestEffort(session);
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, LAB_CLOSING_HOLD_MS);
+    });
+    setPlayState('library');
+    setActiveSession(null);
+    setActiveChallenge(null);
+    setEndResult(null);
+    setLabLeaseLost(null);
+    navigate(dest);
+    void refreshChallenges();
+    setEnding(false);
+    setClosingLabTitle(null);
+  }, [endActiveSessionBestEffort, navigate]);
+
   useEffect(() => {
-    if (authMode === 'interviewer') {
+    if (authMode !== 'resolving') {
       void refreshChallenges();
     }
   }, [authMode]);
 
-  const handleSelectChallenge = async (challenge: ChallengePublic | ChallengeFull): Promise<void> => {
+  const handleSelectChallenge = async (
+    challenge: ChallengePublic | ChallengeFull,
+    opts: { force?: boolean } = {},
+  ): Promise<void> => {
+    if (authMode !== 'interviewer') {
+      requestLogin();
+      return;
+    }
+    if ((challenge as ChallengePublic).locked) {
+      navigate(PRICING_PATH);
+      return;
+    }
+    const force = Boolean(opts.force);
     setStartError(null);
-    setPlayState('loading');
+    setLabConflict(null);
+    setLabLeaseLost(null);
     setActiveChallenge(challenge);
+    const attempt = beginStartAttempt(challenge.id);
+    // K8s: open the lab UI immediately (no full-page loader). Other runtimes keep the spinner.
+    if (!isKubernetesChallenge(challenge)) {
+      setPlayState('loading');
+    }
 
     if (isBoardChallenge(challenge)) {
       try {
         const full = await fetchChallenge(challenge.id);
-        const res = await startBoardSession(full.id);
+        if (attempt.stale()) return;
+        const res = await startBoardSession(full.id, { force });
+        if (attempt.stale()) {
+          discardStartedSession(res.sessionId);
+          return;
+        }
+        attempt.settle();
         const hydrated =
           (res.challenge as ChallengeFull | undefined)
           || (res.session as { challenge?: ChallengeFull } | undefined)?.challenge
@@ -127,13 +333,20 @@ export default function App(): React.JSX.Element {
         setActiveChallenge(hydrated);
         openingSessionRef.current = res.sessionId;
         setPlayState('active');
-        navigate(`/play/${res.sessionId}`);
+        navigate(`/track/${res.sessionId}`);
       } catch (e) {
+        if (attempt.stale()) return;
+        attempt.settle();
         const err = e as { response?: { data?: { error?: string } }; message?: string };
         setActiveChallenge(null);
         setActiveSession(null);
         setPlayState('library');
         navigate(catalogPathForChallenge(challenge.id, challenge.sandboxType, challenge.tags), { replace: true });
+        const labConflictHit = labConflictFromError(e);
+        if (labConflictHit) {
+          setLabConflict({ challenge, conflict: labConflictHit });
+          return;
+        }
         setStartError(
           err?.response?.data?.error
             || err.message
@@ -147,6 +360,7 @@ export default function App(): React.JSX.Element {
     if (isSparkPlatformChallenge(challenge)) {
       try {
         const full = await fetchChallenge(challenge.id);
+        if (attempt.stale()) return;
         const platform = full.sparkPlatform;
         const contentSource = full.contentSource || platform?.contentSource;
         // MinIO SSOT labs: backend loads challenges/<id>/starter/.
@@ -162,7 +376,13 @@ export default function App(): React.JSX.Element {
           full.id,
           starterFiles,
           platform?.starterFileName,
+          { force },
         );
+        if (attempt.stale()) {
+          discardStartedSession(res.sessionId);
+          return;
+        }
+        attempt.settle();
         const hydrated =
           (res.challenge as ChallengeFull | undefined)
           || (res.session as { challenge?: ChallengeFull } | undefined)?.challenge
@@ -182,13 +402,20 @@ export default function App(): React.JSX.Element {
         setActiveTab('editor');
         openingSessionRef.current = res.sessionId;
         setPlayState('active');
-        navigate(`/play/${res.sessionId}`);
+        navigate(`/track/${res.sessionId}`);
       } catch (e) {
+        if (attempt.stale()) return;
+        attempt.settle();
         const err = e as { response?: { data?: { error?: string } }; message?: string };
         setActiveChallenge(null);
         setActiveSession(null);
         setPlayState('library');
         navigate(catalogPathForChallenge(challenge.id, challenge.sandboxType, challenge.tags), { replace: true });
+        const labConflictHit = labConflictFromError(e);
+        if (labConflictHit) {
+          setLabConflict({ challenge, conflict: labConflictHit });
+          return;
+        }
         setStartError(
           err?.response?.data?.error
             || err.message
@@ -199,9 +426,48 @@ export default function App(): React.JSX.Element {
     }
 
     if (isKubernetesChallenge(challenge)) {
+      const pendingId = `pending-k8s-${challenge.id}`;
+      const pendingSession: ActiveSession = {
+        id: pendingId,
+        startTime: Date.now(),
+        recovered: false,
+        terminalWsUrl: null,
+        metricsWsUrl: null,
+        portMap: null,
+        services: [],
+        terminalService: null,
+        runtime: 'kubernetes',
+        k8sNamespace: null,
+        labReady: false,
+      };
+      // Pool down: keep the lab on screen with its brief readable and the terminal locked.
+      const lockLab = (message: string | null): void => {
+        setActiveSession({ ...pendingSession, lockedMessage: message || LAB_LOCKED_FALLBACK_MSG });
+      };
+      setActiveTab('problem');
+      setActiveSession(pendingSession);
+      setPlayState('active');
+      openingSessionRef.current = pendingId;
+
       try {
         const full = await fetchChallenge(challenge.id);
-        const res = await startK8sSession(full.id);
+        if (attempt.stale()) return;
+        setActiveChallenge(full);
+
+        const availability = await fetchK8sAvailability(full.id).catch(() => null);
+        if (attempt.stale()) return;
+        if (availability && !availability.available) {
+          attempt.settle();
+          lockLab(availability.message);
+          return;
+        }
+
+        const res = await startK8sSession(full.id, { force });
+        if (attempt.stale()) {
+          discardStartedSession(res.sessionId);
+          return;
+        }
+        attempt.settle();
         const hydrated =
           (res.challenge as ChallengeFull | undefined)
           || (res.session as { challenge?: ChallengeFull } | undefined)?.challenge
@@ -219,18 +485,29 @@ export default function App(): React.JSX.Element {
           k8sNamespace: res.k8sNamespace
             || (res.session as { k8sNamespace?: string } | undefined)?.k8sNamespace
             || null,
+          labReady: true,
         });
         setActiveChallenge(hydrated);
-        setActiveTab('problem');
         openingSessionRef.current = res.sessionId;
-        setPlayState('active');
-        navigate(`/play/${res.sessionId}`);
+        navigate(`/track/${res.sessionId}`);
       } catch (e) {
+        if (attempt.stale()) return;
+        attempt.settle();
         const err = e as { response?: { data?: { error?: string } }; message?: string };
+        const code = (e as { response?: { data?: { code?: string } } })?.response?.data?.code;
+        if (code === 'LAB_ENV_UNAVAILABLE') {
+          lockLab(err?.response?.data?.error || null);
+          return;
+        }
         setActiveChallenge(null);
         setActiveSession(null);
         setPlayState('library');
         navigate(catalogPathForChallenge(challenge.id, challenge.sandboxType, challenge.tags), { replace: true });
+        const labConflictHit = labConflictFromError(e);
+        if (labConflictHit) {
+          setLabConflict({ challenge, conflict: labConflictHit });
+          return;
+        }
         setStartError(
           err?.response?.data?.error
             || err.message
@@ -242,6 +519,11 @@ export default function App(): React.JSX.Element {
 
     try {
       const res = await startSession(challenge.id);
+      if (attempt.stale()) {
+        discardStartedSession(res.sessionId);
+        return;
+      }
+      attempt.settle();
       const rawSession = res.session as {
         startTime?: number;
         portMap?: Record<string, string | number> | null;
@@ -261,8 +543,10 @@ export default function App(): React.JSX.Element {
       setActiveTab('problem');
       openingSessionRef.current = res.sessionId;
       setPlayState('active');
-      navigate(`/play/${res.sessionId}`);
+      navigate(`/track/${res.sessionId}`);
     } catch (e) {
+      if (attempt.stale()) return;
+      attempt.settle();
       const err = e as { response?: { data?: { error?: string } }; message?: string };
       setStartError(err?.response?.data?.error || err.message || 'Unknown error');
       setPlayState('library');
@@ -272,50 +556,73 @@ export default function App(): React.JSX.Element {
 
   // Keep play UI in sync with the URL (browser Back/Forward, deep links).
   useEffect(() => {
-    if (authMode === 'resolving' || authMode === 'unauthenticated') return;
+    if (authMode === 'resolving') return;
+
+    // A locked lab also keeps the catalog URL, so leaving that URL drops it.
+    const abandoned =
+      (pendingStartRef.current || Boolean(activeSession?.lockedMessage))
+      && window.location.pathname !== pendingStartPathRef.current;
+    if (abandoned) abandonPendingStart();
+    const currentPlayState: PlayState = abandoned ? 'library' : playState;
+    const currentSession = abandoned ? null : activeSession;
 
     const path = location.pathname.replace(/\/$/, '') || '/';
-    const segments = path.split('/').filter(Boolean); // ['play', ...]
-    const underPlay = segments[0] === 'play';
+    const segments = path.split('/').filter(Boolean); // ['track', ...]
+    const underPlay = segments[0] === 'track';
     if (!underPlay) return;
 
     const a = segments[1] || null;
     const b = segments[2] || null;
 
-    // Quiz / papers / quests / playgrounds / majors / minors — not session restore paths
+    // Quiz / papers / quests / playgrounds — not session restore paths
     if (
       a === 'quiz' ||
       a === 'papers' ||
       a === 'quests' ||
       a === 'whiteboard' ||
       a === 'playgrounds' ||
-      a === 'projects' ||
-      a === 'majors' ||
-      a === 'minors' ||
       a === 'spark-playground'
     ) {
       return;
     }
 
-    // Catalog: /play | /play/:domain | /play/:domain/:panel
+    // Catalog: /track | /track/:domain | /track/:domain/:panel
     if (!a || isPlayDomainId(a)) {
-      if (playState === 'loading') return;
+      if (currentPlayState === 'loading') return;
       if (openingSessionRef.current) return;
-      if (playState === 'active' || playState === 'ended') {
+      if (ending) return;
+      if (currentPlayState === 'active' || currentPlayState === 'ended') {
+        const leaving = currentPlayState === 'active' ? currentSession : null;
+        if (leaving?.runtime === 'kubernetes') {
+          const dest = location.pathname.replace(/\/$/, '') || '/track';
+          void dismissK8sLabToCatalog(
+            leaving,
+            dest.startsWith('/track') ? dest : '/track',
+            activeChallenge?.title || null,
+          );
+          return;
+        }
         setPlayState('library');
         setActiveSession(null);
         setActiveChallenge(null);
         setEndResult(null);
+        if (leaving) void endActiveSessionBestEffort(leaving);
       }
       return;
     }
 
-    // Session: /play/:sessionId (UUID / opaque id — not a catalog domain slug)
+    // Session: /track/:sessionId (UUID / opaque id — not a catalog domain slug)
     if (b) return;
     const sessionId = a;
 
     if (!looksLikePlaySessionId(sessionId)) {
-      navigate('/play', { replace: true });
+      navigate('/track', { replace: true });
+      return;
+    }
+
+    if (authMode !== 'interviewer') {
+      navigate('/track', { replace: true });
+      requestLogin();
       return;
     }
 
@@ -323,14 +630,16 @@ export default function App(): React.JSX.Element {
       openingSessionRef.current = null;
     }
 
-    if (playState === 'active' && activeSession?.id === sessionId) return;
-    if (playState === 'loading') return;
+    if (currentPlayState === 'active' && currentSession?.id === sessionId) return;
+    if (currentPlayState === 'loading') return;
 
     setPlayState('loading');
+    const attempt = beginStartAttempt();
 
     void (async () => {
       try {
         const res = await restoreSession(sessionId);
+        if (attempt.stale()) return;
         const runtime =
           (res?.session as { runtime?: string } | null | undefined)?.runtime ||
           (res as { runtime?: string } | null | undefined)?.runtime ||
@@ -361,7 +670,9 @@ export default function App(): React.JSX.Element {
               || (res as { k8sNamespace?: string } | null)?.k8sNamespace
               || sess?.workspacePrefix
               || null,
+            labReady: true,
           });
+          attempt.settle();
           setActiveChallenge((res?.challenge as ChallengeFull | null) || null);
           setActiveTab('problem');
           setPlayState('active');
@@ -389,17 +700,21 @@ export default function App(): React.JSX.Element {
           terminalService: res.terminalService || null,
           runtime: 'compose',
         });
+        attempt.settle();
         setActiveChallenge(res.challenge || null);
         setActiveTab('problem');
         setPlayState('active');
       } catch {
+        if (attempt.stale()) return;
         try {
           await restoreSparkWorkspace(sessionId, null);
         } catch {
+          if (attempt.stale()) return;
+          attempt.settle();
           setPlayState('library');
           setActiveSession(null);
           setActiveChallenge(null);
-          navigate('/play', { replace: true });
+          navigate('/track', { replace: true });
         }
       }
     })();
@@ -420,6 +735,8 @@ export default function App(): React.JSX.Element {
           /* keep session challenge payload */
         }
       }
+      if (attempt.stale()) return;
+      attempt.settle();
       setActiveSession({
         id: sid,
         startTime: sessionRes?.startTime || Date.now(),
@@ -461,6 +778,8 @@ export default function App(): React.JSX.Element {
         full = await fetchChallenge(full.id);
       }
 
+      if (attempt.stale()) return;
+      attempt.settle();
       setActiveSession({
         id: sid,
         startTime: sessionRes?.startTime || Date.now(),
@@ -480,7 +799,12 @@ export default function App(): React.JSX.Element {
   }, [location.pathname, authMode, navigationType]);
 
   const handleEnd = async (): Promise<void> => {
-    if (!activeSession) return;
+    if (!activeSession || ending) return;
+    if (activeSession.id.startsWith('pending-k8s-')) {
+      abandonPendingStart();
+      setEnding(false);
+      return;
+    }
     setEnding(true);
     try {
       if (activeSession.runtime === 'board') {
@@ -490,6 +814,11 @@ export default function App(): React.JSX.Element {
         return;
       }
       if (activeSession.runtime === 'spark-platform' || activeSession.id.startsWith('spark-')) {
+        try {
+          await endSession(activeSession.id);
+        } catch (_e) {
+          /* still close UI */
+        }
         setEndResult({
           sessionId: activeSession.id,
           elapsed: Date.now() - activeSession.startTime,
@@ -497,6 +826,16 @@ export default function App(): React.JSX.Element {
         setPlayState('ended');
         return;
       }
+      if (activeSession.runtime === 'kubernetes') {
+        const dest = catalogPathForChallenge(
+          activeChallenge?.id,
+          activeChallenge?.sandboxType,
+          activeChallenge?.tags,
+        );
+        await dismissK8sLabToCatalog(activeSession, dest, activeChallenge?.title || null);
+        return;
+      }
+      // compose: end on server, then summary card
       const res = await endSession(activeSession.id);
       setEndResult(res as EndSessionResult);
       setPlayState('ended');
@@ -509,8 +848,13 @@ export default function App(): React.JSX.Element {
   };
 
   const handleOpenSparkPlayground = async (): Promise<void> => {
+    if (authMode !== 'interviewer') {
+      requestLogin();
+      return;
+    }
     setStartError(null);
     setPlayState('loading');
+    const attempt = beginStartAttempt();
     const challenge = buildSparkPlaygroundChallenge();
     try {
       const res = await startSparkSession(
@@ -518,6 +862,11 @@ export default function App(): React.JSX.Element {
         buildSparkPlaygroundStarter(),
         'src/main.py',
       );
+      if (attempt.stale()) {
+        discardStartedSession(res.sessionId);
+        return;
+      }
+      attempt.settle();
       setActiveSession({
         id: res.sessionId,
         startTime: Date.now(),
@@ -533,8 +882,10 @@ export default function App(): React.JSX.Element {
       setActiveTab('editor');
       openingSessionRef.current = res.sessionId;
       setPlayState('active');
-      navigate(`/play/${res.sessionId}`);
+      navigate(`/track/${res.sessionId}`);
     } catch (e) {
+      if (attempt.stale()) return;
+      attempt.settle();
       const err = e as { response?: { data?: { error?: string } }; message?: string };
       setActiveChallenge(null);
       setActiveSession(null);
@@ -544,13 +895,103 @@ export default function App(): React.JSX.Element {
           || err.message
           || 'Failed to open Spark Playground',
       );
-      navigate('/play/spark-playground', { replace: true });
+      navigate('/track/spark-playground', { replace: true });
       throw e;
     }
   };
 
   const handleBackToLibrary = (): void => {
+    const dest = catalogPathForChallenge(activeChallenge?.id, activeChallenge?.sandboxType, activeChallenge?.tags);    // A lab still opening keeps the catalog URL, so navigating there alone never
+    // invalidates the start; it would finish and pull the user back into the lab.
+    if (pendingStartRef.current || activeSession?.id.startsWith('pending-k8s-')) {
+      abandonPendingStart();
+      navigate(dest);
+      void refreshChallenges();
+      return;
+    }
+    const leaving = playState === 'active' ? activeSession : null;
+    if (leaving?.runtime === 'kubernetes') {
+      if (ending) return;
+      void dismissK8sLabToCatalog(leaving, dest, activeChallenge?.title || null);
+      return;
+    }
+    setPlayState('library');
+    setActiveSession(null);
+    setActiveChallenge(null);
+    setEndResult(null);
+    navigate(dest);
+    if (leaving) void endActiveSessionBestEffort(leaving);
+    void refreshChallenges();
+  };
+
+  // Not while ending: the user's own end request tears the lab down, and that must not read as "ended elsewhere".
+  const leaseSessionId =
+    playState === 'active'
+    && !ending
+    && activeSession
+    && !activeSession.id.startsWith('pending-k8s-')
+    && (activeSession.runtime === 'kubernetes'
+      || activeSession.runtime === 'spark-platform'
+      || activeSession.runtime === 'board')
+    && activeChallenge?.id !== SPARK_PLAYGROUND_CHALLENGE_ID
+      ? activeSession.id
+      : null;
+
+  useEffect(() => {
+    if (!leaseSessionId || labLeaseLost) return undefined;
+    let cancelled = false;
+    const beat = async (): Promise<void> => {
+      const result = await sendLabHeartbeat(leaseSessionId);
+      if (cancelled) return;
+      if (result === 'taken' || result === 'ended') setLabLeaseLost(result);
+    };
+    void beat();
+    const timer = window.setInterval(() => void beat(), LAB_HEARTBEAT_MS);
+    const onPageHide = (): void => releaseLabLease(leaseSessionId);
+    // Switching back to this tab should reveal a takeover at once, not at the next beat.
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') void beat();
+    };
+    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [leaseSessionId, labLeaseLost, heartbeatEpoch]);
+
+  useEffect(() => {
+    if (!leaseSessionId) return undefined;
+    const onTaken = (): void => setLabLeaseLost((prev) => prev || 'taken');
+    const onEnded = (): void => setLabLeaseLost('ended');
+    window.addEventListener(LAB_LEASE_TAKEN_EVENT, onTaken);
+    window.addEventListener(LAB_SESSION_ENDED_EVENT, onEnded);
+    return () => {
+      window.removeEventListener(LAB_LEASE_TAKEN_EVENT, onTaken);
+      window.removeEventListener(LAB_SESSION_ENDED_EVENT, onEnded);
+    };
+  }, [leaseSessionId]);
+
+  const handleUseLabHere = async (): Promise<void> => {
+    if (!leaseSessionId) return;
+    setLabLeaseBusy(true);
+    const result = await sendLabHeartbeat(leaseSessionId, true);
+    setLabLeaseBusy(false);
+    if (result === 'ok') {
+      setLabLeaseLost(null);
+      setHeartbeatEpoch((n) => n + 1);
+      window.dispatchEvent(new Event(LAB_LEASE_RECLAIMED_EVENT));
+    } else if (result === 'ended') {
+      setLabLeaseLost('ended');
+    }
+  };
+
+  /** Leave without ending: the session belongs to the other tab (or is already over). */
+  const handleLeaveLostLab = (): void => {
     const dest = catalogPathForChallenge(activeChallenge?.id, activeChallenge?.sandboxType, activeChallenge?.tags);
+    setLabLeaseLost(null);
     setPlayState('library');
     setActiveSession(null);
     setActiveChallenge(null);
@@ -560,21 +1001,28 @@ export default function App(): React.JSX.Element {
   };
 
   const handleLogout = (): void => {
+    signingOut = true;
     logout();
     setCurrentUser(null);
     setAuthMode('unauthenticated');
-    navigate('/');
+    setLoginOpen(false);
+    navigate('/', { replace: true });
   };
+
+  useEffect(() => {
+    if (location.pathname === '/') signingOut = false;
+  }, [location.pathname]);
 
   const handleLoggedIn = (user?: UserRecord | null): void => {
     setCurrentUser(user || getCurrentUser());
     setAuthMode('interviewer');
-    navigate('/play', { replace: true });
+    setLoginOpen(false);
+    navigate(takePostLoginPath() || '/track', { replace: true });
   };
 
   useEffect(() => {
     if (authMode !== 'unauthenticated' && authMode !== 'resolving' && location.pathname === '/') {
-      navigate('/play', { replace: true });
+      navigate('/track', { replace: true });
     }
   }, [authMode, location.pathname, navigate]);
 
@@ -591,11 +1039,14 @@ export default function App(): React.JSX.Element {
     activeTab,
     setActiveTab,
     ending,
+    closingLabTitle,
     onSelectChallenge: handleSelectChallenge,
     onOpenSparkPlayground: handleOpenSparkPlayground,
     onBackToLibrary: handleBackToLibrary,
     onEnd: handleEnd,
     onLogout: handleLogout,
+    onRequestLogin: requestLogin,
+    refreshChallenges,
   }), [
     authMode,
     currentUser,
@@ -608,6 +1059,7 @@ export default function App(): React.JSX.Element {
     endResult,
     activeTab,
     ending,
+    closingLabTitle,
   ]);
 
   if (authMode === 'resolving') {
@@ -618,52 +1070,137 @@ export default function App(): React.JSX.Element {
     );
   }
 
-  if (authMode === 'unauthenticated') {
-    return (
+  return (
+    <AppStateProvider value={appState}>
       <Routes>
         <Route
           path="/"
           element={
-            <LandingPage onLoggedIn={handleLoggedIn} />
+            authMode === 'unauthenticated'
+              ? <LandingPage onSignIn={() => requestLogin()} onGetStarted={() => navigate('/track')} />
+              : <Navigate to="/track" replace />
           }
         />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    );
-  }
-
-  return (
-    <AppStateProvider value={appState}>
-      <Routes>
-        <Route path="/" element={<Navigate to="/play" replace />} />
+        <Route
+          path="/auth/google/callback"
+          element={<GoogleAuthCallbackPage onLoggedIn={handleLoggedIn} />}
+        />
+        <Route path="play/*" element={<LegacyPlayRedirect />} />
         <Route element={<AppLayout />}>
-          <Route path="play" element={<PlayPage />} />
-          <Route path="play/quiz/:quizId" element={<QuizPage />} />
-          <Route path="play/papers" element={<WhitePapersPage />} />
-          <Route path="play/papers/:sectionId" element={<WhitePapersPage />} />
-          <Route path="play/whiteboard" element={<WhiteboardPage />} />
-          <Route path="play/whiteboard/:sectionId" element={<WhiteboardPage />} />
-          <Route path="play/quests" element={<SideQuestsPage />} />
-          <Route path="play/quests/:topicId" element={<SideQuestsPage />} />
-          <Route path="play/playgrounds" element={<PlaygroundsPage />} />
-          <Route path="play/majors" element={<ProjectsPage />} />
-          <Route path="play/majors/:projectId" element={<ProjectsPage />} />
-          <Route path="play/majors/:projectId/:moduleId" element={<ProjectModulePage />} />
-          <Route path="play/projects/*" element={<LegacyMajorsRedirect />} />
-          <Route path="play/projects" element={<Navigate to="/play/majors" replace />} />
-          <Route path="play/minors" element={<MinorsPage />} />
-          <Route path="play/minors/:minorId" element={<MinorsPage />} />
-          <Route path="play/spark-playground/open" element={<SparkPlaygroundOpenPage />} />
-          <Route path="play/spark-playground" element={<SparkPlaygroundPage />} />
-          <Route path="play/:domainId" element={<PlayPage />} />
-          <Route path="play/:domainId/:panelId" element={<PlayPage />} />
-          <Route path="profile" element={<ProfilePage />} />
+          <Route path="track" element={<PlayPage />} />
+          <Route path="track/quiz/:quizId" element={<SignedInOnlyRoute><QuizPage /></SignedInOnlyRoute>} />
+          <Route path="track/papers" element={<AdminOnlyRoute><WhitePapersPage /></AdminOnlyRoute>} />
+          <Route path="track/papers/:sectionId" element={<AdminOnlyRoute><WhitePapersPage /></AdminOnlyRoute>} />
+          <Route path="track/whiteboard" element={<WhiteboardPage />} />
+          <Route path="track/whiteboard/:sectionId" element={<WhiteboardPage />} />
+          <Route path="track/quests" element={<SideQuestsPage />} />
+          <Route path="track/quests/:topicId" element={<SideQuestsPage />} />
+          <Route path="track/playgrounds" element={<PlaygroundsPage />} />
+          <Route path="majors" element={<ProjectsPage />} />
+          <Route path="majors/:projectId" element={<ProjectsPage />} />
+          <Route
+            path="majors/:projectId/:moduleId"
+            element={<SignedInOnlyRoute fallback={parentPath} unopened={majorUnopened}><ProjectModulePage /></SignedInOnlyRoute>}
+          />
+          <Route path="minors" element={<MinorsPage />} />
+          <Route
+            path="minors/:minorId"
+            element={<SignedInOnlyRoute fallback={parentPath} unopened={minorUnopened}><MinorsPage /></SignedInOnlyRoute>}
+          />
+          <Route
+            path="minors/:minorId/:chapterId"
+            element={<SignedInOnlyRoute fallback={parentPath} unopened={minorUnopened}><MinorsPage /></SignedInOnlyRoute>}
+          />
+          <Route path="pricing" element={<PricingPage />} />
+          <Route path="monthly-paper" element={<MonthlyPaperPage />} />
+          <Route path="leaderboard" element={<PlatformLeaderboardPage />} />
+          <Route path="learners/:learnerId" element={<LearnerProfilePage />} />
+          <Route path="track/spark-playground/open" element={<SparkPlaygroundOpenPage />} />
+          <Route path="track/spark-playground" element={<SparkPlaygroundPage />} />
+          <Route path="track/data-engineer/spark/intro" element={<SparkPrimerPage />} />
+          <Route path="track/devops-engineer/kubernetes/intro" element={<K8sPrimerPage />} />
+          <Route
+            path="track/devops-engineer/kubernetes/read/:readingSlug"
+            element={<K8sReadingPage />}
+          />
+          <Route
+            path="track/devops-engineer/linux/read/:readingSlug"
+            element={<K8sReadingPage trackId="linux" />}
+          />
+          <Route
+            path="track/devops-engineer/docker/read/:readingSlug"
+            element={<K8sReadingPage trackId="docker" />}
+          />
+          <Route path="track/:domainId/:panelId/leaderboard" element={<TrackLeaderboardPage />} />
+          <Route path="track/:domainId" element={<PlayPage />} />
+          <Route path="track/:domainId/:panelId" element={<PlayPage />} />
+          <Route path="profile" element={<SignedInOnlyRoute><ProfilePage /></SignedInOnlyRoute>} />
+          <Route path="admin" element={<SignedInOnlyRoute><AdminPage /></SignedInOnlyRoute>} />
+          <Route path="admin/feedback" element={<SignedInOnlyRoute><AdminFeedbackPage /></SignedInOnlyRoute>} />
+          <Route path="admin/waitlist" element={<SignedInOnlyRoute><AdminWaitlistPage /></SignedInOnlyRoute>} />
           {import.meta.env.DEV && (
-            <Route path="dev/db" element={<DbExplorerPage />} />
+            <Route path="dev/db" element={<SignedInOnlyRoute><DbExplorerPage /></SignedInOnlyRoute>} />
           )}
         </Route>
-        <Route path="*" element={<Navigate to="/play" replace />} />
+        <Route path="*" element={<Navigate to="/track" replace />} />
       </Routes>
+      <LoginModal
+        open={loginOpen}
+        onClose={() => setLoginOpen(false)}
+        onLoggedIn={handleLoggedIn}
+        returnTo={loginReturnTo}
+      />
+      <ConfirmDialog
+        open={Boolean(labConflict)}
+        title={
+          labConflict?.conflict.code === 'LAB_OPEN_IN_OTHER_TAB'
+            ? 'Lab already open in another tab'
+            : 'You already have a lab open'
+        }
+        confirmLabel={
+          labConflict?.conflict.code === 'LAB_OPEN_IN_OTHER_TAB' ? 'Use it here' : 'End it and open this'
+        }
+        cancelLabel="Cancel"
+        onCancel={() => setLabConflict(null)}
+        onConfirm={() => {
+          if (labConflict) void handleSelectChallenge(labConflict.challenge, { force: true });
+        }}
+      >
+        {labConflict?.conflict.code === 'LAB_OPEN_IN_OTHER_TAB' ? (
+          <p>
+            <strong>{labConflict.challenge.title}</strong> is already open in another tab or window.
+            Continue here? The other tab will be disconnected.
+          </p>
+        ) : (
+          <p>
+            Only one lab can run at a time.{' '}
+            {labConflict?.conflict.activeTitle ? (
+              <>
+                <strong>{labConflict.conflict.activeTitle}</strong> is still running.{' '}
+              </>
+            ) : null}
+            End it and open <strong>{labConflict?.challenge.title}</strong>?
+          </p>
+        )}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={Boolean(labLeaseLost)}
+        title={labLeaseLost === 'ended' ? 'This lab session has ended' : 'Lab opened in another tab'}
+        confirmLabel={labLeaseLost === 'ended' ? 'Back to labs' : 'Use it here'}
+        cancelLabel={labLeaseLost === 'ended' ? 'Close' : 'Back to labs'}
+        busy={labLeaseBusy}
+        onCancel={handleLeaveLostLab}
+        onConfirm={() => {
+          if (labLeaseLost === 'ended') handleLeaveLostLab();
+          else void handleUseLabHere();
+        }}
+      >
+        {labLeaseLost === 'ended' ? (
+          <p>This session was closed, most likely because another lab was started. Head back to the catalog to continue.</p>
+        ) : (
+          <p>This lab is now active in another tab or window. Only one tab can drive a lab at a time.</p>
+        )}
+      </ConfirmDialog>
     </AppStateProvider>
   );
 }

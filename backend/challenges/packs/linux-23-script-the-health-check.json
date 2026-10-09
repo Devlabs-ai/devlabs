@@ -1,0 +1,46 @@
+{
+  "id": "linux-23-script-the-health-check",
+  "number": 323,
+  "finalized": true,
+  "title": "Script the Health Check",
+  "description": "**SITUATION:**\n\nBefore every deploy, the on-call engineer runs three `curl` commands by hand and eyeballs the output. Last week they misread one and deployed onto a dead payment-handler. The deploy pipeline needs one command it can trust, one whose **exit code** says whether a service is healthy.\n\nService ports are registered in `/etc/order-platform/services` (columns: name, port). More services will be added to that file later.\n\n**YOUR TASK:**\n\nWrite `/usr/local/bin/check-health`, a bash script that checks one service by name:\n\n1. With the wrong number of arguments: print a usage message to **stderr** and exit `2`.\n2. If the name isn't in the registry: print an error to **stderr** and exit `3`.\n3. Look up the service's port in the registry and call `http://127.0.0.1:<port>/health`.\n4. If it's healthy, print `<name> OK` and exit `0`. Otherwise print `<name> DOWN` and exit `1`.\n\n**SPEC:**\n\n- `/usr/local/bin/check-health`: executable, bash shebang, runnable by any user\n- `check-health` (no args): exit `2`, usage on stderr\n- `check-health order-processor`: stdout `order-processor OK`, exit `0`\n- `check-health notification-service` (it's down): stdout `notification-service DOWN`, exit `1`\n- `check-health inventory-service`: exit `3`\n- Ports come from the registry. The grader adds a new service with a random port and expects `OK`.\n\n**GOOD PRACTICES:**\n\n- Quote your variables: `\"$1\"`, `\"$port\"`.\n- Keep stdout for results and stderr for errors.\n- `bash -x script args` traces each line as it runs.\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "bash",
+    "scripting"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Script the Health Check",
+    "brief": "Script the Health Check",
+    "solution": "# Solution — Script the Health Check\n\nA good ops script validates its arguments, reads configuration instead of hardcoding it, prints something useful, and, most importantly, returns an **exit code** that other tools can act on (`0` = success, anything else = a specific failure).\n\nDocs: `man bash` (Positional Parameters, Compound Commands, `$?`) · `help test` · `man curl`\n\n## The script\n\n```bash\nsudo tee /usr/local/bin/check-health >/dev/null <<'EOF'\n#!/bin/bash\n# check-health <service> — exit 0 OK, 1 DOWN, 2 usage error, 3 unknown service.\nregistry=/etc/order-platform/services\n\nif [ $# -ne 1 ]; then\n  echo \"usage: check-health <service>\" >&2\n  exit 2\nfi\nname=\"$1\"\n\nport=\"$(awk -v n=\"$name\" '$1 == n {print $2}' \"$registry\")\"\nif [ -z \"$port\" ]; then\n  echo \"unknown service: $name\" >&2\n  exit 3\nfi\n\nif curl -fsS --max-time 3 \"http://127.0.0.1:$port/health\" >/dev/null 2>&1; then\n  echo \"$name OK\"\n  exit 0\nelse\n  echo \"$name DOWN\"\n  exit 1\nfi\nEOF\nsudo chmod 755 /usr/local/bin/check-health\n```\n\n- `$#` is the number of arguments, and `$1` is the first.\n- `>&2` sends a message to stderr.\n- `if <command>; then` branches on that command's exit code. `curl -f` fails on HTTP errors.\n- The `awk` matches the first column exactly, so comment lines (`#`) never match.\n\n## Try it\n\n```bash\ncheck-health; echo \"exit=$?\"                       # usage, 2\ncheck-health order-processor; echo \"exit=$?\"       # OK, 0\ncheck-health notification-service; echo \"exit=$?\"  # DOWN, 1\ncheck-health inventory-service; echo \"exit=$?\"     # unknown, 3\ncheck-health payment-handler && echo \"safe to deploy\"\n```\n\nDebug a script with `bash -x /usr/local/bin/check-health order-processor`. Then **Submit**.\n",
+    "idLabel": "23",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

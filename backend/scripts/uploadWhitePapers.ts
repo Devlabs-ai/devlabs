@@ -3,13 +3,12 @@
  *   papers/<section>/<id>.pdf
  *
  * Usage (from backend/):
- *   npx tsx scripts/uploadWhitePapers.ts
+ *   npx tsx scripts/uploadWhitePapers.ts            # every section
+ *   npx tsx scripts/uploadWhitePapers.ts monthly    # one section
  */
 
 import fs from 'fs';
 import path from 'path';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-
 function loadEnv(file: string) {
   if (!fs.existsSync(file)) return;
   for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
@@ -29,6 +28,8 @@ function loadEnv(file: string) {
 }
 
 loadEnv(path.join(__dirname, '..', '.env'));
+
+const { getObjectStore, normalizeKey } = require('../workspace/objectStore');
 
 const PAPERS: Array<{ id: string; section: string; urls: string[] }> = [
   {
@@ -60,6 +61,32 @@ const PAPERS: Array<{ id: string; section: string; urls: string[] }> = [
       'https://static.googleusercontent.com/media/research.google.com/en//archive/mapreduce-osdi04.pdf',
     ],
   },
+  // Paper of the Month pool (backend/papers/monthlyPapers.ts).
+  {
+    id: 'gfs',
+    section: 'monthly',
+    urls: ['https://static.googleusercontent.com/media/research.google.com/en//archive/gfs-sosp2003.pdf'],
+  },
+  {
+    id: 'mapreduce',
+    section: 'monthly',
+    urls: ['https://static.googleusercontent.com/media/research.google.com/en//archive/mapreduce-osdi04.pdf'],
+  },
+  {
+    id: 'dynamo',
+    section: 'monthly',
+    urls: ['https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf'],
+  },
+  {
+    id: 'raft',
+    section: 'monthly',
+    urls: ['https://raft.github.io/raft.pdf'],
+  },
+  {
+    id: 'bigtable',
+    section: 'monthly',
+    urls: ['https://static.googleusercontent.com/media/research.google.com/en//archive/bigtable-osdi06.pdf'],
+  },
 ];
 
 async function fetchPdf(urls: string[]): Promise<Buffer> {
@@ -83,33 +110,15 @@ async function fetchPdf(urls: string[]): Promise<Buffer> {
 }
 
 async function main() {
-  const endpoint = process.env.MINIO_ENDPOINT || process.env.S3_ENDPOINT;
-  if (!endpoint) throw new Error('MINIO_ENDPOINT required');
-  const bucket = process.env.MINIO_BUCKET || process.env.S3_BUCKET || 'devlabs-data';
-  const client = new S3Client({
-    region: process.env.MINIO_REGION || 'us-east-1',
-    endpoint,
-    forcePathStyle: true,
-    credentials: {
-      accessKeyId: process.env.MINIO_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID || '',
-      secretAccessKey:
-        process.env.MINIO_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY || '',
-    },
-  });
-
-  for (const paper of PAPERS) {
+  // Same client and bucket the API reads from in routes/papers.ts.
+  const store = getObjectStore();
+  const onlySection = process.argv[2];
+  for (const paper of PAPERS.filter((p) => !onlySection || p.section === onlySection)) {
     console.log(`fetch ${paper.section}/${paper.id}`);
     const body = await fetchPdf(paper.urls);
-    const key = `papers/${paper.section}/${paper.id}.pdf`;
-    await client.send(
-      new PutObjectCommand({
-        Bucket: bucket,
-        Key: key,
-        Body: body,
-        ContentType: 'application/pdf',
-      }),
-    );
-    console.log(`  uploaded s3://${bucket}/${key} (${body.length} bytes)`);
+    const key = normalizeKey(`papers/${paper.section}/${paper.id}.pdf`);
+    await store.putObject(key, body, 'application/pdf');
+    console.log(`  uploaded ${key} (${body.length} bytes)`);
   }
   console.log('DONE');
 }

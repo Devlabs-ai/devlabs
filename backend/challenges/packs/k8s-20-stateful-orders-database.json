@@ -1,0 +1,57 @@
+{
+  "id": "k8s-20-stateful-orders-database",
+  "number": 220,
+  "finalized": true,
+  "title": "Stateful Orders Database",
+  "description": "**SITUATION:**\n\nQuickByte needs a small database for order history. Unlike Order Processor (any healthy copy can take the next request), database copies are **not interchangeable**:\n\n- each copy needs a **stable name** (so ops and peers always know which is which)\n- each copy needs **its own disk** (so data does not get overwritten by a random replacement Pod)\n\nA normal Deployment gives Pods throwaway names and is a poor fit. You need the Kubernetes workload type built for this shape.\n\nThis lab introduces a **StatefulSet** for orders-db: stable Pod names and per-replica disks. Treat this differently from Order Processor Deployments — database copies are not interchangeable.\n[DevSetu Blog — StatefulSets](/play/devops-engineer/kubernetes/read/statefulsets)\n\n**YOUR TASK:**\n\n1. Create a **StatefulSet** named `orders-db` running Postgres with **2** copies.\n2. Verify both copies are **Ready** and each got its **own** disk automatically.\n\n**SPEC:**\n\n- StatefulSet name: `orders-db`\n- Replicas: `2`\n- `spec.serviceName`: `orders-db` (name used for stable DNS — you wire the matching Service in the next challenge)\n- Pod labels: `app=orders-db`, `tier=data`\n- Pod `securityContext.fsGroup`: `70` (alpine postgres UID/GID — so the PVC is writable)\n- Container name: `postgres`\n- Image: `postgres:16-alpine`\n- `containerPort`: `5432`\n- Env:\n  - `POSTGRES_PASSWORD`: `quickbyte-lab`\n  - `POSTGRES_DB`: `orders`\n  - `PGDATA`: `/var/lib/postgresql/data/pgdata` (subdir on the volume — do not use the volume root as PGDATA)\n- Resource requests: `20m` CPU, `64Mi` memory\n- Resource limits: `100m` CPU, `128Mi` memory\n- Recommended: container args `-c shared_buffers=16MB` so Postgres shared memory fits the 128Mi limit\n- `volumeClaimTemplates`:\n  - name: `data`\n  - accessModes: `[\"ReadWriteOnce\"]`\n  - storage: `500Mi`\n  - `storageClassName`: `gp2` (cluster StorageClass for dynamic EBS)\n- Mount `data` at `/var/lib/postgresql/data`\n- Ready: **2/2** replicas Ready\n\n**GOOD PRACTICES:**\n\n- Manifest: `orders-db-sts-l20.yaml`.\n- Use a **StatefulSet**, not a Deployment.\n- Do **not** skip `serviceName: orders-db`.\n- Work only in your lab namespace (not `default`).\n",
+  "difficulty": "L1",
+  "tags": [
+    "kubernetes",
+    "ckad",
+    "l1",
+    "statefulsets"
+  ],
+  "category": "kubernetes",
+  "sandboxType": "kubernetes",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "kubernetes"
+  },
+  "problemStatement": {
+    "hints": [
+      "Your namespace is in the lab chrome and in $LEARNER_NS — kubectl already defaults there.",
+      "Set volumeClaimTemplates storageClassName to gp2 so PVCs can provision dynamically.",
+      "Set PGDATA to /var/lib/postgresql/data/pgdata and fsGroup: 70 so Postgres can use the PVC.",
+      "If pods CrashLoop from an earlier attempt, delete the StatefulSet and its PVCs, then re-apply.",
+      "Work only in your lab namespace (not default).",
+      "Read SPEC carefully, apply your YAML, then Submit."
+    ],
+    "overview": "Stateful Orders Database",
+    "brief": "Stateful Orders Database",
+    "solution": "# Solution — Stateful Orders Database\n\nCreate StatefulSet `orders-db` with 2 Postgres replicas, stable identity via `serviceName: orders-db`, and per-replica disks from `volumeClaimTemplates`.\n\nDocs: [DevSetu Blog — StatefulSets](/play/devops-engineer/kubernetes/read/statefulsets) · [StatefulSets](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/)\n\n## Solution YAML\n\nSave as `orders-db-sts-l20.yaml`:\n\n```yaml\napiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: orders-db\nspec:\n  serviceName: orders-db\n  replicas: 2\n  selector:\n    matchLabels:\n      app: orders-db\n      tier: data\n  template:\n    metadata:\n      labels:\n        app: orders-db\n        tier: data\n    spec:\n      securityContext:\n        fsGroup: 70\n      containers:\n        - name: postgres\n          image: postgres:16-alpine\n          ports:\n            - containerPort: 5432\n          env:\n            - name: POSTGRES_PASSWORD\n              value: quickbyte-lab\n            - name: POSTGRES_DB\n              value: orders\n            - name: PGDATA\n              value: /var/lib/postgresql/data/pgdata\n          args: [\"-c\", \"shared_buffers=16MB\"]\n          resources:\n            requests:\n              cpu: \"20m\"\n              memory: \"64Mi\"\n            limits:\n              cpu: \"100m\"\n              memory: \"128Mi\"\n          volumeMounts:\n            - name: data\n              mountPath: /var/lib/postgresql/data\n  volumeClaimTemplates:\n    - metadata:\n        name: data\n      spec:\n        accessModes: [\"ReadWriteOnce\"]\n        storageClassName: gp2\n        resources:\n          requests:\n            storage: 500Mi\n```\n\n## Why `PGDATA` and `fsGroup`\n\n- Mount the PVC at `/var/lib/postgresql/data`, but set **`PGDATA`** to a subdirectory so Postgres does not treat the volume root (e.g. `lost+found`) as the data dir.\n- **`fsGroup: 70`** lets the alpine `postgres` user write the volume.\n\n## Declarative\n\n```bash\n# If a previous attempt CrashLoop'd, delete STS + PVCs so disks re-init cleanly:\nkubectl delete sts orders-db --ignore-not-found\nkubectl delete pvc -l app=orders-db --ignore-not-found\n\nkubectl apply -f orders-db-sts-l20.yaml\nkubectl get sts orders-db\nkubectl get pods -l app=orders-db -o wide\nkubectl get pvc -l app=orders-db\n```\n\nWait until **2/2** replicas are Ready, then **Submit**. Use a StatefulSet (not a Deployment).\n",
+    "idLabel": "20",
+    "theory": ""
+  },
+  "platformSpec": {
+    "quota": {
+      "pods": "5",
+      "requests": {
+        "cpu": "100m",
+        "memory": "224Mi"
+      },
+      "limits": {
+        "cpu": "320m",
+        "memory": "448Mi"
+      }
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 180
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

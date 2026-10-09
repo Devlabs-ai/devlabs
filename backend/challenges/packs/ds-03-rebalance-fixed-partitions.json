@@ -1,0 +1,150 @@
+{
+  "id": "ds-03-rebalance-fixed-partitions",
+  "number": 503,
+  "finalized": true,
+  "title": "Add a node without reshuffling everything",
+  "description": "The orders cluster is adding a fifth node. Rebalance with a fixed number of partitions and keep serving traffic throughout.",
+  "difficulty": "L2",
+  "tags": [
+    "data-systems",
+    "partitioning",
+    "rebalancing",
+    "hashing",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "The orders store runs on four nodes. When the cluster was created it was split into 1,024 partitions, far more than the number of nodes, and each key maps to a partition by hashing: `partition = hash(order_id) mod 1024`.\n\nBlack Friday is coming, so a fifth node is joining. The goal is to move as little data as possible and keep accepting reads and writes while it moves. This is how Elasticsearch, Riak and Couchbase rebalance.\n\nThe outline is on the board. Fill the blocks. Traps move far too much data or take the cluster offline.",
+    "yourTask": "Order the steps for adding a node to a cluster that uses a fixed number of partitions.",
+    "yourTaskSteps": [
+      "Read every card.",
+      "Fill each empty block from Unused.",
+      "The dashed block is optional.",
+      "Submit."
+    ],
+    "hints": [
+      "The key-to-partition mapping never changes. Only the partition-to-node mapping does.",
+      "What moves is whole partitions, not individual keys.",
+      "Clients can only find the new node after the assignment changes."
+    ],
+    "moat": "Setter notes, not shown to learners.\n\nRequired chain: fixed-partitions → node-joins → steal-partitions → copy-partitions → update-assignment → routing-refresh.\nOptional splice: throttle-transfer on steal-partitions → copy-partitions.\nFive traps."
+  },
+  "platformSpec": {
+    "kicker": "Partitioning · Rebalance",
+    "passMessage": "Only the partitions that moved changed owner. Every key kept its partition.",
+    "pieces": [
+      {
+        "id": "fixed-partitions",
+        "title": "Many partitions, fixed at creation",
+        "blurb": "1,024 partitions were created up front. A key's partition is hash(key) mod 1024 and never changes.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "node-joins",
+        "title": "Node 5 joins the cluster",
+        "blurb": "The new node registers with the cluster but owns no partitions yet.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "fixed-partitions",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "steal-partitions",
+        "title": "Pick whole partitions to hand over",
+        "blurb": "Choose a few partitions from each existing node until all five nodes hold about 205 partitions each.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "node-joins",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "throttle-transfer",
+        "title": "Throttle the transfer rate",
+        "blurb": "Cap the bandwidth used for copying so the rebalance doesn't starve live order traffic. Slower, but safer.",
+        "kind": "mechanism",
+        "gold": "optional",
+        "parent": "steal-partitions",
+        "child": "copy-partitions",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "copy-partitions",
+        "title": "Copy those partitions to node 5",
+        "blurb": "Stream each chosen partition's data to the new node. The old owner keeps serving reads and writes, and new writes are caught up at the end.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "steal-partitions",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "update-assignment",
+        "title": "Update the partition assignment",
+        "blurb": "Record in the coordination service (for example ZooKeeper) that those partitions now belong to node 5.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "copy-partitions",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "routing-refresh",
+        "title": "Routing picks up the new owners",
+        "blurb": "The routing tier or partition-aware clients see the new assignment and send requests for moved partitions to node 5.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "update-assignment",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "mod-n",
+        "title": "Rehash keys with hash(key) mod 5",
+        "blurb": "Now that there are five nodes, assign each key to node hash(key) mod 5.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Changing N in mod N moves almost every key. That's why partitions are fixed."
+      },
+      {
+        "id": "move-keys",
+        "title": "Move individual keys one at a time",
+        "blurb": "Pick the hottest keys from each node and migrate them to node 5 individually.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Rebalancing moves whole partitions. Per-key moves would need a per-key routing table."
+      },
+      {
+        "id": "stop-writes",
+        "title": "Freeze writes during the move",
+        "blurb": "Put the cluster in read-only mode until all data has been copied.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Old owners keep serving while partitions copy. No downtime is needed."
+      },
+      {
+        "id": "add-partitions",
+        "title": "Create more partitions for the new node",
+        "blurb": "Add 256 new partitions so node 5 gets its own set and nobody else's data moves.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "In this scheme the partition count is fixed. Adding partitions would change where every key hashes."
+      },
+      {
+        "id": "auto-on-slow",
+        "title": "Rebalance whenever a node is slow",
+        "blurb": "If any node responds slowly, automatically move its partitions elsewhere.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Moving data off an overloaded node adds more load and can cascade. Many systems keep a human in the loop."
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

@@ -21,5 +21,19 @@
     "overview": "StatefulSets",
     "brief": "Deploy a StatefulSet with ordered identity and per-pod claims \u2014 DNS names and volumes sticky across restarts."
   },
-  "platformSpec": {}
+  "platformSpec": {
+    "quota": {
+      "pods": "6",
+      "requests": {
+        "cpu": "120m",
+        "memory": "192Mi"
+      },
+      "limits": {
+        "cpu": "240m",
+        "memory": "384Mi"
+      }
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

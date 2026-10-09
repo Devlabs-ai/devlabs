@@ -1,0 +1,47 @@
+{
+  "id": "linux-21-open-only-the-right-ports",
+  "number": 321,
+  "finalized": true,
+  "title": "Open Only the Right Ports",
+  "description": "**SITUATION:**\n\nA port scan from the security team lit up the order box. Four services listen on every interface, and there is no firewall:\n\n| Port | Service | Should the network reach it? |\n|------|---------|------------------------------|\n| 22 | ssh | yes |\n| 8080 | order-processor | yes |\n| 9100 | metrics-exporter | no, scraped locally |\n| 6379 | order-cache (debug) | **absolutely not** |\n\nThe services must keep running and keep working **locally**. You'll block them at the network edge.\n\n**YOUR TASK:**\n\n1. Confirm what's listening (`ss -tlnp`).\n2. Write an `nftables` ruleset that drops inbound traffic by default and allows:\n   - loopback,\n   - replies to connections the box opens,\n   - TCP 22 and 8080.\n3. Save it in `/etc/nftables.conf`, load it, and make it load at boot.\n\n**SPEC:**\n\n- `/etc/nftables.conf` is valid (`nft -c -f`) and has an input chain with `policy drop`\n- `nftables.service` is enabled, and the live ruleset matches the file\n- From another host: 22 and 8080 reachable; 9100 and 6379 not\n- On the box: `curl 127.0.0.1:9100/health` and `127.0.0.1:6379/health` still work, and outbound traffic (DNS, HTTPS) still works\n- All three services are still running\n\n**GOOD PRACTICES:**\n\n- On a remote box, always allow SSH **before** you set a drop policy.\n- Run `nft -c -f` to check syntax before you load a file.\n- `ct state established,related accept` is what keeps outbound traffic working under default deny.\n",
+  "difficulty": "L2",
+  "tags": [
+    "linux",
+    "l2",
+    "networking",
+    "firewall",
+    "security"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Open Only the Right Ports",
+    "brief": "Open Only the Right Ports",
+    "solution": "# Solution — Open Only the Right Ports\n\n`nftables` is the Linux kernel firewall (iptables' successor; `ufw` and `firewalld` are front-ends to it). The safe pattern is **default deny**. Drop everything inbound, then allow:\n- loopback,\n- replies to connections the box itself opened,\n- the ports you actually serve.\n\nDocs: `man nft` · `/usr/share/doc/nftables/examples/`\n\n## See what's exposed\n\n```bash\nsudo ss -tlnp        # 0.0.0.0:22, :8080, :9100, :6379 — all reachable\nsudo nft list ruleset   # empty\n```\n\n## Write the ruleset\n\n```bash\nsudo tee /etc/nftables.conf >/dev/null <<'EOF'\n#!/usr/sbin/nft -f\nflush ruleset\n\ntable inet filter {\n  chain input {\n    type filter hook input priority filter; policy drop;\n\n    iif lo accept\n    ct state established,related accept\n    ct state invalid drop\n    meta l4proto { icmp, ipv6-icmp } accept\n\n    tcp dport { 22, 8080 } accept\n  }\n  chain forward {\n    type filter hook forward priority filter; policy drop;\n  }\n  chain output {\n    type filter hook output priority filter; policy accept;\n  }\n}\nEOF\n```\n\n- `iif lo accept`: local services still talk to each other over 127.0.0.1.\n- `ct state established,related accept`: replies to your own outbound traffic (DNS, apt, curl) get back in.\n- Keep **22** open, or the next SSH session can't connect.\n\n## Check, load, persist\n\n```bash\nsudo nft -c -f /etc/nftables.conf          # syntax check only\nsudo systemctl enable --now nftables       # loads /etc/nftables.conf now and at boot\nsudo systemctl restart nftables            # after later edits\nsudo nft list ruleset\n```\n\n## Test\n\n```bash\ncurl -s http://127.0.0.1:9100/health       # local: still works\ncurl -sI https://deb.debian.org | head -1  # outbound: still works\n```\n\nThe grader probes from a separate network namespace to check that 22 and 8080 are reachable from outside and 9100 and 6379 are not. Then **Submit**.\n",
+    "idLabel": "21",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 120
+    }
+  },
+  "visibleTo": "admin",
+  "tokens": 10
+}

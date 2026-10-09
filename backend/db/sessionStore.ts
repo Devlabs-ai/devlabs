@@ -36,6 +36,7 @@ function makeSession({
     terminalService: null,
     services: [],
     commandHistory: [],
+    lastActivityAt: Date.now(),
   };
 }
 
@@ -138,6 +139,8 @@ async function restoreFromDB(): Promise<void> {
       ? Number(row.workspace_updated_at)
       : session.workspaceUpdatedAt || null;
     session.boardState = row.board_state || session.boardState || null;
+    // Give restored sessions a fresh idle window after process restart.
+    session.lastActivityAt = Date.now();
 
     sessions.set(row.id, session);
   }

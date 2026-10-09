@@ -295,5 +295,7 @@
     "runScript": "run.sh",
     "jobYaml": "job.yaml",
     "s3Prefix": "challenges/l1-derive-revenue-column"
-  }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

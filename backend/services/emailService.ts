@@ -42,11 +42,11 @@ async function sendOtp(email: string, code: string): Promise<void> {
   await transport.sendMail({
     from,
     to: email,
-    subject: 'Your Devlabs login code',
+    subject: 'Your DevSetu login code',
     text: `Your one-time login code is: ${code}\n\nThis code expires in 10 minutes. Do not share it with anyone.`,
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
-        <h2 style="color:#111">Your Devlabs login code</h2>
+        <h2 style="color:#111">Your DevSetu login code</h2>
         <p style="font-size:15px;color:#444">Use the code below to sign in. It expires in <strong>10 minutes</strong>.</p>
         <div style="font-size:36px;font-weight:700;letter-spacing:8px;color:#111;padding:24px 0">${code}</div>
         <p style="font-size:13px;color:#888">If you didn't request this, you can safely ignore this email.</p>
@@ -78,7 +78,7 @@ async function sendSalesLead({ companyName, email, domain, teamSize, plan, messa
   const planLabelStr = planLabel[plan] || plan;
 
   const text = [
-    'New Devlabs sales inquiry',
+    'New DevSetu sales inquiry',
     '',
     `Company: ${companyName}`,
     `Email: ${email}`,
@@ -91,7 +91,7 @@ async function sendSalesLead({ companyName, email, domain, teamSize, plan, messa
 
   const html = `
     <div style="font-family:sans-serif;max-width:560px;margin:0 auto">
-      <h2 style="color:#111">New Devlabs sales inquiry</h2>
+      <h2 style="color:#111">New DevSetu sales inquiry</h2>
       <table style="font-size:14px;color:#333;border-collapse:collapse;width:100%">
         <tr><td style="padding:6px 12px 6px 0;font-weight:600">Company</td><td>${companyName}</td></tr>
         <tr><td style="padding:6px 12px 6px 0;font-weight:600">Email</td><td>${email}</td></tr>
@@ -113,10 +113,41 @@ async function sendSalesLead({ companyName, email, domain, teamSize, plan, messa
     from,
     to,
     replyTo: email,
-    subject: `[Devlabs] Sales inquiry — ${companyName}`,
+    subject: `[DevSetu] Sales inquiry — ${companyName}`,
     text,
     html,
   });
 }
 
-module.exports = { sendOtp, sendSalesLead };
+async function sendWaitlistConfirmation(email: string): Promise<void> {
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@devlabs.app';
+
+  if (!transport) {
+    console.log(`[email] Waitlist confirmation for ${email} (SMTP not configured)`);
+    return;
+  }
+
+  await transport.sendMail({
+    from,
+    to: email,
+    subject: "You're on the DevSetu waitlist",
+    text: [
+      "Thanks for joining the DevSetu waitlist.",
+      '',
+      "We're launching in the first week of November. You'll hear from us before then with early access and 40% off your first month.",
+      '',
+      'Team DevSetu',
+      'devsetu.io',
+    ].join('\n'),
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
+        <h2 style="color:#111">You're on the DevSetu waitlist</h2>
+        <p style="font-size:15px;color:#444">Thanks for joining. We're launching in the <strong>first week of November</strong>.</p>
+        <p style="font-size:15px;color:#444">You'll hear from us before then with early access and <strong>40% off your first month</strong>.</p>
+        <p style="font-size:14px;color:#888">Team DevSetu · devsetu.io</p>
+      </div>
+    `,
+  });
+}
+
+module.exports = { sendOtp, sendSalesLead, sendWaitlistConfirmation };

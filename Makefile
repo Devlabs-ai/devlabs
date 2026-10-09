@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Devlabs — dev convenience targets
+# DevSetu — dev convenience targets
 #
 # Common flow:
 #   make install      # install backend + frontend npm deps

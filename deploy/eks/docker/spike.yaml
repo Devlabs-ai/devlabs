@@ -1,0 +1,105 @@
+# Phase-0 spike for the Docker module: a Linux-lab box (systemd as PID 1, user-namespaced,
+# no host privileges) that also runs dockerd, on the labs-docker pool, pulling only through
+# the in-cluster mirror.
+#
+# Differences from the Linux box (deploy/eks/linux/spike.yaml):
+#   - /var/lib/docker is an emptyDir: overlay2 cannot stack on the container's own overlay
+#     rootfs, and the emptyDir sits on the node disk under an ephemeral-storage limit.
+#   - procMount: Unmasked (allowed only with hostUsers: false) leaves /proc/sys writable,
+#     so dockerd can set net.ipv4.ip_forward. Every net.* sysctl is per network namespace
+#     and owned by the pod's user namespace, so this changes only the box itself.
+#   - Namespace NetworkPolicy also allows the registry mirror.
+#
+# Driven by ./deploy/eks/eks-docker.sh spike (applies, waits, runs the capability checks).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dl-docker-spike
+  labels:
+    app.kubernetes.io/managed-by: devlabs
+    app.kubernetes.io/component: docker-lab
+    pod-security.kubernetes.io/enforce: privileged
+    devlabs.io/registry-mirror: client
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dl-box-isolation
+  namespace: dl-docker-spike
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: dl-mirror
+          podSelector:
+            matchLabels:
+              app: registry-mirror
+      ports:
+        - {protocol: TCP, port: 5000}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: box-docker
+  namespace: dl-docker-spike
+  labels: {app: docker-box}
+  annotations:
+    karpenter.sh/do-not-disrupt: "true"
+    devlabs.io/cgroup-rw: "true"
+spec:
+  hostUsers: false
+  hostname: order-box
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  terminationGracePeriodSeconds: 20
+  nodeSelector:
+    devlabs.io/pool: docker
+  tolerations:
+    - key: devlabs.io/pool
+      value: docker
+      effect: NoSchedule
+  containers:
+    - name: box
+      image: devsetu/docker-lab:v0.2
+      imagePullPolicy: Always
+      securityContext:
+        procMount: Unmasked
+        capabilities:
+          add: [SYS_ADMIN, NET_ADMIN, NET_RAW, SYS_PTRACE, SYS_RESOURCE, SYS_NICE, AUDIT_WRITE]
+        seccompProfile:
+          type: Unconfined
+      resources:
+        requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 1Gi}
+        limits: {cpu: 1000m, memory: 512Mi, ephemeral-storage: 12Gi}
+      volumeMounts:
+        - {name: run, mountPath: /run}
+        - {name: run-lock, mountPath: /run/lock}
+        - {name: tmp, mountPath: /tmp}
+        - {name: docker, mountPath: /var/lib/docker}
+  volumes:
+    - name: run
+      emptyDir: {medium: Memory, sizeLimit: 64Mi}
+    - name: run-lock
+      emptyDir: {medium: Memory, sizeLimit: 8Mi}
+    - name: tmp
+      emptyDir: {sizeLimit: 1Gi}
+    - name: docker
+      emptyDir: {sizeLimit: 10Gi}

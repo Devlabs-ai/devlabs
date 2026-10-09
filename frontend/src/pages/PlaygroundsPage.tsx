@@ -1,14 +1,20 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { PLAYGROUNDS } from '../constants/playgrounds';
+import { useAppState } from '../context/AppStateContext';
+import { isAdminUser } from '../services/authApi';
 
 export default function PlaygroundsPage(): JSX.Element {
+  const { currentUser } = useAppState();
+  const isAdmin = Boolean(currentUser?.admin) || isAdminUser(currentUser);
+  if (!isAdmin) return <Navigate to="/track" replace />;
+
   return (
     <div className="app-page play-problems-page">
       <header className="play-problems-hero">
         <div className="play-problems-hero-copy">
           <p className="play-papers-crumb">
-            <Link to="/play">Play</Link>
+            <Link to="/track">Tracks</Link>
             <span aria-hidden> / </span>
             <span>Playgrounds</span>
           </p>

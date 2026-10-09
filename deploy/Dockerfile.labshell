@@ -1,0 +1,36 @@
+# Isolated learner shell for the Kubernetes lab terminal. One container per
+# terminal; the backend mounts only that learner's home and namespace-scoped
+# kubeconfig. Keep secrets, docker, and backend code out of this image.
+#
+# Build (repo root):
+#   docker build -f deploy/Dockerfile.labshell -t devlabs-lab-shell:latest .
+
+FROM debian:bookworm-slim
+
+# iptables is only used by the backend's host-network firewall helper run;
+# learner containers have no capabilities, so it is inert for them.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    bash bash-completion ca-certificates curl iptables jq less nano procps vim-tiny \
+  && ln -sf /usr/bin/vim.tiny /usr/bin/vi \
+  && ln -sf /usr/bin/vim.tiny /usr/bin/vim \
+  && printf '%s\n' \
+    '" Debian ships "set compatible" here, which breaks arrow keys in insert mode' \
+    '" (ESC O A is read as <Esc>, O, A) and hides -- INSERT --.' \
+    'set runtimepath=~/.vim,/var/lib/vim/addons,/usr/share/vim/vimfiles,/usr/share/vim/vim90,/usr/share/vim/vimfiles/after,/var/lib/vim/addons/after,~/.vim/after' \
+    'set nocompatible' \
+    'set esckeys ttimeout ttimeoutlen=50' \
+    'set showmode showcmd ruler' \
+    'set backspace=indent,eol,start' \
+    > /etc/vim/vimrc.tiny \
+  && cp /etc/vim/vimrc.tiny /etc/vim/vimrc.local \
+  && KUBECTL_VERSION="$(curl -fsSL https://dl.k8s.io/release/stable.txt)" \
+  && curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')/kubectl" \
+    -o /usr/local/bin/kubectl \
+  && chmod +x /usr/local/bin/kubectl \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd -g 1000 learner \
+  && useradd -u 1000 -g 1000 -M -d /home/learner -s /bin/bash learner
+
+USER 1000:1000
+CMD ["sleep", "infinity"]

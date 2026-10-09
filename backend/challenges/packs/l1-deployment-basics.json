@@ -32,9 +32,15 @@
   },
   "platformSpec": {
     "quota": {
-      "pods": "10",
-      "cpu": "1",
-      "memory": "1Gi"
+      "pods": "7",
+      "requests": {
+        "cpu": "140m",
+        "memory": "224Mi"
+      },
+      "limits": {
+        "cpu": "280m",
+        "memory": "448Mi"
+      }
     },
     "setup": {
       "script": "setup.sh"
@@ -43,5 +49,7 @@
       "script": "grade.sh",
       "timeoutSeconds": 90
     }
-  }
+  },
+  "visibleTo": "users",
+  "tokens": 10
 }

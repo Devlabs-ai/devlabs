@@ -7,6 +7,7 @@ import type { IPty, ObservabilityWebSocket } from '../types/ws';
 const pty = require('node-pty');
 const sessionStore = require('../db/sessionStore');
 const bus = require('./terminalEventBus');
+const sessionIdle = require('../workspace/sessionIdle');
 
 function parseQuery(req: IncomingMessage): URLSearchParams {
   try {
@@ -74,6 +75,7 @@ function handleConnection(ws: ObservabilityWebSocket, req: IncomingMessage): voi
   const args = ['compose', 'exec', service, 'sh', '-c', shellCmd];
 
   console.log(`[terminal] session=${sessionId} service=${service} spawn docker ${args.join(' ')}`);
+  sessionIdle.touch(sessionId);
 
   const cols = parseInt(q.get('cols') || '120', 10) || 120;
   const rows = parseInt(q.get('rows') || '32', 10) || 32;
@@ -103,6 +105,7 @@ function handleConnection(ws: ObservabilityWebSocket, req: IncomingMessage): voi
 
   ws.on('message', (msg: unknown, _isBinary: boolean) => {
     const buf = Buffer.isBuffer(msg) ? msg : Buffer.from(msg as string);
+    sessionIdle.touch(sessionId);
     try { child.write(buf.toString('utf8')); } catch (_e) { /* noop */ }
     bus.emit('stdin', { sessionId, data: buf });
   });

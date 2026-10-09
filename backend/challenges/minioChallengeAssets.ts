@@ -15,6 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const { getObjectStore, normalizeKey } = require('../workspace/objectStore');
+const { isClusterLabType, labPackDir } = require('./labTypes');
 
 export type ChallengeMeta = {
   id: string;
@@ -92,12 +93,12 @@ async function loadStarterFiles(challengeId: string): Promise<Record<string, str
   return loadPrefixFiles(challengeId, 'starter');
 }
 
-/** Pack-based K8s labs: backend/challenges/k8s/<id>/solution/** */
+/** Pack-based cluster labs: backend/challenges/<k8s|linux>/<id>/solution/** */
 function loadLocalK8sSolutionFiles(challengeId: string): Record<string, string> | null {
   if (!challengeId || challengeId.includes('..') || challengeId.includes('/') || challengeId.includes('\\')) {
     return null;
   }
-  const root = path.join(__dirname, 'k8s', challengeId, 'solution');
+  const root = path.join(labPackDir(challengeId), 'solution');
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) return null;
 
   const binaryExt = /\.(png|jpe?g|gif|webp|svg|ico|pdf|zip|parquet)$/i;
@@ -189,7 +190,7 @@ async function hydrateChallengeFromMinio(
 ): Promise<Record<string, unknown> | null> {
   if (!base || typeof base.id !== 'string') return base;
   if ((base.sandboxType as string | undefined) === 'board') return base;
-  if ((base.sandboxType as string | undefined) === 'kubernetes') return base;
+  if (isClusterLabType(base.sandboxType)) return base;
 
   const meta = await loadChallengeMeta(base.id);
   const wantsMinio = catalogWantsMinio(base)
@@ -249,16 +250,38 @@ async function writeSolutionFiles(
   challengeId: string,
   files: Record<string, string>,
 ): Promise<Record<string, string>> {
-  const store = getObjectStore();
-  const prefix = `${challengePrefix(challengeId)}/solution/`;
   const written: Record<string, string> = {};
   for (const [rawPath, rawBody] of Object.entries(files || {})) {
     const rel = safeRelPath(rawPath);
     if (!rel) continue;
     const body = typeof rawBody === 'string' ? rawBody : String(rawBody ?? '');
-    await store.putObject(`${prefix}${rel}`, body, 'text/plain; charset=utf-8');
     written[rel] = body;
   }
+
+  try {
+    const store = getObjectStore();
+    const prefix = `${challengePrefix(challengeId)}/solution/`;
+    for (const [rel, body] of Object.entries(written)) {
+      await store.putObject(`${prefix}${rel}`, body, 'text/plain; charset=utf-8');
+    }
+  } catch (e: unknown) {
+    console.warn(
+      `[minioChallengeAssets] MinIO solution write skipped for ${challengeId}:`,
+      (e as Error).message,
+    );
+  }
+
+  // Pack-based cluster labs also keep solution/ on disk (Play loads that when MinIO is empty).
+  const localRoot = path.join(labPackDir(challengeId), 'solution');
+  if (fs.existsSync(labPackDir(challengeId))) {
+    fs.mkdirSync(localRoot, { recursive: true });
+    for (const [rel, body] of Object.entries(written)) {
+      const abs = path.join(localRoot, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, body, 'utf8');
+    }
+  }
+
   return written;
 }
 
@@ -290,12 +313,17 @@ async function loadSolutionAsset(
 function stripMoat(challenge: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
   if (!challenge || typeof challenge !== 'object') return challenge ?? null;
   const ps = challenge.problemStatement;
-  if (!ps || typeof ps !== 'object' || Array.isArray(ps) || !('moat' in (ps as object))) {
-    return challenge;
+  let next: Record<string, unknown> = { ...challenge };
+  if (ps && typeof ps === 'object' && !Array.isArray(ps) && 'moat' in (ps as object)) {
+    const nextPs = { ...(ps as Record<string, unknown>) };
+    delete nextPs.moat;
+    next = { ...next, problemStatement: nextPs };
   }
-  const nextPs = { ...(ps as Record<string, unknown>) };
-  delete nextPs.moat;
-  return { ...challenge, problemStatement: nextPs };
+  if ('visibilityNotes' in next) {
+    const { visibilityNotes: _omit, ...rest } = next;
+    next = rest;
+  }
+  return next;
 }
 
 /** Learners never see setter notes. Admins (or open lab with no ADMIN_EMAILS) do. */

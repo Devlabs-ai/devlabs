@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-processor-deploy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: order-processor
+      tier: app
+  template:
+    metadata:
+      labels:
+        app: order-processor
+        tier: app
+    spec:
+      volumes:
+        - name: order-logs
+          emptyDir: {}
+      containers:
+        - name: order-processor
+          image: devsetu/order-processor:v1.2
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: order-logs
+              mountPath: /var/log/orders
+        - name: log-shipper
+          image: busybox:1.36
+          command: ["/bin/sh", "-c", "tail -F /var/log/orders/orders.log 2>/dev/null || sleep 3600"]
+          volumeMounts:
+            - name: order-logs
+              mountPath: /var/log/orders

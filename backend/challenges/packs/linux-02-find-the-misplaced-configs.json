@@ -1,0 +1,47 @@
+{
+  "id": "linux-02-find-the-misplaced-configs",
+  "number": 302,
+  "finalized": true,
+  "title": "Find the Misplaced Configs",
+  "description": "**SITUATION:**\n\nLast night **order-processor** kept crashing while on-call was fighting the fire. Three engineers edited configs on the order box in different places, nobody wrote down what changed, and the incident channel still needs a post-mortem.\n\nOrder-processor runs on this machine as the **orders** service account — a Linux user reserved for the app, not for an engineer logging in. Files were changed in a hurry all over the box, crash dumps are piling up, and the team needs clear facts before anyone can write the post-mortem.\n\nFind what **orders** owns, free disk space from the dumps, and save copies of configs that changed recently.\n\n**YOUR TASK:**\n\n1. List every `.conf` file anywhere under `/srv` that is owned by the **orders** service account. Save the full paths in `~/answers/orders-configs`, one per line.\n2. Delete every file **larger than 10 MiB** under `/var/tmp/order-dumps`. Keep the smaller ones.\n3. Copy every file under `/etc/order-processor` that was **modified in the last 2 days** into `~/recent/`. Leave the originals in place.\n\n**WHEN YOU'RE DONE:**\n\n- `~/answers/orders-configs`: exactly the matching paths, nothing else (order doesn't matter)\n- `/var/tmp/order-dumps`: no file larger than 10 MiB remains; smaller dumps are untouched\n- `~/recent/`: exactly the recently changed files, identical copies\n- `/etc/order-processor` still has all 8 files\n\n**GOOD PRACTICES:**\n\n- Quote patterns: `find /srv -name '*.conf'`.\n- Run the `find` without `-delete` first and check the list before you delete anything.\n- Names, sizes and dates are different on every learner's machine. Don't guess.\n",
+  "difficulty": "L0",
+  "tags": [
+    "linux",
+    "l0",
+    "shell",
+    "find"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine — plain shell work, no sudo needed.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Find the Misplaced Configs",
+    "brief": "Find the Misplaced Configs",
+    "solution": "# Solution — Find the Misplaced Configs\n\n`find` walks a directory tree and filters by name, type, owner, size and age. You can then print the matches, delete them, or run a command on each one.\n\nDocs: `man find` (see TESTS and ACTIONS)\n\n## 1. Configs under /srv owned by orders\n\n```bash\nfind /srv -type f -name '*.conf' -user orders\nmkdir -p ~/answers\nfind /srv -type f -name '*.conf' -user orders > ~/answers/orders-configs\ncat ~/answers/orders-configs\n```\n\nQuote the pattern (`'*.conf'`). Without quotes, the shell expands it in your current directory before `find` ever sees it.\n\n## 2. Dumps larger than 10 MiB\n\nAlways look before you delete:\n\n```bash\nfind /var/tmp/order-dumps -type f -size +10M -exec ls -lh {} \\;\nsudo find /var/tmp/order-dumps -type f -size +10M -delete\nfind /var/tmp/order-dumps -type f -exec ls -lh {} \\;     # only small ones left\n```\n\n`-size +10M` means *more than* 10 MiB. The 9 MiB file stays.\n\n## 3. Configs changed in the last 2 days\n\n`-mtime -2` means modified less than 2×24 hours ago:\n\n```bash\nfind /etc/order-processor -type f -mtime -2\nmkdir -p ~/recent\nfind /etc/order-processor -type f -mtime -2 -exec cp {} ~/recent/ \\;\nls -l ~/recent\n```\n\nThen **Submit**.\n",
+    "idLabel": "02",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box",
+      "unprivileged": true
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 5
+}

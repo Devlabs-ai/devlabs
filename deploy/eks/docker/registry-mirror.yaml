@@ -1,0 +1,129 @@
+# In-cluster Docker Hub pull-through cache for Docker-module boxes. Boxes have no internet
+# (their NetworkPolicy allows DNS and this mirror only); dockerd in every box lists it under
+# registry-mirrors (images/docker-lab/daemon.json), so `docker pull` / `FROM` of Docker Hub
+# images resolve here. Each tag is fetched from Docker Hub once per proxy TTL, which also
+# keeps the cluster's single NAT IP under Docker Hub's pull rate limit.
+#
+# Proxy mode is read-only: learners can pull through it but never push into it.
+#
+# Docker Hub credentials (strongly recommended; anonymous pulls are rate-limited per IP):
+#   kubectl -n dl-mirror create secret generic registry-mirror-hub \
+#     --from-literal=username=<hub user> --from-literal=password=<hub access token>
+# then `kubectl -n dl-mirror rollout restart deploy/registry-mirror`.
+#
+# Runs on system-k8s next to the other platform pods.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dl-mirror
+  labels:
+    app.kubernetes.io/managed-by: devlabs
+    app.kubernetes.io/component: registry-mirror
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-mirror-cache
+  namespace: dl-mirror
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: gp2
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry-mirror
+  namespace: dl-mirror
+  labels: {app: registry-mirror}
+spec:
+  replicas: 1
+  # The cache volume is ReadWriteOnce.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: registry-mirror}
+  template:
+    metadata:
+      labels: {app: registry-mirror}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      nodeSelector:
+        devlabs.io/pool: system
+      tolerations:
+        - key: CriticalAddonsOnly
+          operator: Exists
+          effect: NoSchedule
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: registry
+          image: registry:3
+          ports:
+            - {name: http, containerPort: 5000}
+          env:
+            - {name: REGISTRY_PROXY_REMOTEURL, value: https://registry-1.docker.io}
+            - {name: REGISTRY_PROXY_TTL, value: 168h}
+            - {name: REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY, value: /var/lib/registry}
+            - {name: REGISTRY_STORAGE_DELETE_ENABLED, value: "true"}
+            - {name: OTEL_TRACES_EXPORTER, value: none}
+            - name: REGISTRY_PROXY_USERNAME
+              valueFrom:
+                secretKeyRef: {name: registry-mirror-hub, key: username, optional: true}
+            - name: REGISTRY_PROXY_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: registry-mirror-hub, key: password, optional: true}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          readinessProbe:
+            httpGet: {path: /v2/, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /v2/, port: http}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          volumeMounts:
+            - {name: cache, mountPath: /var/lib/registry}
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: registry-mirror-cache
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry-mirror
+  namespace: dl-mirror
+spec:
+  selector: {app: registry-mirror}
+  ports:
+    - {name: http, port: 5000, targetPort: http}
+---
+# Only Docker boxes reach the mirror (box namespaces carry devlabs.io/registry-mirror=client).
+# Egress stays open: the mirror fetches from Docker Hub.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dl-mirror-clients
+  namespace: dl-mirror
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              devlabs.io/registry-mirror: client
+      ports:
+        - {protocol: TCP, port: 5000}

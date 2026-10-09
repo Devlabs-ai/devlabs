@@ -1,0 +1,175 @@
+{
+  "id": "ds-01-lsm-write-path",
+  "number": 501,
+  "finalized": true,
+  "title": "3 a.m. on orders-db: the WAL that wouldn’t stop growing",
+  "description": "orders-db is paging and four dashboard panels look wrong. Map each panel to the LSM write-path step it watches, then find the step that broke first.",
+  "difficulty": "L1",
+  "tags": [
+    "data-systems",
+    "storage-engines",
+    "lsm-tree",
+    "wal",
+    "compaction",
+    "incident",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "**03:07. You’re on call.** PagerDuty fires: `orders-db: disk /data/wal at 41 GB (normal < 1 GB)`.\n\n**How orders-db works.** orders-db stores every order on an LSM-tree engine, the design inside RocksDB, Cassandra and LevelDB. It was built to four rules:\n\n1. **No acknowledged order is ever lost.** Once order-processor gets an OK, the order must survive a crash.\n2. **Writes never wait for heavy disk work.** A `PUT` costs one small log append plus a memory insert, about 2 ms.\n3. **Files on disk are never edited.** New data always goes into new files.\n4. **Memory is bounded.** Each in-memory table (memtable) holds 64 MB. At most **4 full memtables** may wait in memory; at 4, the engine **stalls every write** until one is cleared.\n\n**The dashboard.** Each panel watches one step of the write path:\n\n| Panel | Now | Since 01:52 |\n|---|---|---|\n| `wal_fsync_p99` | 0.4 ms | normal |\n| `put_p99` | 2 ms | normal |\n| `immutable_memtables` | **3 of 4** | rising |\n| `sstable_count` | **212** | **flat** |\n| `/data/wal` size | **41 GB** | **climbing** |\n| `pending_compactions` | **0** | idle |\n\nOne more full memtable and orders-db stops taking orders.\n\n**Arjun**, the incident lead, joins the call: *“Four panels look bad, but only one step actually broke. Before anyone restarts anything, put the write path on the board in order, with each panel on the step it watches. Then tell me which step broke first.”*\n\nThe board’s blocks are labelled with the panels. Each card is a step of the write path. Some cards are steps that orders-db would never take, because they break one of the four rules. Those are traps.\n\nYou have **three hearts**. A wrong Submit costs one, and so does a wrong answer to Arjun. Finish with all three for three stars.",
+    "yourTask": "Put the six write-path steps in order, one under each dashboard panel, then tell Arjun which step broke first.",
+    "yourTaskSteps": [
+      "Read the panel on each block. Ask yourself which step would make that number move.",
+      "Drag a card onto a block, or select a card and then click the block.",
+      "The amber dashed block has no panel. It’s optional.",
+      "Leave any card that breaks one of the four rules in Unused.",
+      "Submit. When the board is right, Arjun asks his question."
+    ],
+    "hints": [
+      "Rule 1 decides the first step. What has to be on disk before an OK goes back?",
+      "immutable_memtables counts memtables that are full and frozen but not yet written to disk.",
+      "sstable_count only goes up when a memtable’s contents land on disk as a new file.",
+      "A WAL file can only be deleted once every record in it is safely in an SSTable.",
+      "Several bad panels can share one cause. Follow the path in order and find the first step that isn’t finishing."
+    ],
+    "moat": "Setter notes, not shown to learners.\n\nRequired chain: wal-append → memtable-insert → memtable-freeze → flush-sstable → wal-discard → compaction.\nOptional splice: bloom-index on flush-sstable → wal-discard.\nTraps map to broken rules: update-in-place (rule 3), ack-before-log (rule 1), truncate-wal (rule 1), delete-everywhere (rule 3), compaction-blocks (rule 2).\nLives 3; finale answer = flush. Freeze is healthy (count rises because frozen memtables aren't drained); WAL growth and idle compaction are downstream symptoms."
+  },
+  "platformSpec": {
+    "kicker": "Storage engines · LSM write path · Incident",
+    "passMessage": "Root cause found: flushes stopped at 01:52. Next stop, the flush thread’s logs.",
+    "game": { "mode": "classic", "lives": 3 },
+    "finale": {
+      "prompt": "Arjun: “Board looks right. Four panels are red. Which step broke first?”",
+      "options": [
+        { "id": "freeze", "label": "Freezing full memtables (immutable_memtables at 3 of 4)" },
+        { "id": "flush", "label": "Flushing frozen memtables to SSTables (sstable_count flat)" },
+        { "id": "wal-discard", "label": "Deleting old WAL files (/data/wal at 41 GB)" },
+        { "id": "compaction", "label": "Compaction (pending_compactions at 0)" },
+        { "id": "wal-append", "label": "Appending to the WAL" }
+      ],
+      "answer": "flush",
+      "explanation": "Walk the path in order. Appends and inserts are healthy (0.4 ms fsync, 2 ms PUT). Freezing is working too: memtables fill and freeze, which is why the count rises. They pile up because nothing drains them, and draining is the flush. sstable_count has been flat since 01:52, so no flush has finished. Everything after that is a symptom: WAL files can only be deleted after their memtable is flushed, so /data/wal grows, and compaction has no new files to merge, so it sits idle. Truncating the WAL would only destroy the one copy of those orders."
+    },
+    "pieces": [
+      {
+        "id": "wal-append",
+        "title": "Append the order to the WAL and fsync",
+        "blurb": "order:88213 → paid is appended to the end of the current write-ahead log file and fsynced. One small sequential write, and the order now survives a crash (rule 1).",
+        "prompt": "wal_fsync_p99 · 0.4 ms · OK",
+        "kind": "stage",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "memtable-insert",
+        "title": "Insert it into the memtable, reply OK",
+        "blurb": "The order joins the memtable, an in-memory tree sorted by key. Reads can find it now, and order-processor gets its OK. Together with the append, this is the whole 2 ms.",
+        "prompt": "put_p99 · 2 ms · OK",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "wal-append",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "memtable-freeze",
+        "title": "Freeze the full memtable, start a new one",
+        "blurb": "At 64 MB the memtable becomes read-only and waits to be written to disk. A fresh memtable and a new WAL file take new writes, so nobody waits (rule 2).",
+        "prompt": "immutable_memtables · 3 of 4 ↑",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "memtable-insert",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "flush-sstable",
+        "title": "Flush the frozen memtable to a new SSTable",
+        "blurb": "A background thread writes the frozen memtable to disk, in key order, as a new SSTable (sorted string table). The file is never edited again (rule 3), and the frozen memtable is freed.",
+        "prompt": "sstable_count · 212 · flat",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "memtable-freeze",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "bloom-index",
+        "title": "Write a Bloom filter and index for the SSTable",
+        "blurb": "Next to the new file, store a Bloom filter (it can answer “this key is definitely not here”) and a sparse key index. Reads get faster; the write is just as safe without them.",
+        "prompt": "Optional · no panel",
+        "kind": "mechanism",
+        "gold": "optional",
+        "parent": "flush-sstable",
+        "child": "wal-discard",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "wal-discard",
+        "title": "Delete the WAL file for the flushed memtable",
+        "blurb": "Every record in that WAL file is now inside an SSTable, so the log is no longer needed to rebuild anything after a crash. This is what keeps /data/wal small.",
+        "prompt": "/data/wal · 41 GB ↑",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "flush-sstable",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "compaction",
+        "title": "Compaction merges SSTables in the background",
+        "blurb": "As SSTables pile up, compaction merge-sorts them into fewer, larger files, keeps only the newest version of each key and drops deleted ones. It needs new SSTables to have work to do.",
+        "prompt": "pending_compactions · 0",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "wal-discard",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "truncate-wal",
+        "title": "Truncate the WAL when the disk passes 40 GB",
+        "blurb": "If /data/wal gets too big, chop off the oldest WAL files to free space. It would clear tonight’s alert.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Breaks rule 1. Those WAL files hold orders that aren’t in any SSTable yet. Truncate them and the next crash loses acknowledged orders."
+      },
+      {
+        "id": "ack-before-log",
+        "title": "Reply OK first, write the log later",
+        "blurb": "Send order-processor its OK as soon as the order is in memory, and batch the WAL write a second later. PUTs would get faster.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Breaks rule 1. A crash inside that second loses an order the client was told was saved."
+      },
+      {
+        "id": "update-in-place",
+        "title": "Find the order’s page on disk and overwrite it",
+        "blurb": "Look up the disk page holding the old value of order:88213 and write the new value over it, the way Postgres does.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Breaks rule 3. That’s a B-tree. An LSM tree never edits files; a newer version goes into a newer file."
+      },
+      {
+        "id": "delete-everywhere",
+        "title": "Remove old versions from every SSTable right away",
+        "blurb": "When order:88213 changes, open each SSTable holding an older version and delete it from that file immediately.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Breaks rule 3. SSTables are never edited. Old versions stay until compaction drops them."
+      },
+      {
+        "id": "compaction-blocks",
+        "title": "Pause writes while compaction runs",
+        "blurb": "Compaction needs a stable view of the files, so incoming PUTs wait until the merge finishes.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Breaks rule 2. Compaction works on files that never change, in the background. Writes keep landing in the memtable."
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

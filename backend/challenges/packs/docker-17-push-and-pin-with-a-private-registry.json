@@ -1,0 +1,47 @@
+{
+  "id": "docker-17-push-and-pin-with-a-private-registry",
+  "number": 417,
+  "finalized": true,
+  "title": "Push and Pin with a Private Registry",
+  "description": "**SITUATION:**\n\nQuickByte is moving its images off Docker Hub into a private registry. As a trial, run one on the order box, publish order-processor v1.2 to it as release `1.2` and as `stable`, and deploy a copy **pinned by digest**, so a re-pushed tag can never change what's running.\n\n**YOUR TASK:**\n\n1. Run a registry on the box.\n2. Tag and push order-processor.\n3. Record the image's digest and deploy by digest.\n\n**SPEC:**\n\n- Container `registry`: image `registry:3`, **running**, `--restart unless-stopped`, host port `5000` → `5000`, storage (`/var/lib/registry`) on the named volume `registry-data`\n- `localhost:5000/quickbyte/order-processor` with tags `1.2` and `stable`, both the image of `devsetu/order-processor:v1.2`\n- `~/answers/digest`: the `sha256:...` digest of `1.2` **in this registry**\n- Container `op-pinned` started from `localhost:5000/quickbyte/order-processor@<digest>`, host port `8087` → `8000`, serving `/health`\n\n**GOOD PRACTICES:**\n\n- `docker tag` adds a name; `docker push` uploads to the registry named in the image reference.\n- `curl http://127.0.0.1:5000/v2/<repo>/tags/list` asks the registry directly.\n- Tags can move; a digest always means the same bytes.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "registry",
+    "tags",
+    "digests"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Push and Pin with a Private Registry",
+    "brief": "Push and Pin with a Private Registry",
+    "solution": "# Solution — Push and Pin with a Private Registry\n\nA **registry** stores images; `docker push` uploads, `docker pull` downloads. Docker Hub is one registry, but companies keep their own images in a private one (ECR, GCR, Harbor, or the open-source `registry`). An image's full name says where it lives: `localhost:5000/quickbyte/order-processor:1.2` means *registry* `localhost:5000`, *repository* `quickbyte/order-processor`, *tag* `1.2`.\n\nDocs: [Registry](https://distribution.github.io/distribution/) · `docker push --help`\n\n## Run a registry\n\n```bash\ndocker run -d --name registry --restart unless-stopped \\\n  -p 5000:5000 -v registry-data:/var/lib/registry registry:3\ncurl http://127.0.0.1:5000/v2/_catalog          # {\"repositories\":[]}\n```\n\nDocker only talks plain HTTP to registries on `localhost`; anything else needs TLS (or an `insecure-registries` entry in daemon.json).\n\n## Tag and push\n\n```bash\ndocker tag devsetu/order-processor:v1.2 localhost:5000/quickbyte/order-processor:1.2\ndocker tag devsetu/order-processor:v1.2 localhost:5000/quickbyte/order-processor:stable\ndocker push localhost:5000/quickbyte/order-processor:1.2\n# 1.2: digest: sha256:4f8a... size: 1993\ndocker push localhost:5000/quickbyte/order-processor:stable     # layers already exist: instant\ncurl http://127.0.0.1:5000/v2/quickbyte/order-processor/tags/list\n```\n\n`docker tag` doesn't copy anything; it adds another name for the same image ID.\n\n## Tags move, digests don't\n\nA **tag** is a label anyone can move: tomorrow `stable` (or even `1.2`) can point at a different image. A **digest** (`sha256:...`) is the hash of the image manifest: it can only ever mean those exact bytes.\n\n```bash\ndocker inspect -f '{{json .RepoDigests}}' localhost:5000/quickbyte/order-processor:1.2 | jq\n# [ \"devsetu/order-processor@sha256:a66b...\",\n#   \"localhost:5000/quickbyte/order-processor@sha256:be4f...\" ]\ndocker inspect -f '{{json .RepoDigests}}' localhost:5000/quickbyte/order-processor:1.2 \\\n  | jq -r '.[] | select(startswith(\"localhost:5000/\")) | split(\"@\")[1]' > ~/answers/digest\n```\n\nOne image, **two digests**: a digest belongs to a manifest **in a registry**. Docker Hub stores a multi-arch index (arm64 + amd64); this box pushed only its own arm64 manifest, so the bytes, and the hash, differ. Always take the digest from the registry you deploy from (the `docker push` output prints it too).\n\n## Deploy by digest\n\n```bash\nDIGEST=$(cat ~/answers/digest)\ndocker run -d --name op-pinned -p 8087:8000 localhost:5000/quickbyte/order-processor@$DIGEST\ncurl http://127.0.0.1:8087/health\n```\n\nPinning by digest means a deploy, a rollback or a new node always gets **the same image** that was tested, even if someone re-pushes the tag. Kubernetes manifests and CI pipelines do the same: `image: repo@sha256:...`.\n\nThen **Submit**.\n",
+    "idLabel": "17",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

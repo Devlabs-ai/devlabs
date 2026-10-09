@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-handler-green
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: payment-handler
+      color: green
+  template:
+    metadata:
+      labels:
+        app: payment-handler
+        color: green
+    spec:
+      containers:
+        - name: payment-handler
+          image: devsetu/payment-handler:v1.1
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: "20m"
+              memory: "32Mi"
+            limits:
+              cpu: "40m"
+              memory: "64Mi"

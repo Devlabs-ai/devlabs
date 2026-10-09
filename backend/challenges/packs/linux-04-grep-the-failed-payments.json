@@ -1,0 +1,47 @@
+{
+  "id": "linux-04-grep-the-failed-payments",
+  "number": 304,
+  "finalized": true,
+  "title": "Grep the Failed Payments",
+  "description": "**SITUATION:**\n\nFinance flagged a spike in failed card payments yesterday. Before anyone opens a dashboard, the payments lead wants raw numbers straight from the **payment-handler** log. The log is messy: the same failure is logged as `FAILED`, `Failed` and `failed`, and some codes and words look alike.\n\n- Log: `/var/log/payment-handler/payments.log`\n- Configs: `/etc/payment-handler/` (several folders)\n\n**YOUR TASK:**\n\nEvery answer goes in `~/answers/` (create it first).\n\n1. Extract every line that says **failed**, in any letter case. Save them to `~/answers/failed.txt`, unchanged and in log order.\n2. Count the lines with decline code **`E402`** exactly. `E4021` is a different code. Save just the number to `~/answers/e402-count`.\n3. List the unique **order IDs** (`ORD-` followed by 6 digits) that appear on lines with the word **declined**. Save them to `~/answers/declined-orders`, one per line, no duplicates.\n4. Find which config files under `/etc/payment-handler` actually **set** a timeout (a line like `read_timeout = 5s`). Save their full paths to `~/answers/timeout-configs`, one per line.\n\n**GOOD PRACTICES:**\n\n- Build pipelines step by step. Run each part, look at the output, then add the next `|`.\n- `-w` (whole word) and `^` (start of line) remove most false matches.\n- Your log is generated per learner. Copying someone else's numbers won't work.\n",
+  "difficulty": "L0",
+  "tags": [
+    "linux",
+    "l0",
+    "text",
+    "grep",
+    "regex"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Grep the Failed Payments",
+    "brief": "Grep the Failed Payments",
+    "solution": "# Solution — Grep the Failed Payments\n\n`grep` prints the lines that match a pattern. A few flags cover most real work:\n\n| Flag | Meaning |\n|------|---------|\n| `-i` | ignore letter case |\n| `-w` | match whole words only (`E402` doesn't match `E4021`) |\n| `-c` | count matching lines |\n| `-o` | print only the matched part |\n| `-E` | extended regex (`{6}`, `+`, `\\|`) |\n| `-r` / `-l` | search a directory tree / list matching file names |\n\nDocs: `man grep` · `man 7 regex`\n\n```bash\ncd /var/log/payment-handler\nmkdir -p ~/answers\n```\n\n## 1. Every failed payment, in any case\n\n```bash\ngrep -i 'failed' payments.log > ~/answers/failed.txt\n```\n\n## 2. How many E402s\n\n```bash\ngrep -c 'code=E402' payments.log        # too many: also counts E4021\ngrep -cw 'code=E402' payments.log > ~/answers/e402-count\n```\n\n## 3. Unique order IDs on declined lines\n\nChain two greps: the first keeps the declined lines, the second cuts out the IDs.\n\n```bash\ngrep -w 'declined' payments.log | grep -oE 'ORD-[0-9]{6}' | sort -u > ~/answers/declined-orders\n```\n\n`-w` skips `predeclined`. `sort -u` sorts and removes duplicates.\n\n## 4. Configs that set a timeout\n\n```bash\ngrep -ri 'timeout' /etc/payment-handler                # includes a comment line\ngrep -rlE '^[a-z_]*timeout *=' /etc/payment-handler > ~/answers/timeout-configs\n```\n\n`^` anchors the match to the start of the line, so comment lines starting with `#` are skipped.\n\nThen **Submit**.\n",
+    "idLabel": "04",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "payment-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

@@ -1,0 +1,46 @@
+{
+  "id": "linux-03-read-the-order-logs",
+  "number": 303,
+  "finalized": true,
+  "title": "Read the Order Logs",
+  "description": "**SITUATION:**\n\nYou're taking over the order-processor pager mid-shift. The outgoing engineer wants proof that you can find your way around its logs. They also left a **shift handoff code** that's announced in the live log every 30 seconds.\n\n- `/var/log/order-processor/orders-2026-09-30.log`: yesterday's full log (thousands of lines)\n- `/var/log/order-processor/live.log`: being written right now\n\n**YOUR TASK:**\n\nEvery answer goes in `~/answers/` (create it first).\n\n1. Browse yesterday's log with `less` (search, jump to the end, quit).\n2. Count its lines. Save just the number to `~/answers/line-count`.\n3. Save exactly its first 10 lines to `~/answers/first-10.txt` and exactly its last 5 lines to `~/answers/last-5.txt`.\n4. Save exactly line 1500 to `~/answers/line-1500`.\n5. Follow `live.log` as it grows and save the **latest** handoff code (6 characters) to `~/answers/handoff-code`. It rotates every 30 seconds, so submit soon after you write it.\n\n**GOOD PRACTICES:**\n\n- `less` doesn't load the whole file at once, so it's safe on huge logs. `cat` is not.\n- Use `>` to save output instead of copying text from the terminal.\n- `tail -f` keeps following the file until you press `Ctrl+C`.\n",
+  "difficulty": "L0",
+  "tags": [
+    "linux",
+    "l0",
+    "shell",
+    "logs"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Read the Order Logs",
+    "brief": "Read the Order Logs",
+    "solution": "# Solution — Read the Order Logs\n\nLogs are the first thing you read in any incident. `less` is for browsing, `head` and `tail` grab the ends, `wc` counts, and `tail -f` follows a file as it grows.\n\nDocs: `man less` · `man head` · `man tail` · `man wc`\n\n## Browse\n\n```bash\ncd /var/log/order-processor\nls -lh\nless orders-2026-09-30.log\n```\n\nInside `less`: `Space`/`b` page down/up, `G` end, `g` start, `/ERROR` search, `n` next match, `q` quit.\n\n## Answers\n\n`>` sends a command's output into a file:\n\n```bash\nmkdir -p ~/answers\nwc -l < orders-2026-09-30.log            > ~/answers/line-count   # < avoids printing the filename\nhead -n 10 orders-2026-09-30.log         > ~/answers/first-10.txt\ntail -n 5  orders-2026-09-30.log         > ~/answers/last-5.txt\nsed -n 1500p orders-2026-09-30.log       > ~/answers/line-1500\n# same thing with head/tail: head -n 1500 orders-2026-09-30.log | tail -n 1\n```\n\n## Follow the live log\n\n```bash\ntail -f live.log          # Ctrl+C to stop\n```\n\nA `NOTICE shift handoff code=...` line appears every 30 seconds. Write the newest code down quickly:\n\n```bash\necho 'K3X9QA' > ~/answers/handoff-code\n```\n\nThen **Submit** before it rotates twice.\n",
+    "idLabel": "03",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

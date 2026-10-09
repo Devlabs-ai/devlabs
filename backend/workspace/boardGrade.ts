@@ -1,6 +1,11 @@
 'use strict';
 
 import type {
+  BoardClaimResult,
+  BoardFinale,
+  BoardFinaleOption,
+  BoardGameConfig,
+  BoardGameState,
   BoardGradeCheck,
   BoardGradeResult,
   BoardGraphEdge,
@@ -8,6 +13,7 @@ import type {
   BoardPiece,
   BoardSpec,
   BoardState,
+  PublicBoardSpec,
 } from '../types/domain';
 
 const LANE_X: Record<string, number> = {
@@ -130,7 +136,7 @@ const SLOT_START_X = 96;
 const SLOT_START_Y = 24;
 
 interface BoardShadow {
-  slots: Array<{ id: string; optional: boolean; x: number; y: number }>;
+  slots: Array<{ id: string; optional: boolean; x: number; y: number; prompt: string | null }>;
   edges: BoardGraphEdge[];
   gold: Record<string, string>;
 }
@@ -182,6 +188,7 @@ function buildShadow(spec: BoardSpec): BoardShadow {
       optional: false,
       x: SLOT_START_X,
       y: SLOT_START_Y + i * (SLOT_H + SLOT_GAP_Y),
+      prompt: p.prompt,
     };
   });
   const edges: BoardGraphEdge[] = [];
@@ -206,6 +213,7 @@ function buildShadow(spec: BoardSpec): BoardShadow {
       optional: true,
       x,
       y,
+      prompt: opt.prompt,
     });
     if (fromSlot) edges.push({ from: fromSlot, to: id });
     if (toSlot) edges.push({ from: id, to: toSlot });
@@ -267,7 +275,7 @@ function gradeBoard(spec: BoardSpec, graphRaw: unknown): BoardGradeResult {
         label,
         passed: false,
         required: true,
-        detail: 'Drop an operator into this block.',
+        detail: 'Drop a card into this block.',
       });
       return;
     }
@@ -278,7 +286,7 @@ function gradeBoard(spec: BoardSpec, graphRaw: unknown): BoardGradeResult {
         label,
         passed: false,
         required: true,
-        detail: piece.trapIfPlaced || 'This operator does not belong on the path.',
+        detail: piece.trapIfPlaced || 'This card does not belong on the path.',
       });
       return;
     }
@@ -288,7 +296,7 @@ function gradeBoard(spec: BoardSpec, graphRaw: unknown): BoardGradeResult {
         label,
         passed: false,
         required: true,
-        detail: 'Wrong operator for this step.',
+        detail: 'Wrong card for this step.',
       });
       return;
     }
@@ -323,7 +331,7 @@ function gradeBoard(spec: BoardSpec, graphRaw: unknown): BoardGradeResult {
         label,
         passed: false,
         required: false,
-        detail: piece.trapIfPlaced || 'Leave this unused, or pick the optional operator.',
+        detail: piece.trapIfPlaced || 'Leave this unused, or pick the optional card.',
       });
       return;
     }
@@ -333,7 +341,7 @@ function gradeBoard(spec: BoardSpec, graphRaw: unknown): BoardGradeResult {
         label,
         passed: false,
         required: false,
-        detail: 'This optional block is empty, or a different operator.',
+        detail: 'Wrong card for the optional block.',
       });
       return;
     }
@@ -342,7 +350,7 @@ function gradeBoard(spec: BoardSpec, graphRaw: unknown): BoardGradeResult {
       label,
       passed: true,
       required: false,
-      detail: 'Optional operator placed.',
+      detail: 'Optional card placed.',
     });
   });
 
@@ -374,11 +382,21 @@ function gradeBoard(spec: BoardSpec, graphRaw: unknown): BoardGradeResult {
   const correctRequired = requiredChecks.filter((c) => c.passed).length;
   const requiredCount = requiredChecks.length;
   const optionalFailed = checks.some((c) => !c.required && !c.skipped && !c.passed && shadow.slots.some((s) => s.optional && s.id === c.id));
-  const passed = correctRequired === requiredCount && trapsPlaced === 0 && !optionalFailed;
+  const boardPassed = correctRequired === requiredCount && trapsPlaced === 0 && !optionalFailed;
+  const game = graphRaw && typeof graphRaw === 'object' && 'game' in (graphRaw as object)
+    ? coerceGame((graphRaw as { game?: unknown }).game, spec)
+    : defaultGame(spec);
+  const needsFinale = Boolean(spec.finale) && boardPassed && !game.finaleCorrect;
+  const passed = boardPassed && (!spec.finale || game.finaleCorrect);
+  const stars = passed && game.livesMax != null && game.lives != null
+    ? (game.resets > 0 ? 1 : Math.max(1, Math.min(3, 3 - (game.livesMax - game.lives))))
+    : null;
 
   const summary = passed
-    ? 'The blocks match the distinct() lifecycle.'
-    : [
+    ? spec.passMessage || 'Every block is in the right place.'
+    : needsFinale
+      ? 'Every block is right. One last question.'
+      : [
         correctRequired < requiredCount
           ? `${correctRequired}/${requiredCount} required blocks correct`
           : null,
@@ -395,6 +413,9 @@ function gradeBoard(spec: BoardSpec, graphRaw: unknown): BoardGradeResult {
     correctRequired,
     requiredCount,
     trapsPlaced,
+    boardPassed,
+    needsFinale,
+    stars,
   };
 }
 
@@ -406,9 +427,47 @@ function parseParents(p: Record<string, unknown>): string[] {
   return [];
 }
 
+const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
+
+function parseGameConfig(raw: unknown): BoardGameConfig {
+  const rec = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  const mode = rec.mode === 'unlock' || rec.mode === 'debate' ? rec.mode : 'classic';
+  const lives = typeof rec.lives === 'number' && Number.isFinite(rec.lives) && rec.lives > 0
+    ? Math.min(9, Math.trunc(rec.lives))
+    : null;
+  return { mode, lives };
+}
+
+function parseFinale(raw: unknown): BoardFinale | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const rec = raw as Record<string, unknown>;
+  const prompt = text(rec.prompt);
+  const answer = text(rec.answer);
+  const options = Array.isArray(rec.options)
+    ? rec.options
+      .map((o) => {
+        const r = o && typeof o === 'object' ? o as Record<string, unknown> : {};
+        const id = text(r.id);
+        const label = text(r.label);
+        return id && label ? { id, label } : null;
+      })
+      .filter((o): o is BoardFinaleOption => Boolean(o))
+    : [];
+  if (!prompt || !answer || !options.some((o) => o.id === answer)) return null;
+  return { prompt, options, answer, explanation: text(rec.explanation) || '' };
+}
+
 function parseBoardSpec(raw: unknown): BoardSpec | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const rec = raw as { pieces?: unknown };
+  const rec = raw as {
+    pieces?: unknown;
+    kicker?: unknown;
+    passMessage?: unknown;
+    game?: unknown;
+    finale?: unknown;
+    trayLabel?: unknown;
+    unlockAfter?: unknown;
+  };
   if (!Array.isArray(rec.pieces)) return null;
   const pieces = rec.pieces
     .map((item) => {
@@ -427,37 +486,57 @@ function parseBoardSpec(raw: unknown): BoardSpec | null {
         parents: parseParents(p),
         child: typeof p.child === 'string' && p.child.trim() ? p.child.trim() : null,
         trapIfPlaced: typeof p.trapIfPlaced === 'string' ? p.trapIfPlaced : null,
+        prompt: gold !== 'tray' ? text(p.prompt) : null,
+        clue: gold === 'required' ? text(p.clue) : null,
+        speaker: text(p.speaker),
       };
     })
     .filter((item): item is BoardSpec['pieces'][number] => Boolean(item));
   if (!pieces.length) return null;
-  return { pieces };
+  return {
+    pieces,
+    kicker: text(rec.kicker),
+    passMessage: text(rec.passMessage),
+    game: parseGameConfig(rec.game),
+    finale: parseFinale(rec.finale),
+    trayLabel: text(rec.trayLabel),
+    unlockAfter: text(rec.unlockAfter),
+  };
 }
 
-function publicBoardSpec(spec: BoardSpec | {
-  pieces?: Array<{
-    id: string;
-    title: string;
-    blurb: string;
-    kind: 'stage' | 'mechanism';
-    gold?: string;
-  }>;
+type PublicPieceIn = {
+  id: string;
+  title: string;
+  blurb: string;
+  kind: 'stage' | 'mechanism';
+  speaker?: string | null;
+  gold?: string;
+};
+
+function publicBoardSpec(spec: (Omit<Partial<BoardSpec>, 'pieces' | 'finale'> & {
+  pieces?: PublicPieceIn[];
   shadow?: { slots: BoardShadow['slots']; edges: BoardGraphEdge[] };
-} | null): {
-  pieces: Array<{ id: string; title: string; blurb: string; kind: 'stage' | 'mechanism' }>;
-  shadow: { slots: BoardShadow['slots']; edges: BoardGraphEdge[] };
-} | null {
+  finale?: { prompt: string; options: BoardFinaleOption[]; answer?: string } | null;
+}) | null): PublicBoardSpec | null {
   if (!spec || !Array.isArray(spec.pieces) || spec.pieces.length === 0) return null;
-  const strip = (p: { id: string; title: string; blurb: string; kind: 'stage' | 'mechanism' }) => ({
+  const strip = (p: PublicPieceIn) => ({
     id: p.id,
     title: p.title,
     blurb: p.blurb,
     kind: p.kind,
+    speaker: p.speaker ?? null,
+  });
+  const extras = (s: typeof spec) => ({
+    kicker: text(s.kicker),
+    game: parseGameConfig(s.game),
+    finale: s.finale && s.finale.prompt
+      ? { prompt: s.finale.prompt, options: s.finale.options || [] }
+      : null,
+    trayLabel: text(s.trayLabel),
+    unlockAfter: text(s.unlockAfter),
   });
   const hasGold = spec.pieces.some((p) =>
-    (p as { gold?: string }).gold === 'required'
-    || (p as { gold?: string }).gold === 'optional'
-    || (p as { gold?: string }).gold === 'tray',
+    p.gold === 'required' || p.gold === 'optional' || p.gold === 'tray',
   );
   if (!hasGold) {
     const shadow = spec.shadow;
@@ -465,6 +544,7 @@ function publicBoardSpec(spec: BoardSpec | {
     return {
       pieces: spec.pieces.map(strip),
       shadow: { slots: shadow.slots, edges: Array.isArray(shadow.edges) ? shadow.edges : [] },
+      ...extras(spec),
     };
   }
   const parsed = parseBoardSpec(spec);
@@ -472,6 +552,7 @@ function publicBoardSpec(spec: BoardSpec | {
   return {
     pieces: parsed.pieces.map(strip),
     shadow: publicShadow(parsed),
+    ...extras(parsed),
   };
 }
 
@@ -485,7 +566,43 @@ function emptyBoardState(spec: BoardSpec): BoardState {
     shuffled[j] = tmp;
   }
   const fills = parseFills({}, spec);
-  return { trayOrder: shuffled, fills, nodes: [], edges: [], lastGrade: null };
+  return { trayOrder: shuffled, fills, nodes: [], edges: [], lastGrade: null, game: defaultGame(spec) };
+}
+
+function defaultGame(spec: BoardSpec, resets = 0): BoardGameState {
+  const lives = spec.game?.lives ?? null;
+  return {
+    lives,
+    livesMax: lives,
+    step: 0,
+    clues: [],
+    claims: null,
+    finaleCorrect: false,
+    finaleExplanation: null,
+    resets,
+    over: false,
+  };
+}
+
+function coerceGame(raw: unknown, spec: BoardSpec): BoardGameState {
+  const base = defaultGame(spec);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return base;
+  const rec = raw as Partial<BoardGameState>;
+  const required = buildShadow(spec).slots.filter((s) => !s.optional).length;
+  const lives = base.livesMax == null
+    ? null
+    : Math.max(0, Math.min(base.livesMax, Number.isFinite(rec.lives) ? Number(rec.lives) : base.livesMax));
+  return {
+    lives,
+    livesMax: base.livesMax,
+    step: Math.max(0, Math.min(required, Number.isFinite(rec.step) ? Number(rec.step) : 0)),
+    clues: Array.isArray(rec.clues) ? rec.clues.filter((c): c is string => typeof c === 'string') : [],
+    claims: rec.claims && typeof rec.claims === 'object' ? rec.claims : null,
+    finaleCorrect: rec.finaleCorrect === true,
+    finaleExplanation: typeof rec.finaleExplanation === 'string' ? rec.finaleExplanation : null,
+    resets: Number.isFinite(rec.resets) ? Math.max(0, Number(rec.resets)) : 0,
+    over: lives === 0,
+  };
 }
 
 function coerceBoardState(raw: unknown, spec: BoardSpec): BoardState {
@@ -495,6 +612,7 @@ function coerceBoardState(raw: unknown, spec: BoardSpec): BoardState {
     lastGrade?: BoardState['lastGrade'];
     fills?: unknown;
     nodes?: unknown;
+    game?: unknown;
   };
   const fills = parseFills(rec, spec);
   const migrated = Array.isArray(rec.nodes) && rec.fills == null;
@@ -507,6 +625,120 @@ function coerceBoardState(raw: unknown, spec: BoardSpec): BoardState {
     nodes: [],
     edges: [],
     lastGrade: migrated ? null : rec.lastGrade ?? null,
+    game: coerceGame(rec.game, spec),
+  };
+}
+
+function loseLife(game: BoardGameState): void {
+  if (game.lives == null) return;
+  game.lives = Math.max(0, game.lives - 1);
+  game.over = game.lives === 0;
+}
+
+type GameError = Error & { status?: number };
+
+function gameError(message: string, status = 409): GameError {
+  return Object.assign(new Error(message), { status });
+}
+
+function assertPlayable(game: BoardGameState): void {
+  if (game.over) throw gameError('Out of lives. Reset the board to try again.');
+}
+
+/** Unlock mode: check one card against the current step. Mutates and returns the state. */
+function checkStep(
+  spec: BoardSpec,
+  state: BoardState,
+  slotId: string,
+  pieceId: string,
+): { state: BoardState; correct: boolean; detail: string; clue: string | null } {
+  if (spec.game?.mode !== 'unlock') throw gameError('This board is not in step-by-step mode.');
+  const game = state.game || defaultGame(spec);
+  assertPlayable(game);
+  const shadow = buildShadow(spec);
+  const required = shadow.slots.filter((s) => !s.optional);
+  const current = required[game.step];
+  if (!current) throw gameError('Every step is already unlocked.');
+  if (slotId !== current.id) throw gameError('That step is still locked. Fill the highlighted step first.');
+  const piece = spec.pieces.find((p) => p.id === pieceId);
+  if (!piece) throw gameError('Unknown card.', 400);
+  if (Object.entries(state.fills).some(([sid, pid]) => pid === pieceId && sid !== slotId)) {
+    throw gameError('That card is already on the board.', 400);
+  }
+
+  if (shadow.gold[current.id] === pieceId) {
+    state.fills = { ...state.fills, [current.id]: pieceId };
+    game.step += 1;
+    if (piece.clue) game.clues = [...game.clues, piece.clue];
+    state.game = game;
+    return { state, correct: true, detail: 'Locked in.', clue: piece.clue };
+  }
+  loseLife(game);
+  state.game = game;
+  const detail = piece.gold === 'tray'
+    ? piece.trapIfPlaced || 'That card is a trap.'
+    : 'That card belongs on the board, just not at this step.';
+  return { state, correct: false, detail, clue: null };
+}
+
+/** Debate mode: judge every claim. True claims are the ones that belong on the board. */
+function judgeClaims(
+  spec: BoardSpec,
+  state: BoardState,
+  verdictsRaw: unknown,
+): { state: BoardState; wrong: number } {
+  if (spec.game?.mode !== 'debate') throw gameError('This board has no claims to judge.');
+  const game = state.game || defaultGame(spec);
+  assertPlayable(game);
+  if (game.claims) throw gameError('Claims are already judged. Reset the board to judge them again.');
+  const verdicts = verdictsRaw && typeof verdictsRaw === 'object' && !Array.isArray(verdictsRaw)
+    ? verdictsRaw as Record<string, unknown>
+    : {};
+  const missing = spec.pieces.filter((p) => typeof verdicts[p.id] !== 'boolean');
+  if (missing.length) throw gameError(`Mark every claim true or false (${missing.length} left).`, 400);
+
+  const claims: Record<string, BoardClaimResult> = {};
+  let wrong = 0;
+  for (const p of spec.pieces) {
+    const verdict = verdicts[p.id] === true;
+    const truth = p.gold !== 'tray';
+    const correct = verdict === truth;
+    if (!correct) wrong += 1;
+    claims[p.id] = { verdict, correct, explanation: truth ? null : p.trapIfPlaced || 'This claim is false.' };
+  }
+  for (let i = 0; i < wrong; i++) loseLife(game);
+  game.claims = claims;
+  state.game = game;
+  // False claims leave the table; the board is built from the true ones.
+  state.trayOrder = state.trayOrder.filter((id) => spec.pieces.find((p) => p.id === id)?.gold !== 'tray');
+  return { state, wrong };
+}
+
+/** Closing question; only once every block is correct. */
+function answerFinale(
+  spec: BoardSpec,
+  state: BoardState,
+  optionId: unknown,
+): { state: BoardState; correct: boolean; explanation: string } {
+  if (!spec.finale) throw gameError('This board has no final question.');
+  const game = state.game || defaultGame(spec);
+  assertPlayable(game);
+  if (!gradeBoard(spec, state).boardPassed) throw gameError('Get every block right first.');
+  if (game.finaleCorrect) {
+    return { state, correct: true, explanation: game.finaleExplanation || spec.finale.explanation };
+  }
+  const correct = optionId === spec.finale.answer;
+  if (correct) {
+    game.finaleCorrect = true;
+    game.finaleExplanation = spec.finale.explanation;
+  } else {
+    loseLife(game);
+  }
+  state.game = game;
+  return {
+    state,
+    correct,
+    explanation: correct ? spec.finale.explanation : 'Not quite. Look at the board again and think about what the evidence points to.',
   };
 }
 
@@ -517,4 +749,10 @@ module.exports = {
   publicBoardSpec,
   emptyBoardState,
   coerceBoardState,
+  defaultGame,
+  loseLife,
+  assertPlayable,
+  checkStep,
+  judgeClaims,
+  answerFinale,
 };

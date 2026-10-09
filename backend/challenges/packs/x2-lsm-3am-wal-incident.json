@@ -1,0 +1,188 @@
+{
+  "id": "x2-lsm-3am-wal-incident",
+  "number": 592,
+  "finalized": true,
+  "title": "X2 · 3 a.m.: the WAL that wouldn’t stop growing",
+  "description": "orders-db is paging. Redraw the write path from memory, then name the step that stopped. Three hearts, and every wrong submit costs one.",
+  "difficulty": "L1",
+  "tags": [
+    "data-systems",
+    "board-experiment",
+    "lsm-tree",
+    "incident",
+    "lives",
+    "finale",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "**03:07. You’re on call.** PagerDuty fires: `orders-db disk /data/wal 41 GB (normal < 1 GB)`.\n\nYou open the dashboard:\n\n- `/data/wal` has been climbing in a straight line since **01:52**.\n- `sstable_count` has been flat at **212** since 01:52.\n- `immutable_memtables` is **3 of 4**. RocksDB will stall all writes at 4.\n- `p99 PUT latency` still looks fine, **for now**.\n\nArjun, the incident lead, joins the call: *\"Before anyone restarts anything, draw me how a write is supposed to flow. Then tell me which step stopped at 01:52.\"*\n\nYou have **three hearts**. Every Submit with a wrong board costs one. Finish with all three for three stars.",
+    "yourTask": "Rebuild the write path, then answer Arjun: which step stopped?",
+    "yourTaskSteps": [
+      "Place six cards on the write path. One optional card exists.",
+      "Submit. A wrong board costs a heart.",
+      "When the board is right, answer the final question. A wrong answer also costs a heart."
+    ],
+    "hints": [
+      "WAL segments are deleted only after something else finishes. What?",
+      "If the SSTable count is flat, files aren’t being created."
+    ],
+    "moat": "Classic board with lives=3 and finale answer = flush."
+  },
+  "platformSpec": {
+    "kicker": "Experiment X2 · Incident · Lives & stars",
+    "passMessage": "Found it. Flushes stopped at 01:52, so WAL segments couldn’t be deleted.",
+    "game": {
+      "mode": "classic",
+      "lives": 3
+    },
+    "finale": {
+      "prompt": "Arjun: “OK, the board’s right. So which step stopped at 01:52?”",
+      "options": [
+        {
+          "id": "wal-append",
+          "label": "Appending to the WAL"
+        },
+        {
+          "id": "memtable",
+          "label": "Inserting into the memtable"
+        },
+        {
+          "id": "flush",
+          "label": "Flushing frozen memtables to SSTables"
+        },
+        {
+          "id": "wal-discard",
+          "label": "Deleting old WAL segments"
+        },
+        {
+          "id": "compaction",
+          "label": "Compaction"
+        }
+      ],
+      "answer": "flush",
+      "explanation": "The SSTable count is flat, so no flush has finished since 01:52. Frozen memtables are piling up (3 of 4), and WAL segments can only be deleted after their memtable is flushed, which is why the WAL grows. Deleting WAL segments is a symptom, not the cause. A compaction stall wouldn’t make the WAL grow."
+    },
+    "pieces": [
+      {
+        "id": "wal-append",
+        "kind": "stage",
+        "title": "Append to the WAL and fsync",
+        "blurb": "Every PUT lands at the end of the current WAL segment in /data/wal first.",
+        "prompt": "Every write · crash-proof it",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "memtable-insert",
+        "kind": "mechanism",
+        "title": "Insert into the active memtable",
+        "blurb": "The record joins the in-memory sorted tree and the client gets its OK.",
+        "prompt": "Every write · make it readable",
+        "gold": "required",
+        "parent": "wal-append",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "memtable-freeze",
+        "kind": "stage",
+        "title": "Freeze the full memtable",
+        "blurb": "At 64 MB the memtable becomes immutable and a new one (with a new WAL segment) takes writes. This is what immutable_memtables counts.",
+        "prompt": "Later · memtable hits 64 MB",
+        "gold": "required",
+        "parent": "memtable-insert",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "flush-sstable",
+        "kind": "stage",
+        "title": "Flush the frozen memtable to a new SSTable",
+        "blurb": "A background thread writes it to /data/sst as a new file. This is what makes sstable_count go up.",
+        "prompt": "Later · move it to disk",
+        "gold": "required",
+        "parent": "memtable-freeze",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "bloom-index",
+        "kind": "mechanism",
+        "title": "Write a Bloom filter and index",
+        "blurb": "Optional read speed-up stored next to the new SSTable.",
+        "prompt": "Optional · faster reads",
+        "gold": "optional",
+        "parent": "flush-sstable",
+        "child": "wal-discard",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "wal-discard",
+        "kind": "stage",
+        "title": "Delete the WAL segment for that memtable",
+        "blurb": "Only safe once its memtable is in an SSTable. This is what keeps /data/wal small.",
+        "prompt": "Later · clean up the log",
+        "gold": "required",
+        "parent": "flush-sstable",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "compaction",
+        "kind": "mechanism",
+        "title": "Compaction merges SSTables",
+        "blurb": "Background merge-sort of older files into fewer, larger ones.",
+        "prompt": "Much later · merge files",
+        "gold": "required",
+        "parent": "wal-discard",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "update-in-place",
+        "kind": "stage",
+        "title": "Overwrite the order’s page on disk",
+        "blurb": "Go to the page holding order:88213 and write the new value over it.",
+        "trapIfPlaced": "That’s a B-tree. LSM engines never overwrite in place.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "truncate-wal-on-alert",
+        "kind": "stage",
+        "title": "Truncate the WAL when the disk alert fires",
+        "blurb": "If /data/wal passes 40 GB, chop the oldest segments to free space.",
+        "trapIfPlaced": "Those segments hold records that aren’t in any SSTable yet. Truncating them loses data on the next crash.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "ack-before-log",
+        "kind": "stage",
+        "title": "Reply OK first, write the log later",
+        "blurb": "Batch WAL writes every second for lower latency.",
+        "trapIfPlaced": "A crash in that second loses acknowledged orders.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "delete-everywhere",
+        "kind": "stage",
+        "title": "Delete old versions from every SSTable right away",
+        "blurb": "Edit each SSTable that holds an older version of the key.",
+        "trapIfPlaced": "SSTables are immutable. Old versions wait for compaction.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "compaction-blocks",
+        "kind": "mechanism",
+        "title": "Pause writes during compaction",
+        "blurb": "Writes wait until the merge finishes.",
+        "trapIfPlaced": "Compaction runs in the background. Writes don’t wait for it.",
+        "gold": "tray",
+        "parent": null
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

@@ -1,4 +1,4 @@
-# Devlabs — AWS EC2 deployment (single host)
+# DevSetu — AWS EC2 deployment (single host)
 
 Target: one **Amazon Linux 2023** EC2 instance running **Play** with **Postgres + Redis in Docker**, **no custom domain** (access via Elastic IP over HTTP).
 
@@ -23,8 +23,8 @@ Internet :80
 | Setting    | Recommendation                                                                                                                      |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | AMI        | **Amazon Linux 2023**                                                                                                               |
-| Type       | **m7i-flex.large** (2 vCPU, 8 GiB) — one concurrent sandbox; heavier challenges (Spark/ES) need patience or a larger instance later |
-| Disk       | **40–80 GB** gp3 root volume (8 GB default is too small for Docker images + sessions)                                               |
+| Type       | **t3.large** (2 vCPU, 8 GiB, amd64) for Lean Beta app plane — or **t4g.large** if images are arm64                                 |
+| Disk       | **100 GB** gp3 root volume (8 GB default is too small for Docker images + sessions)                                                 |
 | Elastic IP | Allocate and associate so the public IP stays stable across stop/start                                                              |
 | SSH user   | `**ec2-user`** (default on Amazon Linux)                                                                                            |
 
@@ -137,13 +137,17 @@ git checkout main
 cp deploy/env.production.example .env
 nano .env   # set PGPASSWORD, JWT_SECRET, PUBLIC_HOST=<elastic-ip>
 
+mkdir -p sandbox/verified
+
 # Frontend static build (still built on the VM — not in Docker Hub)
 cd frontend && npm ci && npm run build && cd ..
 
-# Pull platform images (backend from Docker Hub; postgres/redis/nginx from Hub)
-docker compose -f docker-compose.prod.yml pull
+# Build backend from deploy/Dockerfile.backend (recommended until Hub :latest is fresh),
+# then start postgres/redis/nginx/backend.
+docker compose -f docker-compose.prod.yml build backend
 docker compose -f docker-compose.prod.yml up -d
 ```
+
 
 Pin a specific backend build (optional):
 
@@ -215,6 +219,20 @@ docker system prune -f
 2. Terminate TLS at nginx (Certbot on the instance, or ACM + ALB in front).
 3. Switch bookmarks to `https://your.domain`.
 4. Browser WS rewrite already follows page scheme (`ws` / `wss`).
+
+## EKS lab cluster (sleep / wake / recreate)
+
+Managed scripts live in **[eks/](./eks/)** (cluster `devlabs`, region `ap-south-2`):
+
+```bash
+./deploy/eks/eks-status.sh
+./deploy/eks/eks-sleep.sh     # node groups → 0
+./deploy/eks/eks-wake.sh      # system-k8s → 1
+./deploy/eks/eks-destroy.sh   # delete cluster (optional hibernate)
+./deploy/eks/eks-recreate.sh  # recreate + app Access Entry + kubeconfig
+```
+
+Learner snapshots stay on the App EC2 under `kube/homes/` — not inside EKS.
 
 ## Host tuning
 

@@ -1,0 +1,47 @@
+{
+  "id": "linux-19-archive-and-roll-back-releases",
+  "number": 319,
+  "finalized": true,
+  "title": "Archive and Roll Back Releases",
+  "description": "**SITUATION:**\n\n**order-processor v1.2** shipped an hour ago with broken payment routes. Releases live side by side in `/opt/order-processor/releases/`, and `/opt/order-processor/current` is a symlink to the live one. The release manager wants v1.2 archived for the post-mortem and taken off the box. v1.0 must also be restored from its backup, in case v1.1 shows the same bug.\n\n**YOUR TASK:**\n\n1. Roll back: point `current` at the **v1.1** release.\n2. Archive the v1.2 folder to `/var/backups/order-processor-v1.2.tar.gz`, then delete the folder.\n3. Restore **v1.0** from `/var/backups/order-processor-v1.0.tar.gz` into `releases/`.\n4. Make `/etc/order-processor/app.conf` a symlink to `/opt/order-processor/current/app.conf`, so it follows future rollbacks automatically.\n5. Keep a **hard link** to v1.1's config at `/var/backups/app.conf.v1.1`.\n\n**SPEC:**\n\n- `/var/backups/order-processor-v1.2.tar.gz`: valid gzip tarball; paths start with `v1.2/` (for example `v1.2/VERSION`)\n- `/opt/order-processor/releases/v1.2` no longer exists\n- `/opt/order-processor/current` is a symlink resolving to `releases/v1.1`\n- `releases/v1.0` restored, with its binary still executable\n- `/etc/order-processor/app.conf` is a symlink to `/opt/order-processor/current/app.conf`\n- `/var/backups/app.conf.v1.1` has the same inode as `releases/v1.1/app.conf`\n\n**GOOD PRACTICES:**\n\n- Fix the outage first (roll back), then do the housekeeping.\n- `tar -C <dir>` keeps absolute paths out of your archives.\n- `ln -sfn` replaces a symlink in one step; `ls -li` shows inode numbers.\n",
+  "difficulty": "L1",
+  "tags": [
+    "linux",
+    "l1",
+    "files",
+    "tar",
+    "links"
+  ],
+  "category": "linux",
+  "sandboxType": "linux",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "linux"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "Reset gives you a fresh machine (your changes are wiped).",
+      "Read SPEC carefully, then Submit — the grader checks the machine itself."
+    ],
+    "overview": "Archive and Roll Back Releases",
+    "brief": "Archive and Roll Back Releases",
+    "solution": "# Solution — Archive and Roll Back Releases\n\nThe release layout used by most deploy tools: every version lives in its own folder, and a `current` **symlink** points at the live one. Rolling back means re-pointing one link. `tar` + `gzip` package a folder into one file. A **hard link** is a second name for the same file data (inode); a symlink is a pointer to a *path*.\n\nDocs: `man tar` · `man ln` · `man stat`\n\n## Look\n\n```bash\nls -l /opt/order-processor /opt/order-processor/releases\nreadlink /opt/order-processor/current\n```\n\n## Roll back first (outage first, housekeeping later)\n\n```bash\nsudo ln -sfn releases/v1.1 /opt/order-processor/current\n/opt/order-processor/current/bin/order-processor      # v1.1\n```\n\n`-s` makes a symlink, `-f` replaces the existing link, and `-n` treats the existing link as a file rather than descending into the directory it points to.\n\n## Archive v1.2, then remove it\n\n`-C` changes into a directory first, so the paths inside the archive start at `v1.2/`:\n\n```bash\nsudo tar -C /opt/order-processor/releases -czf /var/backups/order-processor-v1.2.tar.gz v1.2\ntar -tzf /var/backups/order-processor-v1.2.tar.gz          # list without extracting\nsudo rm -rf /opt/order-processor/releases/v1.2\n```\n\nThe flags: `c` create, `x` extract, `t` list, `z` gzip, `f` the archive file.\n\n## Restore v1.0\n\n```bash\nsudo tar -C /opt/order-processor/releases -xzf /var/backups/order-processor-v1.0.tar.gz\nls -l /opt/order-processor/releases/v1.0/bin      # modes preserved\n```\n\n## Config symlink and hard-link backup\n\n```bash\nsudo ln -sfn /opt/order-processor/current/app.conf /etc/order-processor/app.conf\ncat /etc/order-processor/app.conf                  # v1.1 config\n\nsudo ln /opt/order-processor/releases/v1.1/app.conf /var/backups/app.conf.v1.1\nls -li /opt/order-processor/releases/v1.1/app.conf /var/backups/app.conf.v1.1   # same inode, link count 2\n```\n\nDeleting the release folder later wouldn't touch the backup: the data survives while any hard link points at it. Hard links can't cross filesystems or point at directories.\n\nThen **Submit**.\n",
+    "idLabel": "19",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 60
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

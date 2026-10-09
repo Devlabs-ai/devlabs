@@ -33,14 +33,19 @@ interface TerminalPanelProps {
   isActive?: boolean;
   /** When true, send {type:resize} to the PTY (needed for k8s lab). */
   resizeProtocol?: boolean;
+  /** Called when the server closes the socket (not when this panel tears it down). */
+  onDisconnect?: () => void;
 }
 
 export default function TerminalPanel({
   wsUrl,
   isActive = true,
   resizeProtocol = false,
+  onDisconnect,
 }: TerminalPanelProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
+  const onDisconnectRef = useRef(onDisconnect);
+  onDisconnectRef.current = onDisconnect;
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -82,10 +87,23 @@ export default function TerminalPanel({
       /* size not ready */
     }
 
-    const ws = new WebSocket(wsUrl);
+    // The server sizes the PTY and picks the intro banner from these, before the first
+    // resize message arrives; a hidden host fits to nothing, so estimate from the viewport.
+    let url = wsUrl;
+    if (resizeProtocol) {
+      const fitted = hostRef.current.clientWidth > 0;
+      const cols = fitted ? term.cols : Math.max(20, Math.floor((window.innerWidth - 24) / 8));
+      const rows = fitted ? term.rows : 24;
+      url += `${wsUrl.includes('?') ? '&' : '?'}cols=${cols}&rows=${rows}`;
+    }
+    const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
     ws.addEventListener('open', () => sendResize());
+    let tearingDown = false;
+    ws.addEventListener('close', () => {
+      if (!tearingDown) onDisconnectRef.current?.();
+    });
     const attach = new AttachAddon(ws);
     term.loadAddon(attach);
 
@@ -93,6 +111,7 @@ export default function TerminalPanel({
     resizeObserver.observe(hostRef.current);
 
     return () => {
+      tearingDown = true;
       resizeObserver.disconnect();
       try {
         ws.close();

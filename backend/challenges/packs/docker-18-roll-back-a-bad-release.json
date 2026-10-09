@@ -1,0 +1,47 @@
+{
+  "id": "docker-18-roll-back-a-bad-release",
+  "number": 418,
+  "finalized": true,
+  "title": "Roll Back a Bad Release",
+  "description": "**SITUATION:**\n\nThis morning's deploy moved order-processor to `quickbyte/order-processor:latest`. Since then customers get **connection reset** on port 8080, even though `docker ps` says the container is up. Two releases are on the box: `1.7` and `1.8`.\n\n**YOUR TASK:**\n\n1. Work out which release is running and why it's broken.\n2. Roll order-processor back to the last good release.\n3. Point `latest` back at that release.\n\n**SPEC:**\n\n- `~/answers/broken-version`: the broken release (`1.7` or `1.8`)\n- `~/answers/listen-address`: the `address:port` the broken release's server listens on inside the container\n- Container `order-processor` runs `quickbyte/order-processor:1.7` (by that tag), **running**, `--restart unless-stopped`, host port `8080` → `8000`, `/health` reports `v1.7`\n- `quickbyte/order-processor:latest` points at the same image as `1.7`\n- Both release images stay on the box\n\n**GOOD PRACTICES:**\n\n- Compare **image IDs**, not tag names: `docker images`, `docker inspect`.\n- Labels and `docker history` tell you what changed between releases.\n- `docker logs` shows what the server bound to.\n",
+  "difficulty": "L1",
+  "tags": [
+    "docker",
+    "l1",
+    "release",
+    "rollback",
+    "tags"
+  ],
+  "category": "docker",
+  "sandboxType": "docker",
+  "play": {
+    "domainId": "devops-engineer",
+    "panelId": "docker"
+  },
+  "problemStatement": {
+    "hints": [
+      "You are learner on your own Ubuntu machine running Docker; docker works without sudo.",
+      "Reset gives you a fresh machine (containers, images and files are wiped).",
+      "Read SPEC carefully, then Submit — the grader inspects your containers and images."
+    ],
+    "overview": "Roll Back a Bad Release",
+    "brief": "Roll Back a Bad Release",
+    "solution": "# Solution — Roll Back a Bad Release\n\nImages are immutable and old versions stay on the machine (and in the registry), so rolling back is just \"run the previous image\". The hard part is knowing **what's running**, **what changed**, and **which version was last good**.\n\nDocs: `docker image ls --help` · `docker history --help`\n\n## What's running?\n\n```bash\ndocker ps                                  # order-processor  Up ...  0.0.0.0:8080->8000/tcp\ncurl -v http://127.0.0.1:8080/health       # Connection reset by peer\ndocker inspect -f '{{.Config.Image}}' order-processor        # quickbyte/order-processor:latest\ndocker images quickbyte/order-processor    # 1.8 and latest share an IMAGE ID\n```\n\n`latest` tells you nothing: it's just the tag that was pushed last. Compare **image IDs** to find the real version.\n\n```bash\ndocker inspect -f '{{index .Config.Labels \"org.opencontainers.image.version\"}}' quickbyte/order-processor:latest   # 1.8\necho 1.8 > ~/answers/broken-version\n```\n\n## Why is it broken?\n\n```bash\ndocker logs order-processor\n# [INFO] Listening at: http://127.0.0.1:8000\ndocker history --no-trunc quickbyte/order-processor:1.8 | head -3     # the changed CMD\necho 127.0.0.1:8000 > ~/answers/listen-address\n```\n\nInside a container, `127.0.0.1` is the **container's own** loopback. Docker forwards published ports to the container's network interface (`eth0`), where nothing is listening, so connections are reset. Apps in containers must listen on `0.0.0.0`.\n\n## Roll back\n\n```bash\ndocker rm -f order-processor\ndocker run -d --name order-processor --restart unless-stopped -p 8080:8000 quickbyte/order-processor:1.7\ncurl http://127.0.0.1:8080/health        # {\"status\":\"ok\",\"version\":\"v1.7\"}\n```\n\nRun by the **version tag**, not `latest`: anyone reading `docker ps` sees exactly what's deployed, and a re-tag can't silently change it on the next restart.\n\n## Point latest back at the good release\n\n```bash\ndocker tag quickbyte/order-processor:1.7 quickbyte/order-processor:latest\ndocker images quickbyte/order-processor\n```\n\nKeep `1.8` around for the post-mortem, and fix forward with a `1.9`. Kubernetes keeps this history for you: `kubectl rollout undo deployment/order-processor`.\n\nThen **Submit**.\n",
+    "idLabel": "18",
+    "theory": ""
+  },
+  "platformSpec": {
+    "box": {
+      "hostname": "order-box"
+    },
+    "setup": {
+      "script": "setup.sh"
+    },
+    "grade": {
+      "script": "grade.sh",
+      "timeoutSeconds": 90
+    }
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

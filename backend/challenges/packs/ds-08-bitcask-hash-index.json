@@ -1,0 +1,151 @@
+{
+  "id": "ds-08-bitcask-hash-index",
+  "number": 508,
+  "finalized": true,
+  "title": "A log with a hash map: Bitcask",
+  "description": "The notification service stores the latest delivery status per message. Walk through the life of a Bitcask-style store, from append to restart.",
+  "difficulty": "L1",
+  "tags": [
+    "data-systems",
+    "storage-engines",
+    "hash-index",
+    "bitcask",
+    "compaction",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "The simplest storage engine that works well is an append-only log plus an in-memory hash map. Every write goes to the end of a file, and the hash map remembers where each key's latest value lives. This is Bitcask, the default engine in Riak.\n\nThe notification service fits it perfectly: millions of writes like `msg-4471 → delivered`, the same keys updated over and over, and lookups that are always by exact key.\n\nThe outline follows one store from its first write to a restart. Fill the blocks. Traps describe other engines or break the append-only rule.",
+    "yourTask": "Order the life of a Bitcask store: write, read, rotate, merge and restart.",
+    "yourTaskSteps": [
+      "Read every card.",
+      "Fill each empty block from Unused.",
+      "The dashed block is optional.",
+      "Submit."
+    ],
+    "hints": [
+      "Data files are never edited, only appended to and eventually deleted.",
+      "The hash map lives in memory, so it must be rebuilt after a restart.",
+      "Only files that are no longer being written can be merged."
+    ],
+    "moat": "Setter notes, not shown to learners.\n\nRequired chain: append-record → update-keydir → one-seek-read → rotate-file → merge-closed → rebuild-keydir.\nOptional splice: hint-files on merge-closed → rebuild-keydir.\nFive traps."
+  },
+  "platformSpec": {
+    "kicker": "Storage engines · Hash index",
+    "passMessage": "Append, index in memory, read with one seek, rotate, merge, rebuild. That's Bitcask.",
+    "pieces": [
+      {
+        "id": "append-record",
+        "title": "Append the record to the active file",
+        "blurb": "Write key, value, timestamp and a checksum to the end of the current data file. Sequential writes only.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "update-keydir",
+        "title": "Point the in-memory hash map at it",
+        "blurb": "The keydir maps each key to the file ID, byte offset and size of its latest value. The old entry is simply replaced.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "append-record",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "one-seek-read",
+        "title": "Read with a single disk seek",
+        "blurb": "A lookup finds the key in the keydir and reads exactly that many bytes at that offset. Often it's already in the OS page cache.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "update-keydir",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "rotate-file",
+        "title": "Close the full file and open a new one",
+        "blurb": "When the active file reaches its size limit it becomes read-only, and a fresh active file takes new writes.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "one-seek-read",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "merge-closed",
+        "title": "Merge closed files",
+        "blurb": "Copy only the latest value of each key from the closed files into new files, drop deleted keys, update keydir offsets, then delete the old files.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "rotate-file",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "hint-files",
+        "title": "Write a hint file next to each merged file",
+        "blurb": "A hint file lists key → offset without the values, so a restart can rebuild the keydir without reading every value. Faster startup; not required.",
+        "kind": "mechanism",
+        "gold": "optional",
+        "parent": "merge-closed",
+        "child": "rebuild-keydir",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "rebuild-keydir",
+        "title": "On restart, rebuild the keydir",
+        "blurb": "The hash map was only in memory. Scan the data files (or their hint files) from oldest to newest to rebuild it before serving reads.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "merge-closed",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "overwrite-offset",
+        "title": "Overwrite the old value at its offset",
+        "blurb": "If the key already exists, seek to its old position and write the new value over it.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Bitcask is append-only. Overwriting breaks crash safety and fails when the new value is longer."
+      },
+      {
+        "id": "range-scan",
+        "title": "Serve a range query from the hash map",
+        "blurb": "Walk the keydir in key order to return every message between msg-4000 and msg-5000.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "A hash map has no key order. Range queries are the main weakness of a hash index."
+      },
+      {
+        "id": "erase-bytes",
+        "title": "Delete by erasing the key's bytes",
+        "blurb": "To delete a key, find its record in the data file and zero it out.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Deletes append a tombstone. The old record disappears when the file is merged."
+      },
+      {
+        "id": "merge-active",
+        "title": "Merge the active file while it's written",
+        "blurb": "Include the file currently receiving writes in the merge so every file is compacted at once.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Only closed, immutable files are merged. The active file is still changing."
+      },
+      {
+        "id": "sort-by-key",
+        "title": "Sort each file by key during merge",
+        "blurb": "While merging, order records by key so files can be searched with binary search.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Sorting by key is what turns a log into an SSTable. A hash index doesn't need it."
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}
