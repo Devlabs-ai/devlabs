@@ -89,11 +89,17 @@ helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
   --set controller.resources.limits.memory=1Gi \
   --wait
 
-echo "==> EC2NodeClass + NodePool"
-kubectl apply -f "$ROOT/karpenter/nodepool.yaml"
-kubectl get ec2nodeclass,nodepool
+# EKS_KARPENTER_LABS_POOL=0 installs only the controller (e.g. a Docker-only cluster):
+# without a labs-k8s base, the balloons would make Karpenter buy labs-elastic nodes.
+if [[ "${EKS_KARPENTER_LABS_POOL:-1}" == "1" ]]; then
+  echo "==> EC2NodeClass + NodePool"
+  kubectl apply -f "$ROOT/karpenter/nodepool.yaml"
+  kubectl get ec2nodeclass,nodepool
 
-echo "==> balloons (dl-system/dl-balloon)"
-kubectl apply -f "$ROOT/karpenter/balloons.yaml"
+  echo "==> balloons (dl-system/dl-balloon)"
+  kubectl apply -f "$ROOT/karpenter/balloons.yaml"
+else
+  echo "==> EKS_KARPENTER_LABS_POOL=0: skip labs-elastic NodePool and balloons"
+fi
 
 echo "==> done"

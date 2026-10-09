@@ -136,6 +136,47 @@ export async function saveBoardGraph(
   return (data as { boardState: import('../types/domain').BoardState }).boardState;
 }
 
+export async function checkBoardStep(
+  sessionId: string,
+  body: { slotId: string; pieceId: string },
+): Promise<{
+  correct: boolean;
+  detail: string;
+  clue: string | null;
+  grade: import('../types/domain').BoardGradeResult | null;
+  boardState: import('../types/domain').BoardState;
+}> {
+  const { data } = await axios.post(`/api/session/${sessionId}/board/check`, body, {
+    headers: getAuthHeader(),
+  });
+  return data;
+}
+
+export async function judgeBoardClaims(
+  sessionId: string,
+  verdicts: Record<string, boolean>,
+): Promise<{ wrong: number; boardState: import('../types/domain').BoardState }> {
+  const { data } = await axios.post(`/api/session/${sessionId}/board/claims`, { verdicts }, {
+    headers: getAuthHeader(),
+  });
+  return data;
+}
+
+export async function answerBoardFinale(
+  sessionId: string,
+  optionId: string,
+): Promise<{
+  correct: boolean;
+  explanation: string;
+  grade: import('../types/domain').BoardGradeResult;
+  boardState: import('../types/domain').BoardState;
+}> {
+  const { data } = await axios.post(`/api/session/${sessionId}/board/finale`, { optionId }, {
+    headers: getAuthHeader(),
+  });
+  return data;
+}
+
 export async function submitBoard(
   sessionId: string,
   graph: {

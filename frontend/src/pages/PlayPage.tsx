@@ -23,7 +23,7 @@ import PlatformLeaderboardCard from '../components/PlatformLeaderboardCard';
 import TrackRoadmapModal from '../components/TrackRoadmapModal';
 import { buildPanelRoadmapNodes } from '../lib/trackRoadmapNodes';
 import { useIsNarrowUi } from '../hooks/useMediaQuery';
-import { IconCoins } from '../components/ChromeIcons';
+import { IconCoins, IconLock } from '../components/ChromeIcons';
 import {
   PLAY_DOMAINS,
   getPlayDomain,
@@ -36,7 +36,7 @@ import {
   type PlayDomainId,
   type PlayPanel,
 } from '../constants/playCatalog';
-// import { WHITEBOARD_PATH } from '../constants/whiteboard';
+import { WHITEBOARD_PATH } from '../constants/whiteboard';
 import { SPARK_PRIMER_PATH } from '../constants/sparkPrimer';
 import { K8S_PRIMER_PATH } from '../constants/k8sPrimer';
 import type { K8sTrackItem } from '../constants/k8sReadings';
@@ -307,8 +307,16 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
       <h1 className="sr-only">Play</h1>
 
       <div className="play-problems-layout">
-        <aside className="play-problems-sidebar" aria-label="Paper of the Month and leaderboard">
+        <aside className="play-problems-sidebar" aria-label="Paper of the Month, Whiteboard and leaderboard">
           <MonthlyPaperCard />
+          <Link to={WHITEBOARD_PATH} className="play-sidebar-card play-sidebar-papers play-sidebar-board">
+            <strong>Whiteboard</strong>
+            <p>Data systems theory: replication, consensus, transactions and more. No cluster.</p>
+            <span className="play-sidebar-papers-cta">
+              Browse boards
+              <span aria-hidden>→</span>
+            </span>
+          </Link>
           <PlatformLeaderboardCard />
         </aside>
 
@@ -533,6 +541,7 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                       const { challenge, trackId } = row;
                       const playable = Boolean(challenge.finalized);
                       const solved = Boolean(challenge.solved);
+                      const locked = Boolean(challenge.locked);
                       const vis = visibilityMark(challenge.visibleTo);
                       const tokens =
                         typeof challenge.tokens === 'number' && Number.isFinite(challenge.tokens)
@@ -542,8 +551,9 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                         <li key={row.key}>
                           <button
                             type="button"
-                            className={`play-problem-row play-problem-row--lab${playable ? '' : ' disabled'}${solved ? ' is-solved' : ''}`}
+                            className={`play-problem-row play-problem-row--lab${playable ? '' : ' disabled'}${solved ? ' is-solved' : ''}${locked ? ' is-locked' : ''}`}
                             disabled={!playable}
+                            title={locked ? 'Subscribe to unlock this lab' : undefined}
                             onClick={() => {
                               if (playable) void onSelectChallenge(challenge);
                             }}
@@ -551,7 +561,14 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
                             <span className="play-problem-id" title={challenge.id}>
                               {trackId}
                             </span>
-                            <span className="play-problem-title">{challenge.title}</span>
+                            <span className="play-problem-title">
+                              {challenge.title}
+                              {locked ? (
+                                <span className="play-problem-lock" aria-label="Locked">
+                                  <IconLock size={13} />
+                                </span>
+                              ) : null}
+                            </span>
                             <span
                               className={`play-problem-meta${showVisibilityMarks ? ' play-problem-meta--staff' : ''}`}
                             >

@@ -9,7 +9,22 @@ import {
   fetchBillingSummary,
   purchase,
   type BillingMode,
+  type BillingSummary,
 } from '../services/billingApi';
+
+/** Latest paid-until per plan the user bought directly (not via a bundle). */
+function accessUntilByPlan(summary: BillingSummary): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const s of summary.subscriptions) {
+    if (!s.entitled || !s.paidUntil) continue;
+    out[s.planId] = Math.max(out[s.planId] || 0, s.paidUntil);
+  }
+  return out;
+}
+
+function formatDay(ms: number): string {
+  return new Date(ms).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
 
 function useRemainingMs(until: Date): number {
   const [now, setNow] = useState(() => Date.now());
@@ -20,29 +35,9 @@ function useRemainingMs(until: Date): number {
   return Math.max(0, until.getTime() - now);
 }
 
-function OfferCountdown({ ms }: { ms: number }): JSX.Element {
-  const s = Math.floor(ms / 1000);
-  const parts: Array<[number, string]> = [
-    [Math.floor(s / 86400), 'days'],
-    [Math.floor((s % 86400) / 3600), 'hrs'],
-    [Math.floor((s % 3600) / 60), 'min'],
-    [s % 60, 'sec'],
-  ];
-  return (
-    <div className="pricing-offer-timer" role="timer" aria-live="off">
-      {parts.map(([value, unit]) => (
-        <span key={unit} className="pricing-offer-timer-cell">
-          <strong>{String(value).padStart(2, '0')}</strong>
-          <em>{unit}</em>
-        </span>
-      ))}
-    </div>
-  );
-}
-
 export default function PricingSection(): JSX.Element {
   const navigate = useNavigate();
-  const { currentUser, onRequestLogin } = useAppState();
+  const { currentUser, onRequestLogin, refreshChallenges } = useAppState();
   const reveal = useInView<HTMLElement>();
   const remainingMs = useRemainingMs(LAUNCH_OFFER.endsAt);
   const offerLive = remainingMs > 0;
@@ -51,6 +46,7 @@ export default function PricingSection(): JSX.Element {
   const [mode, setMode] = useState<BillingMode>('one_time');
   const oneTime = mode === 'one_time';
   const [entitlements, setEntitlements] = useState<string[]>([]);
+  const [accessUntil, setAccessUntil] = useState<Record<string, number>>({});
   const [busyPlan, setBusyPlan] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ planId: string; kind: 'ok' | 'error'; text: string } | null>(
     null,
@@ -73,12 +69,15 @@ export default function PricingSection(): JSX.Element {
   useEffect(() => {
     if (!billingOpen || !currentUser) {
       setEntitlements([]);
+      setAccessUntil({});
       return;
     }
     let cancelled = false;
     fetchBillingSummary()
       .then((s) => {
-        if (!cancelled) setEntitlements(s.entitlements);
+        if (cancelled) return;
+        setEntitlements(s.entitlements);
+        setAccessUntil(accessUntilByPlan(s));
       })
       .catch(() => {});
     return () => {
@@ -95,13 +94,20 @@ export default function PricingSection(): JSX.Element {
       setBusyPlan(planId);
       setNotice(null);
       try {
+        const extending = entitlements.includes(planId);
         const summary = await purchase(planId, mode);
         if (summary) {
           setEntitlements(summary.entitlements);
+          setAccessUntil(accessUntilByPlan(summary));
+          void refreshChallenges();
           setNotice({
             planId,
             kind: 'ok',
-            text: mode === 'one_time' ? `${planName} is unlocked for a month.` : `You're subscribed to ${planName}.`,
+            text: extending
+              ? `Added another month of ${planName}.`
+              : mode === 'one_time'
+                ? `${planName} is unlocked for a month.`
+                : `You're subscribed to ${planName}.`,
           });
         }
       } catch (e) {
@@ -110,7 +116,7 @@ export default function PricingSection(): JSX.Element {
         setBusyPlan(null);
       }
     },
-    [currentUser, onRequestLogin, mode],
+    [currentUser, onRequestLogin, refreshChallenges, mode, entitlements],
   );
 
   return (
@@ -128,36 +134,37 @@ export default function PricingSection(): JSX.Element {
               Launch offer: <span>{LAUNCH_OFFER.percentOff}% off</span> your first month on every track
             </p>
             <p className="pricing-offer-note">
-              {billingOpen
-                ? `${oneTime ? 'Buy' : 'Subscribe'} by October 31 to get it.`
-                : `Ends October 31. Payments open ${LAUNCH_OFFER.paymentsOpenLabel}.`}
+              We open in the first week of November. For more details,{' '}
+              <Link to="/#waitlist">join the waitlist</Link>.
             </p>
           </div>
-          <OfferCountdown ms={remainingMs} />
         </div>
       )}
       <div className="pricing-plans-grid">
         {PRICING_PLANS.map((plan) => {
           const owned = entitlements.includes(plan.id);
+          const ownedUntil = accessUntil[plan.id] || null;
+          const viaBundle = owned && !ownedUntil;
           const busy = busyPlan === plan.id;
           const planNotice = notice?.planId === plan.id ? notice : null;
           return (
             <div
               key={plan.id}
-              className={`landing-pricing-plan pricing-plan${plan.featured ? ' pricing-plan--featured' : ''}`}
+              className={`landing-pricing-plan pricing-plan${plan.featured ? ' pricing-plan--featured' : ''}${owned ? ' pricing-plan--owned' : ''}`}
             >
-              <p className={`landing-pricing-plan-badge${plan.featured ? '' : ' landing-pricing-plan-badge--muted'}`}>
-                {plan.featured ? 'Whole track' : 'Subtrack'}
-              </p>
+              {owned && (
+                <p className="landing-pricing-plan-badge pricing-plan-badge--active">
+                  <span className="pricing-plan-active-dot" aria-hidden />
+                  Active
+                </p>
+              )}
               <h3 className="landing-pricing-plan-name">{plan.name}</h3>
               <p className="landing-pricing-plan-price">
                 {offerLive && <s className="pricing-plan-was">₹{plan.price}</s>}
                 <span className="landing-pricing-plan-amount">
                   ₹{offerLive ? offerPrice(plan.price) : plan.price}
                 </span>
-                <span className="landing-pricing-plan-period">
-                  {offerLive ? '/ first month' : '/ month'}
-                </span>
+                <span className="landing-pricing-plan-period">/ month</span>
               </p>
               {offerLive && (
                 <p className="pricing-plan-then">
@@ -171,22 +178,37 @@ export default function PricingSection(): JSX.Element {
               </ul>
               {billingOpen ? (
                 <>
-                  {owned ? (
-                    <Link to="/profile" className="landing-cta-primary pricing-plan-owned">
-                      {oneTime ? 'Active · Extend' : 'Subscribed · Manage'}
-                    </Link>
+                  {owned && (
+                    <p className="pricing-plan-access">
+                      {viaBundle
+                        ? 'Included in your DevOps Engineer plan'
+                        : `${oneTime ? 'Unlocked' : 'Subscribed'} until ${formatDay(ownedUntil as number)}`}
+                    </p>
+                  )}
+                  {viaBundle ? null : owned ? (
+                    oneTime ? (
+                      <button
+                        type="button"
+                        className="landing-cta-primary pricing-plan-owned"
+                        disabled={busy || busyPlan !== null}
+                        onClick={() => void onSubscribe(plan.id, plan.name)}
+                      >
+                        {busy ? 'Opening checkout…' : 'Add another month'}
+                      </button>
+                    ) : (
+                      <Link to="/profile" className="landing-cta-primary pricing-plan-owned">
+                        Manage subscription
+                      </Link>
+                    )
                   ) : (
                     <button
                       type="button"
                       className="landing-cta-primary"
                       disabled={busy || busyPlan !== null}
+                      aria-label={busy ? undefined : `${oneTime ? 'Purchase' : 'Subscribe to'} ${plan.name}`}
                       onClick={() => void onSubscribe(plan.id, plan.name)}
                     >
-                      {busy
-                        ? 'Opening checkout…'
-                        : oneTime
-                          ? `Get 1 month of ${plan.name}`
-                          : `Subscribe to ${plan.name}`}
+                      {busy ? 'Opening checkout…' : oneTime ? 'Purchase' : 'Subscribe'}
                       {!busy && (
                         <span className="landing-cta-arrow" aria-hidden>
                           →

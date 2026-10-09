@@ -1,21 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppState } from '../context/AppStateContext';
-import { LEADERBOARD_PATH } from '../constants/leaderboard';
+import { LEADERBOARD_PATH, learnerPath } from '../constants/leaderboard';
 import {
   fetchPlatformLeaderboard,
   type PlatformLeaderboard,
   type PlatformLeaderboardEntry,
 } from '../services/leaderboardApi';
 import { IconCoins } from './ChromeIcons';
+import Avatar from './Avatar';
+import LeaderboardSignInPrompt from './LeaderboardSignInPrompt';
 
 function Row({ entry }: { entry: PlatformLeaderboardEntry }): JSX.Element {
   const medal = entry.rank <= 3 ? ` leaderboard-rank--${entry.rank}` : '';
   return (
-    <li className={`platform-lb-row${entry.isMe ? ' platform-lb-row--me' : ''}`}>
+    <li className={`platform-lb-row leaderboard-row--link${entry.isMe ? ' platform-lb-row--me' : ''}`}>
       <span className={`leaderboard-rank${medal}`}>{entry.rank}</span>
       <span className="platform-lb-name" title={entry.name}>
-        {entry.name}
+        <Avatar avatar={entry.avatar} name={entry.name} size={18} className="leaderboard-avatar" />
+        <Link to={learnerPath(entry.id)} className="leaderboard-row-link">{entry.name}</Link>
         {entry.isMe && <span className="leaderboard-you">You</span>}
       </span>
       <span className="platform-lb-tokens">
@@ -29,18 +32,29 @@ function Row({ entry }: { entry: PlatformLeaderboardEntry }): JSX.Element {
 /** Top learners by lifetime tokens; `refreshKey` reloads it after the caller earns more. */
 export default function PlatformLeaderboardCard({ refreshKey = 0 }: { refreshKey?: number }): JSX.Element {
   const { authMode, currentUser } = useAppState();
+  const signedIn = authMode === 'interviewer';
   const [board, setBoard] = useState<PlatformLeaderboard | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    if (!signedIn) return undefined;
     let cancelled = false;
     fetchPlatformLeaderboard(10)
       .then((b) => { if (!cancelled) { setBoard(b); setFailed(false); } })
       .catch(() => { if (!cancelled) setFailed(true); });
     return () => { cancelled = true; };
-  }, [refreshKey, authMode, currentUser?.email]);
+  }, [refreshKey, signedIn, currentUser?.email]);
 
   const meOutsideTop = board?.me && !board.entries.some((e) => e.isMe) ? board.me : null;
+
+  if (!signedIn) {
+    return (
+      <section className="play-sidebar-card platform-lb" aria-label="Platform leaderboard">
+        <p className="monthly-paper-kicker">Leaderboard</p>
+        <LeaderboardSignInPrompt compact />
+      </section>
+    );
+  }
 
   return (
     <section className="play-sidebar-card platform-lb" aria-label="Platform leaderboard">
@@ -53,7 +67,7 @@ export default function PlatformLeaderboardCard({ refreshKey = 0 }: { refreshKey
       )}
       {board && board.entries.length > 0 && (
         <ol className="platform-lb-list">
-          {board.entries.map((e) => <Row key={`${e.rank}-${e.name}`} entry={e} />)}
+          {board.entries.map((e) => <Row key={e.id} entry={e} />)}
           {meOutsideTop && (
             <>
               <li className="leaderboard-gap" aria-hidden="true">⋯</li>

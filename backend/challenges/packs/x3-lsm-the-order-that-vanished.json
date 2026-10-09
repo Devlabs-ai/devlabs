@@ -1,0 +1,190 @@
+{
+  "id": "x3-lsm-the-order-that-vanished",
+  "number": 593,
+  "finalized": true,
+  "title": "X3 · Mystery: the order that vanished",
+  "description": "A customer was told their order was saved. After a crash, it’s gone. Unlock the write path one step at a time, collect clues, and name the culprit.",
+  "difficulty": "L1",
+  "tags": [
+    "data-systems",
+    "board-experiment",
+    "lsm-tree",
+    "mystery",
+    "unlock",
+    "finale",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "**Case file #4417.** On Tuesday at **14:02:11**, a customer paid for `order:88213` and saw *“Order confirmed.”*\n\nHalf a second later, the orders node running **FastKV** (the team’s homegrown LSM store) was OOM-killed and restarted. When it came back, **order:88213 was gone**. Payments has the money; orders has no record.\n\nYou’re the detective. The board is locked. **Only one step is open at a time.** Place the right card on the glowing step to unlock it, and each unlock reveals a clue from the investigation.\n\nA wrong card costs a heart. You have three.\n\nWhen the whole path is open, you’ll name the culprit.",
+    "yourTask": "Unlock all six steps of the write path, read the clues, and name the design shortcut that lost the order.",
+    "yourTaskSteps": [
+      "Drop a card on the glowing step. A correct card locks in and reveals a clue.",
+      "Clues collect in the Story panel.",
+      "Once all six steps are open, answer: who’s the culprit?"
+    ],
+    "hints": [
+      "The clues are about FastKV specifically. Compare what it did with what the textbook step says.",
+      "One of the cards in the tray is the culprit itself."
+    ],
+    "moat": "Unlock mode. Finale answer = ack-before-log."
+  },
+  "platformSpec": {
+    "kicker": "Experiment X3 · Mystery room · Unlock one step at a time",
+    "passMessage": "Case closed. FastKV said OK before the order was in the log.",
+    "game": {
+      "mode": "unlock",
+      "lives": 3
+    },
+    "finale": {
+      "prompt": "Name the culprit. Which shortcut lost order:88213?",
+      "options": [
+        {
+          "id": "ack-before-log",
+          "label": "Replying OK before the WAL write was on disk"
+        },
+        {
+          "id": "memtable-too-small",
+          "label": "A memtable limit that was too small"
+        },
+        {
+          "id": "early-wal-delete",
+          "label": "Deleting the WAL before the flush finished"
+        },
+        {
+          "id": "compaction",
+          "label": "Compaction dropping the newest version"
+        }
+      ],
+      "answer": "ack-before-log",
+      "explanation": "FastKV batches WAL writes every 1000 ms but acks as soon as the record is in memory. order:88213 was acked at 14:02:11.2, the last WAL batch covered up to 14:02:10.9, and the crash came before the next batch. Nothing was deleted early and nothing was ever flushed or compacted, so the record only ever lived in RAM."
+    },
+    "pieces": [
+      {
+        "id": "wal-append",
+        "kind": "stage",
+        "title": "Append to the WAL and fsync",
+        "blurb": "The record is on disk before anything else happens.",
+        "prompt": "Step 1 · crash-proof it",
+        "clue": "The WAL on disk ends at 14:02:10.9. order:88213 (14:02:11.2) is not in it.",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "memtable-insert",
+        "kind": "mechanism",
+        "title": "Insert into the memtable",
+        "blurb": "The record joins the in-memory sorted tree.",
+        "prompt": "Step 2 · make it readable",
+        "clue": "The API log shows “200 OK order:88213” at 14:02:11.2. The client really was told it was saved.",
+        "gold": "required",
+        "parent": "wal-append",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "memtable-freeze",
+        "kind": "stage",
+        "title": "Freeze the full memtable",
+        "blurb": "At 64 MB it goes read-only and a fresh one takes writes.",
+        "prompt": "Step 3 · memtable hits 64 MB",
+        "clue": "At crash time the memtable was only 22 MB. It was never frozen.",
+        "gold": "required",
+        "parent": "memtable-insert",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "flush-sstable",
+        "kind": "stage",
+        "title": "Flush it to a new SSTable",
+        "blurb": "Written to disk in key order as an immutable file.",
+        "prompt": "Step 4 · move it to disk",
+        "clue": "No SSTable was written between 13:40 and the crash. The order only ever lived in memory.",
+        "gold": "required",
+        "parent": "memtable-freeze",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "bloom-index",
+        "kind": "mechanism",
+        "title": "Write a Bloom filter and index",
+        "blurb": "Optional read speed-up.",
+        "prompt": "Optional · faster reads",
+        "gold": "optional",
+        "parent": "flush-sstable",
+        "child": "wal-discard",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "wal-discard",
+        "kind": "stage",
+        "title": "Delete the WAL segment",
+        "blurb": "Only after its memtable is safely in an SSTable.",
+        "prompt": "Step 5 · clean up the log",
+        "clue": "No WAL segments were deleted on Tuesday. Nothing was cleaned up too early.",
+        "gold": "required",
+        "parent": "flush-sstable",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "compaction",
+        "kind": "mechanism",
+        "title": "Compaction merges SSTables",
+        "blurb": "Background merge that keeps the newest version of each key.",
+        "prompt": "Step 6 · merge files",
+        "clue": "FastKV config: wal.sync = batch, wal.batch_interval = 1000ms, ack_on = memtable.",
+        "gold": "required",
+        "parent": "wal-discard",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "ack-before-log",
+        "kind": "stage",
+        "title": "Reply OK first, write the log later",
+        "blurb": "Ack once the record is in memory; batch the WAL write a second later.",
+        "trapIfPlaced": "Suspicious. That’s not a step a safe write path takes. Keep it in mind for the end.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "update-in-place",
+        "kind": "stage",
+        "title": "Overwrite the order’s page on disk",
+        "blurb": "Find the page and write over it.",
+        "trapIfPlaced": "That’s a B-tree move, not FastKV.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "memtable-too-small",
+        "kind": "stage",
+        "title": "Flush every 1 MB instead of 64 MB",
+        "blurb": "Smaller memtables mean data reaches disk sooner.",
+        "trapIfPlaced": "Tuning, not a step. And the memtable was never full anyway.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "delete-everywhere",
+        "kind": "stage",
+        "title": "Delete old versions from every SSTable",
+        "blurb": "Edit each SSTable that holds the key.",
+        "trapIfPlaced": "SSTables are never edited.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "compaction-blocks",
+        "kind": "mechanism",
+        "title": "Pause writes during compaction",
+        "blurb": "Writes wait for the merge.",
+        "trapIfPlaced": "Compaction never blocks writes.",
+        "gold": "tray",
+        "parent": null
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

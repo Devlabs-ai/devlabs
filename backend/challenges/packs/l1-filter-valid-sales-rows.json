@@ -272,6 +272,6 @@
     "jobYaml": "job.yaml",
     "s3Prefix": "challenges/l1-filter-valid-sales-rows"
   },
-  "visibleTo": "admin",
+  "visibleTo": "users",
   "tokens": 10
 }

@@ -64,6 +64,6 @@
     },
     "slotsPerPod": 3
   },
-  "visibleTo": "reviewers",
+  "visibleTo": "users",
   "tokens": 15
 }

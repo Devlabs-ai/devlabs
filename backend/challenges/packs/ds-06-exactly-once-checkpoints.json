@@ -1,0 +1,150 @@
+{
+  "id": "ds-06-exactly-once-checkpoints",
+  "number": 506,
+  "finalized": true,
+  "title": "Exactly-once with checkpoint barriers",
+  "description": "A streaming job counts payments per merchant and writes to Kafka. Walk through one checkpoint that makes its output exactly-once.",
+  "difficulty": "L2",
+  "tags": [
+    "data-systems",
+    "streams",
+    "checkpointing",
+    "exactly-once",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "A Flink-style job reads payment events from Kafka, keeps a running total per merchant, and writes the totals to another Kafka topic. Machines will fail, and when they do the job replays from its last checkpoint.\n\nExactly-once doesn't mean each event is physically processed once. It means the state and the output look as if it was. That takes three things lined up: a consistent snapshot of source offsets and operator state, taken without stopping the job, and a sink that only publishes output once the snapshot is safe.\n\nThe outline covers one checkpoint. Fill the blocks. Traps either duplicate output or stop the world.",
+    "yourTask": "Order the steps of one checkpoint, from injecting the barrier to the sink making results visible.",
+    "yourTaskSteps": [
+      "Read every card.",
+      "Fill each empty block from Unused.",
+      "The dashed block is optional.",
+      "Submit."
+    ],
+    "hints": [
+      "Barriers travel in the data stream itself and never overtake records.",
+      "Output must not become visible until the whole checkpoint is complete.",
+      "Replaying input is fine if the state and output roll back to the same point."
+    ],
+    "moat": "Setter notes, not shown to learners.\n\nRequired chain: inject-barrier → barrier-flows → snapshot-state → sink-precommit → checkpoint-complete → sink-commit.\nOptional splice: align-inputs on barrier-flows → snapshot-state.\nFive traps."
+  },
+  "platformSpec": {
+    "kicker": "Stream processing · Exactly-once",
+    "passMessage": "Barrier, snapshot, pre-commit, complete, commit. Replays now produce the same output.",
+    "pieces": [
+      {
+        "id": "inject-barrier",
+        "title": "Inject checkpoint barrier n at the sources",
+        "blurb": "The coordinator tells each source to record its Kafka offsets and emit barrier n into its output stream.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "barrier-flows",
+        "title": "Barrier flows downstream with the records",
+        "blurb": "The barrier travels in-band. Records before it belong to checkpoint n; records after it belong to n+1.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "inject-barrier",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "align-inputs",
+        "title": "Align barriers across inputs",
+        "blurb": "An operator with several inputs holds back inputs whose barrier already arrived until the rest catch up. Unaligned checkpoints skip this by also saving in-flight records.",
+        "kind": "mechanism",
+        "gold": "optional",
+        "parent": "barrier-flows",
+        "child": "snapshot-state",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "snapshot-state",
+        "title": "Snapshot operator state, forward the barrier",
+        "blurb": "Each operator writes its per-merchant totals to durable storage asynchronously, then passes the barrier on.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "barrier-flows",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "sink-precommit",
+        "title": "Sink pre-commits its transaction",
+        "blurb": "When the barrier reaches the sink, it flushes its open Kafka transaction but does not commit it. Readers using read_committed can't see it yet.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "snapshot-state",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "checkpoint-complete",
+        "title": "Every task acknowledges: checkpoint complete",
+        "blurb": "The coordinator has acknowledgements from all tasks, so checkpoint n is durable and becomes the restore point.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "sink-precommit",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "sink-commit",
+        "title": "Sink commits; output becomes visible",
+        "blurb": "Notified that the checkpoint is complete, the sink commits the Kafka transaction. Downstream consumers now see the totals.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "checkpoint-complete",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "stop-the-world",
+        "title": "Pause the whole job for the snapshot",
+        "blurb": "Stop all sources, wait for in-flight records to drain, snapshot everything, then resume.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Barriers exist so the job never has to stop. Snapshots happen while records keep flowing."
+      },
+      {
+        "id": "offsets-per-record",
+        "title": "Commit Kafka offsets after every record",
+        "blurb": "Committing the consumer offset after each event guarantees nothing is processed twice.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Offsets alone don't cover operator state or sink output. A crash between them still duplicates or loses data."
+      },
+      {
+        "id": "plain-sink",
+        "title": "Sink writes immediately, no transaction",
+        "blurb": "Each total is produced to the output topic as soon as it's computed. Replays just write the same thing again.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Running totals aren't idempotent writes. On replay, consumers see duplicate or out-of-date totals."
+      },
+      {
+        "id": "commit-on-own-snapshot",
+        "title": "Sink commits after its own snapshot",
+        "blurb": "As soon as the sink has snapshotted its state, it commits the transaction without waiting for anyone else.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "If another task fails, the job rolls back to checkpoint n-1, but this output is already visible."
+      },
+      {
+        "id": "physically-once",
+        "title": "Each event is processed exactly once",
+        "blurb": "Exactly-once means the engine guarantees no event ever passes through an operator twice.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Events can be reprocessed after a failure. Exactly-once is about the effect on state and output."
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

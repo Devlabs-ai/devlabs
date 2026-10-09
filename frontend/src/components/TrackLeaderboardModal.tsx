@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { fetchTrackLeaderboard, type Leaderboard, type LeaderboardEntry } from '../services/leaderboardApi';
 import { IconCoins } from './ChromeIcons';
 import { LeaderboardIcon } from './TrackStatusIcons';
+import LeaderboardSignInPrompt from './LeaderboardSignInPrompt';
+import { useAppState } from '../context/AppStateContext';
 
 interface TrackLeaderboardModalProps {
   open: boolean;
@@ -40,12 +42,14 @@ export default function TrackLeaderboardModal({
   fullPath,
   onClose,
 }: TrackLeaderboardModalProps): JSX.Element | null {
+  const { authMode } = useAppState();
+  const signedIn = authMode === 'interviewer';
   const [board, setBoard] = useState<Leaderboard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const idsKey = challengeIds.join(',');
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open || !signedIn) return undefined;
     let cancelled = false;
     setBoard(null);
     setError(null);
@@ -56,7 +60,7 @@ export default function TrackLeaderboardModal({
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, idsKey]);
+  }, [open, idsKey, signedIn]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -90,8 +94,9 @@ export default function TrackLeaderboardModal({
             </button>
           </header>
 
-          {error && <div className="alert">{error}</div>}
-          {!error && !board && (
+          {!signedIn && <LeaderboardSignInPrompt compact />}
+          {signedIn && error && <div className="alert">{error}</div>}
+          {signedIn && !error && !board && (
             <div className="leaderboard-empty"><span className="spinner" /> Loading…</div>
           )}
           {board && board.entries.length === 0 && (
@@ -122,9 +127,11 @@ export default function TrackLeaderboardModal({
               </p>
             </>
           )}
-          <Link to={fullPath} className="leaderboard-full-link" onClick={onClose}>
-            View full leaderboard <span aria-hidden>→</span>
-          </Link>
+          {signedIn && (
+            <Link to={fullPath} className="leaderboard-full-link" onClick={onClose}>
+              View full leaderboard <span aria-hidden>→</span>
+            </Link>
+          )}
         </div>
       </div>
     </div>

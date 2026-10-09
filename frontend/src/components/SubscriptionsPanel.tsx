@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PRICING_PATH } from '../constants/pricing';
+import { useAppState } from '../context/AppStateContext';
 import {
   apiErrorMessage,
   cancelSubscription,
@@ -59,6 +60,7 @@ function collapsePasses(subs: BillingSubscription[]): BillingSubscription[] {
 }
 
 export default function SubscriptionsPanel(): JSX.Element {
+  const { refreshChallenges } = useAppState();
   const [summary, setSummary] = useState<BillingSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
@@ -69,7 +71,10 @@ export default function SubscriptionsPanel(): JSX.Element {
     setError(null);
     try {
       const next = await purchase(sub.planId, 'one_time');
-      if (next) setSummary(next);
+      if (next) {
+        setSummary(next);
+        void refreshChallenges();
+      }
     } catch (e) {
       setError(apiErrorMessage(e, 'Could not start checkout'));
     } finally {

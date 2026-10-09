@@ -21,6 +21,11 @@ export interface ProjectModule {
   subtitle: string;
   blurb: string;
   status: 'ready' | 'planned';
+  /**
+   * `reading` chapters are a single article with no scratch repo or tasks. A
+   * reading placed first is numbered 00, so chapter 01 is still the first build.
+   */
+  kind?: 'build' | 'reading';
   /** Independent minors this module assumes or points at. */
   minors?: string[];
 }

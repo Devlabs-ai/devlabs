@@ -1,0 +1,85 @@
+# Installs the box seccomp profiles (deploy/eks/linux/seccomp/*.json, shipped as ConfigMap
+# dl-system/seccomp-profiles by eks-linux.sh up) into the kubelet's seccomp root on every
+# labs-linux node, as /var/lib/kubelet/seccomp/devlabs/<file>. Boxes reference them with
+# seccompProfile {type: Localhost, localhostProfile: devlabs/linux-box.json} (linuxBox.ts).
+#
+# linux-box.json is a deny-list over the kernel interfaces behind most container-escape
+# bugs: io_uring, bpf, perf events, userfaultfd, keyrings, kexec / modules, the new mount
+# API (classic mount(2) still works, so systemd and `mount -t tmpfs` fall back to it) and
+# nested user namespaces (CLONE_NEWUSER; clone3 returns ENOSYS so libc falls back to clone).
+#
+# Re-checked every 30 s, so a ConfigMap change reaches nodes without a restart. A box created
+# on a fresh node before the first copy fails with CreateContainerError and starts on retry.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dl-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: seccomp-profiles
+  namespace: dl-system
+spec:
+  selector:
+    matchLabels:
+      app: seccomp-profiles
+  template:
+    metadata:
+      labels:
+        app: seccomp-profiles
+    spec:
+      priorityClassName: system-node-critical
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      nodeSelector:
+        devlabs.io/pool: linux
+      tolerations:
+        - key: devlabs.io/pool
+          value: linux
+          effect: NoSchedule
+      containers:
+        - name: installer
+          image: busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /host/devlabs
+              while true; do
+                for f in /profiles/*.json; do
+                  n="$(basename "$f")"
+                  if ! cmp -s "$f" "/host/devlabs/$n"; then
+                    cp "$f" "/host/devlabs/.$n.tmp"
+                    mv "/host/devlabs/.$n.tmp" "/host/devlabs/$n"
+                    echo "installed devlabs/$n"
+                  fi
+                done
+                sleep 30
+              done
+          securityContext:
+            runAsUser: 0
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests: {cpu: 1m, memory: 8Mi}
+            limits: {cpu: 20m, memory: 16Mi}
+          volumeMounts:
+            - name: profiles
+              mountPath: /profiles
+              readOnly: true
+            - name: seccomp-root
+              mountPath: /host
+      volumes:
+        - name: profiles
+          configMap:
+            name: seccomp-profiles
+        - name: seccomp-root
+          hostPath:
+            path: /var/lib/kubelet/seccomp
+            type: DirectoryOrCreate

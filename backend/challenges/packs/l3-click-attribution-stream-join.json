@@ -210,6 +210,6 @@
     "jobYaml": "job.yaml",
     "s3Prefix": "challenges/l3-click-attribution-stream-join"
   },
-  "visibleTo": "admin",
+  "visibleTo": "users",
   "tokens": 10
 }

@@ -50,6 +50,7 @@ const STATEMENTS: string[] = [
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'learner'`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS review_tracks JSONB NOT NULL DEFAULT '[]'::jsonb`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users (google_sub) WHERE google_sub IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_users_status ON users (status)`,
   `CREATE INDEX IF NOT EXISTS idx_users_role ON users (role)`,
@@ -164,6 +165,15 @@ const STATEMENTS: string[] = [
      email       TEXT,
      created_at  BIGINT NOT NULL,
      PRIMARY KEY (user_id, item_kind, item_id)
+   )`,
+
+  // Pre-launch waitlist from the landing page; no account needed. One row per email.
+  `CREATE TABLE IF NOT EXISTS waitlist_signups (
+     email         TEXT PRIMARY KEY,
+     role          TEXT NOT NULL,
+     organization  TEXT,
+     source        TEXT,
+     created_at    BIGINT NOT NULL
    )`,
 
   // Paper of the Month: an admin picks a paper from the pool; the latest pick is current.

@@ -12,11 +12,12 @@ Defaults match the live `devlabs` cluster in **ap-south-2** (see `env.sh`).
 | `eks-status.sh` | Print cluster / NG / access / addons | — |
 | `eks-access.sh` | Access Entry + `DevLabsEksDescribe` for app user | — |
 | `eks-addon-placement.sh` | Pin add-on Deployments to `system-k8s` nodes | — |
-| `eks-karpenter.sh` | Karpenter IAM + controller + `labs-elastic` NodePool | — |
+| `eks-karpenter.sh` | Karpenter IAM + controller + `labs-elastic` NodePool (`EKS_KARPENTER_LABS_POOL=0`: controller only, for a cluster without `labs-k8s`) | — |
 | `eks-kyverno.sh` | Kyverno + learner `do-not-disrupt` policy | — |
 | `eks-admission.sh` | Policies that keep learner workloads inside lab quota / limits | — |
 | `eks-labs-sleep.sh` | Park k8s-lab capacity: balloons → 0, `labs-elastic` nodes removed, `labs-k8s` → **0** | Still pays |
-| `eks-linux.sh` | Linux-module capacity: `base` (managed node group `labs-linux`, always-on, admin creds), `up` (Karpenter `labs-linux-elastic` overflow + `nri-cgroup-rw` plugin for systemd in user-namespaced pods), `sleep` / `wake`, `spike` / `check` / `down` | — |
+| `eks-linux.sh` | Linux-module capacity: `base` (managed node group `labs-linux`, always-on, admin creds), `up` (Karpenter `labs-linux-elastic` overflow + `nri-cgroup-rw` plugin for systemd in user-namespaced pods + box seccomp profiles), `seccomp` (profiles only), `sleep` / `wake`, `spike` / `check` / `down` | — |
+| `eks-nodegroup-update.sh` | Roll learner node groups onto the current launch template and latest AMI (evicts their pods) | — |
 | `eks-docker.sh` | Docker-module capacity, same subcommands as `eks-linux.sh`: managed node group `labs-docker` (t4g.medium), Karpenter `labs-docker-elastic`, `nri-cgroup-rw-docker`, and the Docker Hub pull-through mirror `dl-mirror/registry-mirror` (`docker/registry-mirror.yaml`) | — |
 | `eks-kubeconfig.sh` | Refresh `kube/k8s-lab.kubeconfig` | — |
 | `eks-recreate.sh` | Create cluster+NGs if missing, access, kubeconfig | Starts paying |
@@ -72,12 +73,22 @@ build: `devsetu/*` images are published multi-arch by `./images/build-all.sh`;
 third-party images (`nginx`, `busybox`, `postgres`, `bitnami/kubectl`) already are.
 When adding a new lab image, check with `docker buildx imagetools inspect <image>`.
 
+**Network policy:** the VPC CNI add-on runs its network policy agent (`enableNetworkPolicy` in
+`EKS_VPC_CNI_CONFIG`), so NetworkPolicies are enforced: `dl-box-isolation` in every `lx-*` /
+`dk-*` namespace, and learners' own policies in `ns-*`. Re-running `eks-recreate.sh` applies the
+config to an existing cluster.
+
 **Pod density:** the VPC CNI runs with **prefix delegation** (`ENABLE_PREFIX_DELEGATION=true`,
 `MINIMUM_IP_TARGET=80`, `WARM_IP_TARGET=16`), so pod count is no longer capped by the ENI IP formula
 (17 on `t4g.medium`). Learner nodes run **42 pods** (38 learner slots of 40m / 64Mi after
 4 DaemonSets). 80 IPs (5 prefixes) per node cover 42 pods plus the IPs of just-deleted pods, which
 the CNI won't reuse for 30 s: replacing 28 pods at once starts in ~8 s instead of ~41 s.
 
+- All learner launch templates (`nodegroups.sh`) and Karpenter `EC2NodeClass`es also set
+  **IMDS hop limit 1** (learner pods can't reach the node role's credentials) and a boot script
+  with **`kernel.io_uring_disabled=2`**. Template changes are detected by a checksum in the
+  version description; roll existing groups with `./deploy/eks/eks-nodegroup-update.sh <group>`.
+  See `docs/security/linux-lab-hardening-2026-10-06.md`.
 - `labs-k8s` — launch template `devlabs-labs-k8s` (created by `eks-recreate.sh`) with a
   `nodeadm` NodeConfig: `maxPods: 42`, explicit `kubeReserved` (70m / 717Mi / 1Gi), 25 GiB gp3.
 - Karpenter — `kubelet.maxPods` / `kubeReserved` in `karpenter/nodepool.yaml`.

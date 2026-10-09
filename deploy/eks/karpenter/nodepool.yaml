@@ -23,6 +23,25 @@ spec:
       cpu: 70m
       memory: 717Mi
       ephemeral-storage: 1Gi
+  userData: |
+    MIME-Version: 1.0
+    Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+    --BOUNDARY
+    Content-Type: text/x-shellscript; charset="us-ascii"
+
+    #!/bin/bash
+    # Nothing in the labs uses io_uring, and it is a frequent source of kernel privilege
+    # escalation bugs reachable from containers. Same as the managed groups (nodegroups.sh).
+    printf 'kernel.io_uring_disabled = 2\n' > /etc/sysctl.d/90-devlabs-learner.conf
+    sysctl -p /etc/sysctl.d/90-devlabs-learner.conf
+    --BOUNDARY--
+  # IMDS for the host only: learner pods cannot reach the node role's credentials.
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpPutResponseHopLimit: 1
+    httpTokens: required
   blockDeviceMappings:
     - deviceName: /dev/xvda
       ebs:

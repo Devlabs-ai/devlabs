@@ -28,6 +28,8 @@ const leaderboardRoutes = require('./routes/leaderboard');
 const billingRoutes = require('./routes/billing');
 const notifyRoutes = require('./routes/notify');
 const monthlyPaperRoutes = require('./routes/monthlyPaper');
+const profileRoutes = require('./routes/profile');
+const waitlistRoutes = require('./routes/waitlist');
 
 const terminalService = require('./observability/terminalService');
 const k8sTerminalService = require('./observability/k8sTerminalService');
@@ -61,6 +63,8 @@ app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/notify', notifyRoutes);
 app.use('/api/monthly-paper', monthlyPaperRoutes);
+app.use('/api/profile', profileRoutes);
+app.use('/api/waitlist', waitlistRoutes);
 app.use('/api/dev/db', devDbRoutes);
 
 app.use((err: Error & { status?: number }, _req: ExpressRequest, res: ExpressResponse, _next: ExpressNextFunction) => {

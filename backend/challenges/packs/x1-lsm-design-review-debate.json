@@ -1,0 +1,173 @@
+{
+  "id": "x1-lsm-design-review-debate",
+  "number": 591,
+  "finalized": true,
+  "title": "X1 · The design review: who’s right about LSM?",
+  "description": "Your team is debating a move from Postgres to an LSM engine. Call each claim true or false, then build the write path from the true ones.",
+  "difficulty": "L1",
+  "tags": [
+    "data-systems",
+    "board-experiment",
+    "lsm-tree",
+    "debate",
+    "story-discussion",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "**Thursday, 11:00. Design review.** The orders table in Postgres is choking on write load, about 40k `PUT`s a second at peak. Neha (staff engineer) wants to move orders to an LSM-tree engine like RocksDB.\n\nArjun (SRE) has run Postgres for years and thinks in pages. Meera (backend) wrote order-processor and cares about latency. Within ten minutes the whiteboard is covered in claims about how an LSM write works, and **some of them are wrong**.\n\nThe meeting ends with: *\"Whoever’s on the board next, sort this out.\"* That’s you.\n\n**Round 1:** mark every claim True or False. Each wrong call costs a heart.\n\n**Round 2:** the false claims are crossed out. Arrange the true ones into the write path for `PUT order:88213 → status=paid`.",
+    "yourTask": "Judge all twelve claims, then place the true ones in the order a write actually goes through them.",
+    "yourTaskSteps": [
+      "Read each claim and who said it. Mark it True or False.",
+      "Submit your verdicts. You see why each claim was right or wrong.",
+      "Build the write path from what remains. One card is optional."
+    ],
+    "hints": [
+      "If a claim mentions pages or overwriting, ask whether LSM trees have pages at all.",
+      "Any claim that gives the client an OK before the write is crash-safe is a latency trick, not a design."
+    ],
+    "moat": "Debate mode. Truth = gold !== tray. Same chain as ds-01."
+  },
+  "platformSpec": {
+    "kicker": "Experiment X1 · Debate mode",
+    "passMessage": "Meeting settled. Neha gets her LSM engine, and Arjun finally stops looking for pages.",
+    "game": {
+      "mode": "debate",
+      "lives": 3
+    },
+    "trayLabel": "Claims",
+    "pieces": [
+      {
+        "id": "wal-append",
+        "kind": "stage",
+        "speaker": "Neha · staff engineer",
+        "title": "Every write gets appended to a log on disk and fsynced first.",
+        "blurb": "Appending is a cheap sequential write, and that log is what we replay if the process crashes.",
+        "prompt": "Every write · crash-proof it",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "memtable-insert",
+        "kind": "mechanism",
+        "speaker": "Meera · backend",
+        "title": "Then it goes into a sorted tree in memory, and that’s when the client gets its OK.",
+        "blurb": "Reads for order:88213 find it there straight away.",
+        "prompt": "Every write · make it readable",
+        "gold": "required",
+        "parent": "wal-append",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "memtable-freeze",
+        "kind": "stage",
+        "speaker": "Neha · staff engineer",
+        "title": "When the memory tree hits 64 MB, we freeze it and start a fresh one.",
+        "blurb": "New writes go to the fresh tree, so nobody waits for the disk.",
+        "prompt": "Later · memtable hits 64 MB",
+        "gold": "required",
+        "parent": "memtable-insert",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "flush-sstable",
+        "kind": "stage",
+        "speaker": "Arjun · SRE",
+        "title": "The frozen tree is written out as a new sorted file that is never edited again.",
+        "blurb": "Arjun, grudgingly: “So every flush is a brand new file. Fine.”",
+        "prompt": "Later · move it to disk",
+        "gold": "required",
+        "parent": "memtable-freeze",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "bloom-index",
+        "kind": "mechanism",
+        "speaker": "Meera · backend",
+        "title": "We can store a Bloom filter next to each file so reads skip files that can’t have the key.",
+        "blurb": "Nice to have for read latency. The write is just as safe without it.",
+        "prompt": "Optional · faster reads",
+        "gold": "optional",
+        "parent": "flush-sstable",
+        "child": "wal-discard",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "wal-discard",
+        "kind": "stage",
+        "speaker": "Arjun · SRE",
+        "title": "Once that file is on disk, the log segment behind it can be deleted.",
+        "blurb": "The log only existed to rebuild the memory tree after a crash.",
+        "prompt": "Later · clean up the log",
+        "gold": "required",
+        "parent": "flush-sstable",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "compaction",
+        "kind": "mechanism",
+        "speaker": "Neha · staff engineer",
+        "title": "In the background, old files get merged and only the newest version of each key survives.",
+        "blurb": "That’s how deleted and overwritten orders eventually disappear.",
+        "prompt": "Much later · merge files",
+        "gold": "required",
+        "parent": "wal-discard",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "update-in-place",
+        "kind": "stage",
+        "speaker": "Arjun · SRE",
+        "title": "We find the page holding the order and overwrite it, like Postgres does.",
+        "blurb": "“A row lives somewhere. You go there and change it.”",
+        "trapIfPlaced": "LSM trees never overwrite data in place. A newer version goes into a newer file.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "page-split",
+        "kind": "mechanism",
+        "speaker": "Arjun · SRE",
+        "title": "When a page fills up we split it and update the parent page.",
+        "blurb": "“Same as any index, right?”",
+        "trapIfPlaced": "Page splits are B-tree behaviour. An LSM tree has no pages to split.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "ack-before-log",
+        "kind": "stage",
+        "speaker": "Meera · backend",
+        "title": "To cut latency, reply OK from memory and batch the log write a second later.",
+        "blurb": "“We’d shave a millisecond off every PUT.”",
+        "trapIfPlaced": "A crash inside that second loses orders the client was told were saved.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "delete-everywhere",
+        "kind": "stage",
+        "speaker": "Arjun · SRE",
+        "title": "When an order changes, delete its old versions from every file right away.",
+        "blurb": "“Otherwise we’re storing junk.”",
+        "trapIfPlaced": "Files are never edited. Old versions wait for compaction.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "compaction-blocks",
+        "kind": "mechanism",
+        "speaker": "Meera · backend",
+        "title": "Writes have to pause while compaction merges files.",
+        "blurb": "“It needs a stable view of the data, surely.”",
+        "trapIfPlaced": "Compaction works on immutable files in the background. Writes keep landing in the memtable.",
+        "gold": "tray",
+        "parent": null
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

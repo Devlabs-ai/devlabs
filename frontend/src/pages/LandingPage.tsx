@@ -5,9 +5,10 @@ import {
   TracksAnim,
   WhiteboardAnim,
 } from '../components/LandingFeatureAnims';
-import { Link } from 'react-router-dom';
-import { PRICING_PATH } from '../constants/pricing';
+import { Link, useLocation } from 'react-router-dom';
+import { LAUNCH_OFFER, PRICING_PATH } from '../constants/pricing';
 import { useInView } from '../hooks/useInView';
+import WaitlistForm from '../components/WaitlistForm';
 
 interface LandingPageProps {
   onSignIn: () => void;
@@ -233,6 +234,16 @@ function LandingContent(): JSX.Element {
   const offer3 = useInView<HTMLElement>();
   const pricingReveal = useInView<HTMLElement>();
 
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash !== '#waitlist') return undefined;
+    // Smooth scrolling gets cancelled during a client-side route change, so jump instead.
+    const t = window.setTimeout(() => {
+      document.getElementById('waitlist')?.scrollIntoView({ block: 'center' });
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [hash]);
+
   return (
     <>
       <section className="landing-hero">
@@ -259,6 +270,18 @@ function LandingContent(): JSX.Element {
           </div>
         </div>
         <HeroPanel />
+      </section>
+
+      <section id="waitlist" className="landing-waitlist" aria-label="Join the waitlist">
+        <div className="landing-waitlist-copy">
+          <p className="landing-kicker">Launching first week of November</p>
+          <h2 className="landing-section-title">Join the waitlist</h2>
+          <p className="landing-section-lead">
+            Get {LAUNCH_OFFER.percentOff}% off your first month at launch, and early access before
+            everyone else.
+          </p>
+        </div>
+        <WaitlistForm />
       </section>
 
       <section
@@ -342,23 +365,21 @@ function LandingContent(): JSX.Element {
             <span className="landing-hero-line landing-hero-line--accent">by design</span>
           </h2>
           <p className="landing-section-lead">
-            DevSetu is built for students, early-career engineers, and anyone curious about how
-            real systems actually work — people who learn best by doing, but can&rsquo;t pay for
-            a cloud account per experiment. We run every lab on optimized shared infrastructure, so you
-            get real systems without the real bill.
+            Real systems without the real cloud bill. Every lab runs on our shared infrastructure,
+            so you practise on live machines without paying for a cloud account.
           </p>
           <ul className="landing-afford-reasons">
-            <li>Pay only for what you need. Finish it, then go beyond.</li>
-            <li>No cloud setup, no surprise charges for a cluster you forgot to delete.</li>
-            <li>Priced for a learner&rsquo;s budget, not a company training budget.</li>
+            <li>Pay only for what you need.</li>
+            <li>No cloud setup, no surprise charges.</li>
+            <li>Priced for a learner&rsquo;s budget.</li>
           </ul>
         </div>
 
         <aside className="landing-tokens" aria-label="Lab tokens">
           <h3 className="landing-tokens-title">Every lab you solve pays you back.</h3>
           <p className="landing-tokens-body">
-            Solving a lab earns you <strong>tokens</strong>. Cash them out into DevSetu credit and
-            spend it on your next track or project — the more you practice, the less you pay.
+            Solve labs, earn <strong>tokens</strong>, and turn them into credit. The more you
+            practice, the less you pay.
           </p>
           <ol className="landing-tokens-steps">
             <li><span>1</span>Solve a lab</li>

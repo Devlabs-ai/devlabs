@@ -1,0 +1,150 @@
+{
+  "id": "ds-04-two-phase-commit",
+  "number": 504,
+  "finalized": true,
+  "title": "Two-phase commit across orders and payments",
+  "description": "An order and its payment live in two different databases. Commit both or neither using two-phase commit.",
+  "difficulty": "L2",
+  "tags": [
+    "data-systems",
+    "transactions",
+    "atomic-commit",
+    "2pc",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "Placing an order writes a row to the orders database and a charge to the payments database. If one commits and the other doesn't, you either ship for free or charge for nothing.\n\nTwo-phase commit (2PC) makes the pair atomic. A coordinator asks every participant whether it can commit, records a single decision, and then tells everyone the outcome. The trick is the point of no return: once a participant votes yes, it has promised to commit if told to.\n\nThe outline is on the board. Fill the blocks. Traps break atomicity or make recovery impossible.",
+    "yourTask": "Order the steps of a two-phase commit, from starting the transaction to participants releasing their locks.",
+    "yourTaskSteps": [
+      "Read every card.",
+      "Fill each empty block from Unused.",
+      "The dashed block is optional.",
+      "Submit."
+    ],
+    "hints": [
+      "There are two promises: the participant's yes vote, and the coordinator's decision.",
+      "The decision has to survive a coordinator crash.",
+      "Once the decision is made, it cannot be taken back. Only delivered."
+    ],
+    "moat": "Setter notes, not shown to learners.\n\nRequired chain: global-txid → send-prepare → durable-yes → log-decision → send-commit → commit-release.\nOptional splice: ask-outcome on send-commit → commit-release.\nFive traps."
+  },
+  "platformSpec": {
+    "kicker": "Transactions · Two-phase commit",
+    "passMessage": "Atomic across both databases: prepare, durable votes, logged decision, commit.",
+    "pieces": [
+      {
+        "id": "global-txid",
+        "title": "Start a global transaction",
+        "blurb": "The coordinator assigns a global transaction ID. order-processor writes to both databases under that ID.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "send-prepare",
+        "title": "Coordinator sends prepare",
+        "blurb": "When the application is ready to commit, the coordinator asks every participant: can you commit?",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "global-txid",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "durable-yes",
+        "title": "Participants persist, then vote yes",
+        "blurb": "Each participant writes its changes and a prepare record to disk, holds its locks, and votes yes. It can no longer abort on its own.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "send-prepare",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "log-decision",
+        "title": "Coordinator logs the commit decision",
+        "blurb": "With yes votes from every participant, the coordinator writes 'commit' to its own durable log. This is the commit point.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "durable-yes",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "send-commit",
+        "title": "Send commit to every participant",
+        "blurb": "The coordinator tells each participant to commit, retrying indefinitely until each one acknowledges.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "log-decision",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "ask-outcome",
+        "title": "In-doubt participant asks for the outcome",
+        "blurb": "If the commit message is slow to arrive, a participant that voted yes can ask the coordinator what was decided. It still may not decide alone.",
+        "kind": "mechanism",
+        "gold": "optional",
+        "parent": "send-commit",
+        "child": "commit-release",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "commit-release",
+        "title": "Participants commit and release locks",
+        "blurb": "Each participant makes the changes visible, releases its locks, and acknowledges to the coordinator.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "send-commit",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "first-yes",
+        "title": "Commit on the first yes vote",
+        "blurb": "As soon as one participant votes yes, the coordinator decides commit to save time.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Commit requires a yes from every participant. One no means abort."
+      },
+      {
+        "id": "timeout-abort",
+        "title": "Prepared participant aborts on timeout",
+        "blurb": "If the coordinator goes quiet for too long, a participant that voted yes rolls back to free its locks.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "After voting yes, a participant gave up the right to abort. The coordinator may already have decided commit."
+      },
+      {
+        "id": "no-coord-log",
+        "title": "Skip the coordinator's log",
+        "blurb": "The votes already show everyone agreed, so the coordinator doesn't need to write the decision down.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "If the coordinator crashes without a logged decision, in-doubt participants can never learn the outcome."
+      },
+      {
+        "id": "partial-commit",
+        "title": "Others commit when one votes no",
+        "blurb": "If payments votes no, orders still commits its part and payments retries later.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "That breaks atomicity. One no vote aborts the transaction everywhere."
+      },
+      {
+        "id": "same-as-2pl",
+        "title": "This is two-phase locking",
+        "blurb": "2PC is another name for 2PL: acquire all locks in phase one, release them in phase two.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Different ideas. 2PL gives serializable isolation on one database; 2PC gives atomic commit across many."
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

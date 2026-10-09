@@ -170,6 +170,22 @@ export function IconSubmissions({ color = '#34d399' }: { color?: string }): JSX.
   );
 }
 
+/** Padlock — lab outside the user's plan. */
+export function IconLock({
+  color = 'currentColor',
+  size = 16,
+}: {
+  color?: string;
+  size?: number;
+}): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="3" y="7" width="10" height="7" rx="1.5" stroke={color} strokeWidth="1.4" />
+      <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** Stacked coins — profile tokens shelf. */
 export function IconCoins({
   color = 'currentColor',

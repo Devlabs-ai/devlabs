@@ -1,54 +1,9 @@
 import React from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
-import { PROJECTS, MAJORS_PATH, getProject, type ProjectEntry, type ProjectModule } from '../constants/projects';
+import { PROJECTS, MAJORS_PATH, getProject, type ProjectEntry } from '../constants/projects';
 import { hasModuleContent } from '../fixtures/projectModules';
 import NotifyButton from '../components/NotifyButton';
-
-function MilestoneRow({
-  projectId,
-  projectReady,
-  module,
-  index,
-}: {
-  projectId: string;
-  projectReady: boolean;
-  module: ProjectModule;
-  index: number;
-}): JSX.Element {
-  const open = projectReady && module.status === 'ready' && hasModuleContent(projectId, module.id);
-  const ordinal = String(index + 1).padStart(2, '0');
-
-  const body = (
-    <>
-      <span className="project-milestone-ord">{ordinal}</span>
-      <span className="project-milestone-copy">
-        <span className="project-milestone-label">{module.label}</span>
-        <span className="project-milestone-sub">{module.subtitle}</span>
-      </span>
-      <span className={`project-milestone-state${open ? ' is-open' : ''}`}>
-        {open ? 'Open' : 'Soon'}
-      </span>
-    </>
-  );
-
-  if (open) {
-    return (
-      <li>
-        <Link to={`${MAJORS_PATH}/${projectId}/${module.id}`} className="project-milestone is-open">
-          {body}
-        </Link>
-      </li>
-    );
-  }
-
-  return (
-    <li>
-      <div className="project-milestone is-planned" aria-disabled="true">
-        {body}
-      </div>
-    </li>
-  );
-}
+import ChapterList from '../components/ChapterList';
 
 function ProjectDetail({ project }: { project: ProjectEntry }): JSX.Element {
   return (
@@ -79,20 +34,13 @@ function ProjectDetail({ project }: { project: ProjectEntry }): JSX.Element {
         ))}
       </div>
 
-      <section className="project-milestones" aria-label="Chapters">
-        <h2 className="project-milestones-heading">Chapters</h2>
-        <ol className="project-milestones-list">
-          {project.modules.map((module, index) => (
-            <MilestoneRow
-              key={module.id}
-              projectId={project.id}
-              projectReady={project.status === 'ready'}
-              module={module}
-              index={index}
-            />
-          ))}
-        </ol>
-      </section>
+      <ChapterList
+        chapters={project.modules}
+        isOpen={(module) =>
+          project.status === 'ready' && module.status === 'ready' && hasModuleContent(project.id, module.id)
+        }
+        hrefFor={(module) => `${MAJORS_PATH}/${project.id}/${module.id}`}
+      />
     </div>
   );
 }

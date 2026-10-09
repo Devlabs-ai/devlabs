@@ -50,6 +50,6 @@
       "timeoutSeconds": 120
     }
   },
-  "visibleTo": "reviewers",
+  "visibleTo": "users",
   "tokens": 15
 }

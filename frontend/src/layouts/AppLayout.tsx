@@ -13,8 +13,17 @@ import { LEADERBOARD_PATH } from '../constants/leaderboard';
 import { WHITEBOARD_PATH } from '../constants/whiteboard';
 import { useIsNarrowUi } from '../hooks/useMediaQuery';
 import NavIcon from '../components/NavIcons';
+import PlatformFooter from '../components/PlatformFooter';
 
 const PAPERS_PATH = '/track/papers';
+
+const PLATFORM_FOOTER_ENABLED = false;
+
+/** Viewport-filling workspaces that manage their own scrolling. */
+const FOOTERLESS_PREFIXES = ['/track/quiz/', SPARK_PLAYGROUND_PATH, '/dev/db'];
+const MAJOR_MODULE_ROUTE = new RegExp(`^${MAJORS_PATH}/[^/]+/[^/]+`);
+/** Play catalog routes that read like documents rather than the fixed catalog grid. */
+const PLAY_DOCUMENT_ROUTE = /\/(read\/[^/]+|intro|leaderboard)\/?$/;
 
 /** Play routes that bring their own page chrome instead of the catalog's. */
 const PLAY_SUBROUTES = [
@@ -56,6 +65,7 @@ function AppLayoutInner(): React.JSX.Element {
     activeSession,
     currentUser,
     onRequestLogin,
+    onLogout,
   } = useAppState();
 
   const location = useLocation();
@@ -71,12 +81,21 @@ function AppLayoutInner(): React.JSX.Element {
   const onPlayRoute =
     location.pathname === '/track' ||
     (location.pathname.startsWith('/track/') && !onPlaySubroute);
-  const usePlayChrome = (onPlayRoute || onPlaySubroute) && !challengeOpen;
+  const usePlayChrome = !challengeOpen;
   // The Spark bench is reached through the index, so keep the pill lit inside it.
   const playgroundsActive =
     location.pathname.startsWith(PLAYGROUNDS_PATH) ||
     location.pathname.startsWith(SPARK_PLAYGROUND_PATH);
   const papersActive = location.pathname.startsWith(PAPERS_PATH);
+  const showFooter =
+    PLATFORM_FOOTER_ENABLED &&
+    authMode !== 'resolving' &&
+    !challengeOpen &&
+    !(onPlayRoute && !PLAY_DOCUMENT_ROUTE.test(location.pathname)) &&
+    !MAJOR_MODULE_ROUTE.test(location.pathname) &&
+    !FOOTERLESS_PREFIXES.some((p) => location.pathname.startsWith(p));
+  const profileSection =
+    location.pathname === '/profile' ? new URLSearchParams(location.search).get('section') || 'overview' : null;
 
   useEffect(() => {
     setNavOpen(false);
@@ -109,6 +128,14 @@ function AppLayoutInner(): React.JSX.Element {
 
   const sectionLinks = (
     <>
+      <NavLink
+        to="/track"
+        className={`topnav-pill topnav-action${onPlayRoute ? ' active' : ''}`}
+        onClick={() => setNavOpen(false)}
+      >
+        <NavIcon name="track" />
+        <span>Track</span>
+      </NavLink>
       <NavLink
         to={MAJORS_PATH}
         className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
@@ -187,6 +214,49 @@ function AppLayoutInner(): React.JSX.Element {
     </button>
   );
 
+  const drawerAccountLinks = signedIn ? (
+    <>
+      {([
+        ['overview', 'Profile', 'profile'],
+        ['subscriptions', 'Subscriptions', 'subscriptions'],
+        ['contact', 'Contact', 'contact'],
+      ] as const).map(([section, label, icon]) => (
+        <Link
+          key={section}
+          to={section === 'overview' ? '/profile' : `/profile?section=${section}`}
+          className={`topnav-pill topnav-action${profileSection === section ? ' active' : ''}`}
+          onClick={() => setNavOpen(false)}
+        >
+          <NavIcon name={icon} />
+          <span>{label}</span>
+        </Link>
+      ))}
+      {showAdmin && (
+        <NavLink
+          to="/admin"
+          className={({ isActive }) => `topnav-pill topnav-action${isActive ? ' active' : ''}`}
+          onClick={() => setNavOpen(false)}
+        >
+          <NavIcon name="admin" />
+          <span>Admin</span>
+        </NavLink>
+      )}
+      <button
+        type="button"
+        className="topnav-pill topnav-action topnav-action--signout"
+        onClick={() => {
+          setNavOpen(false);
+          onLogout();
+        }}
+      >
+        <NavIcon name="signout" />
+        <span>Sign out</span>
+      </button>
+    </>
+  ) : (
+    accountLinks
+  );
+
   return (
     <div className={`app${challengeOpen ? ' app--challenge' : ''}${usePlayChrome ? ' app--play' : ''}`}>
       {challengeOpen ? (
@@ -242,14 +312,17 @@ function AppLayoutInner(): React.JSX.Element {
             >
               <p className="topnav-drawer-heading">Menu</p>
               {sectionLinks ? <div className="topnav-drawer-group">{sectionLinks}</div> : null}
-              <div className="topnav-drawer-group">{accountLinks}</div>
+              <div className="topnav-drawer-group">{drawerAccountLinks}</div>
             </nav>
           ) : null}
         </header>
       )}
 
-      <div className={`app-body${challengeOpen ? ' app-body--challenge' : ''}`}>
+      <div
+        className={`app-body${challengeOpen ? ' app-body--challenge' : ''}${showFooter ? ' app-body--with-footer' : ''}`}
+      >
         <Outlet />
+        {showFooter && <PlatformFooter signedIn={signedIn} onRequestLogin={onRequestLogin} />}
       </div>
     </div>
   );

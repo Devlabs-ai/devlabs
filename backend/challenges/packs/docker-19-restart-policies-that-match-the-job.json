@@ -41,6 +41,6 @@
       "timeoutSeconds": 150
     }
   },
-  "visibleTo": "admin",
+  "visibleTo": "users",
   "tokens": 10
 }

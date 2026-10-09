@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getAuthHeader } from './authApi';
+import type { ActivityDay } from '../components/ActivityHeatmap';
 
 export interface LeaderboardEntry {
   rank: number;
@@ -18,8 +19,10 @@ export interface Leaderboard {
 }
 
 export interface PlatformLeaderboardEntry {
+  id: string;
   rank: number;
   name: string;
+  avatar: string | null;
   solved: number;
   papers: number;
   tokens: number;
@@ -42,6 +45,26 @@ export async function fetchPlatformLeaderboard(limit = 10): Promise<PlatformLead
     participants: data?.participants ?? 0,
     entries: Array.isArray(data?.entries) ? data.entries : [],
     me: data?.me ?? null,
+  };
+}
+
+export interface LearnerProfile extends PlatformLeaderboardEntry {
+  participants: number;
+  activity: ActivityDay[];
+  solvedLabs: { title: string; difficulty: string | null; tokens: number; solvedAt: number | null }[];
+  paperQuizzes: { title: string; correct: number; total: number; tokens: number; takenAt: number | null }[];
+}
+
+export async function fetchLearnerProfile(id: string): Promise<LearnerProfile> {
+  const { data } = await axios.get(`/api/leaderboard/platform/${encodeURIComponent(id)}`, {
+    params: { tz: new Date().getTimezoneOffset() },
+    headers: getAuthHeader(),
+  });
+  return {
+    ...data,
+    activity: Array.isArray(data?.activity) ? data.activity : [],
+    solvedLabs: Array.isArray(data?.solvedLabs) ? data.solvedLabs : [],
+    paperQuizzes: Array.isArray(data?.paperQuizzes) ? data.paperQuizzes : [],
   };
 }
 

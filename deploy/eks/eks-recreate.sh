@@ -65,17 +65,18 @@ ensure_addon() {
   fi
 }
 
-# Idempotent: applies prefix delegation to an existing vpc-cni add-on. Only newly
-# launched nodes use it cleanly; running nodes keep their secondary IPs.
+# Idempotent: applies EKS_VPC_CNI_CONFIG (prefix delegation + network policy agent) to an
+# existing vpc-cni add-on. Prefix delegation is used cleanly only by newly launched nodes;
+# running nodes keep their secondary IPs. The policy agent starts on every node right away.
 ensure_vpc_cni_config() {
   local have
   have="$(aws eks describe-addon --cluster-name "$EKS_CLUSTER_NAME" --region "$AWS_REGION" \
     --addon-name vpc-cni --query 'addon.configurationValues' --output text 2>/dev/null || true)"
   if [[ "$have" == "$EKS_VPC_CNI_CONFIG" ]]; then
-    echo "==> vpc-cni prefix delegation already configured"
+    echo "==> vpc-cni configuration up to date"
     return
   fi
-  echo "==> vpc-cni: enable prefix delegation"
+  echo "==> vpc-cni: apply configuration (prefix delegation, network policy)"
   aws eks update-addon --cluster-name "$EKS_CLUSTER_NAME" --region "$AWS_REGION" \
     --addon-name vpc-cni --configuration-values "$EKS_VPC_CNI_CONFIG" \
     --resolve-conflicts PRESERVE >/dev/null

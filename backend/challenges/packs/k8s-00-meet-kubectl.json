@@ -46,6 +46,6 @@
     },
     "practice": true
   },
-  "visibleTo": "reviewers",
+  "visibleTo": "users",
   "tokens": 0
 }

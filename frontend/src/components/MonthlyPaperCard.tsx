@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { MONTHLY_PAPER_PATH } from '../constants/monthlyPaper';
 import { useMonthlyPaper } from '../hooks/useMonthlyPaper';
+import { IconCoins } from './ChromeIcons';
 
 /** Desktop left-column teaser; the paper, PDF and quiz live on the monthly paper page. */
 export default function MonthlyPaperCard(): JSX.Element | null {
@@ -10,11 +11,13 @@ export default function MonthlyPaperCard(): JSX.Element | null {
   const { paper } = state;
   return (
     <Link to={MONTHLY_PAPER_PATH} className="play-sidebar-card monthly-paper" aria-label={`Paper of the Month: ${paper.title}`}>
-      <p className="monthly-paper-kicker">Paper of the Month</p>
+      <span className="monthly-paper-coin" title={`Up to ${state.tokensPerPaper} tokens`}>
+        <IconCoins size={18} />
+      </span>
       <h3 className="monthly-paper-title">{paper.title}</h3>
       <p className="monthly-paper-blurb">{paper.blurb}</p>
       <span className="monthly-paper-open" aria-hidden>
-        Read &amp; quiz →
+        Read the paper →
       </span>
     </Link>
   );

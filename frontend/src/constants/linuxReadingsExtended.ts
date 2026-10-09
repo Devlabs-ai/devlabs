@@ -1633,45 +1633,274 @@ systemctl status hello                # 5. confirm it is running`,
     showBlogStamp: true,
     gatedByChallengeId: 'linux-18-disk-full-on-the-order-box',
     lede:
-      'Disks **fill up**; mounts attach storage into the **one tree**. A **photo archive** volunteer sees uploads fail — **`df`**, **`du`**, find the hog, **`tar`** a rollback bundle. Self-contained; no story arc from other blogs.',
+      'A Linux server can report “no space left” even when you do not know which folder grew. This post shows how to read filesystem capacity with **`df`**, trace usage with **`du`**, understand where disks are **mounted**, and create safe backup bundles with **`tar`** before removing anything.',
     sections: [
       {
-        id: 'archive-story',
-        title: 'Disk full on upload day',
+        id: 'storage-map',
+        title: 'From a disk to a folder',
         body: [
-          'Wedding season hits **`/srv/photos/incoming`**. **`df -h`** shows **`/`** at 100%. **`du -sh /srv/*`** finds the surprise winner. You archive last year to **`/backup`**, **`tar`**, and free space.',
+          'Linux presents files as one tree beginning at **`/`**, but that tree can contain several storage devices. The system **mounts** each filesystem at a directory called a **mount point**. The root filesystem is mounted at `/`; another disk might be mounted at `/data` or `/backup`.',
+          'That distinction explains the two main space commands. **`df`** asks a filesystem, “How much capacity is free?” **`du`** walks files under a path and asks, “How much space do these files use?” You normally start with `df`, then use `du` inside the filesystem that is full.',
         ],
-      },
-      {
-        id: 'df-du',
-        title: 'df and du',
-        body: [],
         table: {
-          headers: ['Command', 'Answers'],
+          headers: ['Word', 'Meaning', 'Example'],
           rows: [
-            ['`df -h`', 'Free space per **mounted** filesystem'],
-            ['`du -sh path`', 'Total size of a folder'],
-            ['`du -h --max-depth=1 dir`', 'One level of subfolder sizes'],
+            ['Device', 'The disk, partition, or logical volume that stores blocks', '`/dev/nvme0n1p1`'],
+            ['Filesystem', 'The format that organizes files on that device', 'ext4, XFS'],
+            ['Mount point', 'The directory where that filesystem appears in the Linux tree', '`/`, `/data`, `/backup`'],
+            ['Capacity', 'Space available to the whole mounted filesystem', 'Shown by `df`'],
+            ['Usage', 'Space occupied by files below a path', 'Measured by `du`'],
+          ],
+        },
+        callout: {
+          kind: 'idea',
+          title: 'One tree can hide several disks',
+          body: [
+            'If `/backup` is a separate mount, moving a file from `/srv` to `/backup` moves the data to another filesystem. If it is only an ordinary directory on `/`, the same move does **not** free space on `/`.',
           ],
         },
       },
       {
-        id: 'tar',
-        title: 'tar archives',
+        id: 'df-du',
+        title: 'Start broad: df shows filesystem capacity',
         body: [
-          '**`tar -cvf archive.tar dir/`** creates; **`-xvf`** extracts; **`-czvf`** gzip compresses. **`--exclude`** skips junk. Archives are how you **move trees** and **roll back** before cleanup.',
+          '**`df`** means “disk free.” It reports each mounted filesystem, its total size, used and available space, and where it is mounted. **`-h`** uses readable units such as GiB instead of raw 1 KiB blocks.',
+          'Look first at **Use%** and **Mounted on**. If the line mounted on `/` is at 100%, investigate folders on `/`. If `/data` is full, investigate `/data`; cleaning an unrelated filesystem will not help.',
         ],
         code: {
           language: 'shell',
-          code: `tar -czvf ~/backup-photos-2025.tgz -C /srv photos/2025
-tar -tzvf ~/backup-photos-2025.tgz | head`,
+          code: `$ df -h
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/nvme0n1p1   40G   38G  1.8G  96% /
+/dev/nvme1n1     200G   61G  140G  31% /backup
+
+df -h /var              # show the filesystem that contains /var
+df -T /                 # include its filesystem type
+df -i /                 # inode usage: number of files, not bytes`,
+        },
+        subsections: [
+          {
+            id: 'inodes',
+            title: 'Space can run out in two ways',
+            body: [
+              'A filesystem can exhaust **bytes** because a few files are huge, or exhaust **inodes** because it contains millions of tiny files. Every file and directory needs an inode. In the second case `df -h` may show free bytes while programs still receive “No space left on device.”',
+              'Run **`df -i`** and check **IUse%**. If it is near 100%, find directories with enormous file counts instead of looking only for large files.',
+            ],
+          },
+        ],
+      },
+      {
+        id: 'du',
+        title: 'Narrow down: du shows directory usage',
+        body: [
+          '**`du`** means “disk usage.” It walks through a path and adds up the blocks used by files below it. **`-s`** gives one summary instead of every nested path, and **`-h`** uses readable units.',
+          'Work from broad to narrow. Summarize the top-level directories, enter the largest one, and repeat. Use **`sudo`** when permission errors would otherwise hide system directories.',
+        ],
+        code: {
+          language: 'shell',
+          code: `sudo du -xhd1 / 2>/dev/null | sort -h
+sudo du -xhd1 /var 2>/dev/null | sort -h
+sudo du -xhd1 /var/log 2>/dev/null | sort -h
+du -sh /srv/orders                    # one total
+du -ah /var/log | sort -h | tail -20  # largest entries near the end`,
+        },
+        subsections: [
+          {
+            id: 'du-options',
+            title: 'Why -x and max depth matter',
+            body: [
+              '**`-x`** keeps `du` on one filesystem. Without it, scanning `/` may descend into separately mounted backup disks, network shares, or virtual filesystems and make the numbers confusing.',
+              '**`-d1`** (the same idea as **`--max-depth=1`**) prints only one level below the path. That gives a useful shortlist instead of thousands of lines. BSD/macOS `du` uses slightly different options, but this track targets GNU tools on Linux.',
+            ],
+          },
+          {
+            id: 'find-large-files',
+            title: 'Find individual large files',
+            body: [
+              'Once you know which directory is large, **`find`** can list individual files over a threshold. The `-printf` form below prints size in bytes and path; numeric sorting puts the largest at the end.',
+            ],
+            code: {
+              language: 'shell',
+              code: `sudo find /var -xdev -type f -size +500M -printf '%s %p\\n' |
+  sort -n
+
+sudo find /var/log -xdev -type f -mtime +30 -ls  # old files; inspect only`,
+            },
+          },
+        ],
+        callout: {
+          kind: 'warn',
+          title: 'Measure before you delete',
+          body: [
+            'Do not start with `rm -rf` because a filesystem is full. Identify the filesystem, identify the large path, confirm what owns it, and make a backup when the data may be needed.',
+          ],
+        },
+      },
+      {
+        id: 'df-du-disagree',
+        title: 'When df and du disagree',
+        body: [
+          'Sometimes `df` says the filesystem is full but `du` cannot account for the space. A common cause is a process that still has a deleted file open. The directory entry is gone, so `du` cannot see it, but the filesystem cannot reclaim the blocks until the process closes the file.',
+          '**`lsof +L1`** lists open files whose link count is below 1. Restarting or safely signalling the owning service closes the file and releases the space. Do not truncate an unknown `/proc/PID/fd/...` entry without understanding the service.',
+        ],
+        code: {
+          language: 'shell',
+          code: `sudo lsof +L1                 # look for large entries marked (deleted)
+sudo systemctl restart app   # if app owns the deleted log and restart is safe
+df -h /                      # confirm that the blocks were released`,
+        },
+      },
+      {
+        id: 'mounts',
+        title: 'See and manage mounts',
+        body: [
+          '**`lsblk`** shows block devices as a tree. **`findmnt`** shows which filesystems are mounted and where. These are clearer than reading the full output of `mount` when you are building a storage map.',
+        ],
+        code: {
+          language: 'shell',
+          code: `lsblk -f                 # devices, filesystem types, labels, UUIDs, mount points
+findmnt                   # mounted filesystems as a tree
+findmnt /backup           # what device supplies this path?
+findmnt -T /var/log/app   # filesystem containing this exact path`,
+        },
+        subsections: [
+          {
+            id: 'temporary-mount',
+            title: 'Mount a filesystem temporarily',
+            body: [
+              'Create an empty directory, then mount the device there. The existing contents of that directory are hidden while the mount is active, so use a dedicated mount point. **`umount`** removes the attachment; it does not erase the disk.',
+            ],
+            code: {
+              language: 'shell',
+              code: `sudo mkdir -p /backup
+sudo mount /dev/nvme1n1 /backup
+findmnt /backup
+sudo umount /backup`,
+            },
+          },
+          {
+            id: 'fstab',
+            title: 'Make a mount survive reboot',
+            body: [
+              'Temporary mounts disappear at reboot. Persistent mounts are declared in **`/etc/fstab`**, preferably by stable **UUID** rather than a device name that could change. A bad entry can delay or break boot, so back up the file and test it before rebooting.',
+            ],
+            code: {
+              language: 'shell',
+              code: `sudo blkid /dev/nvme1n1       # copy the filesystem UUID
+sudo cp /etc/fstab /etc/fstab.bak
+sudoedit /etc/fstab
+sudo mount -a                   # test every not-yet-mounted fstab entry
+findmnt --verify                # check fstab syntax and references`,
+            },
+          },
+        ],
+      },
+      {
+        id: 'tar',
+        title: 'Create a safe archive with tar',
+        body: [
+          '**`tar`** combines a directory tree into one archive while preserving paths and metadata. It does not free space by itself: after you create and verify an archive, the original files still exist until you deliberately remove or move them.',
+          'The common operation letters are **`c`** create, **`t`** list, **`x`** extract, **`f`** archive filename, and **`z`** gzip compression. **`v`** is optional verbose output; leaving it out is quieter for large archives.',
+        ],
+        table: {
+          headers: ['Goal', 'Command shape'],
+          rows: [
+            ['Create an uncompressed archive', '`tar -cf archive.tar directory/`'],
+            ['Create a gzip-compressed archive', '`tar -czf archive.tgz directory/`'],
+            ['List without extracting', '`tar -tzf archive.tgz`'],
+            ['Extract into a chosen directory', '`tar -xzf archive.tgz -C destination/`'],
+            ['Exclude matching paths', "`tar -czf archive.tgz --exclude='*.tmp' directory/`"],
+          ],
+        },
+        subsections: [
+          {
+            id: 'tar-c-example',
+            title: 'Control the paths stored in the archive',
+            body: [
+              '**`-C directory`** tells `tar` to change into that directory before collecting files. This avoids embedding a long absolute-looking source path and makes restores predictable.',
+            ],
+            code: {
+              language: 'shell',
+              code: `sudo tar -czf /backup/orders-2026-10-06.tgz \
+  -C /srv orders
+
+tar -tzf /backup/orders-2026-10-06.tgz | head
+mkdir -p /tmp/restore-check
+tar -xzf /backup/orders-2026-10-06.tgz -C /tmp/restore-check`,
+            },
+          },
+          {
+            id: 'verify-archive',
+            title: 'Verify before cleanup',
+            body: [
+              'A command exiting with status 0 is a good start, but also list the archive and test-extract it when the data matters. Confirm that expected files, permissions, and directory structure are present. Only then decide whether old source data can be removed.',
+            ],
+          },
+        ],
+        callout: {
+          kind: 'warn',
+          title: 'Do not extract an unknown archive as root',
+          body: [
+            'Inspect it with `tar -tf` first and extract into an empty temporary directory. Archives can contain unexpected paths, links, ownership, or files that overwrite existing data.',
+          ],
+        },
+      },
+      {
+        id: 'disk-full-runbook',
+        title: 'A safe disk-full runbook',
+        body: [
+          'Use the same order every time. The goal is to restore service without deleting evidence or moving data onto the same full filesystem by mistake.',
+        ],
+        flows: [
+          {
+            title: 'From alert to recovered space',
+            steps: [
+              'Confirm the error and affected path',
+              'Run df -h and df -i',
+              'Map the path with findmnt',
+              'Use du from broad to narrow',
+              'Check deleted-open files',
+              'Archive or clean the confirmed owner',
+              'Recheck space and service health',
+            ],
+          },
+        ],
+        codes: [
+          {
+            language: 'shell',
+            code: `df -h /var/log/app
+df -i /var/log/app
+findmnt -T /var/log/app
+sudo du -xhd1 /var | sort -h
+sudo lsof +L1
+df -h /var/log/app`,
+          },
+        ],
+      },
+      {
+        id: 'storage-quick-reference',
+        title: 'Quick reference',
+        body: [],
+        tableAfter: {
+          headers: ['Question', 'Command'],
+          rows: [
+            ['Which filesystem is full?', '`df -h`, `df -h path`'],
+            ['Did it run out of inodes?', '`df -i path`'],
+            ['Which top-level directory is large?', '`du -xhd1 path | sort -h`'],
+            ['Which large files are present?', '`find path -xdev -type f -size +500M -ls`'],
+            ['Is a deleted file still open?', '`sudo lsof +L1`'],
+            ['Which device backs this path?', '`findmnt -T path`, `lsblk -f`'],
+            ['Create / list / extract an archive', '`tar -czf`, `tar -tzf`, `tar -xzf`'],
+            ['Validate persistent mounts', '`sudo mount -a`, `findmnt --verify`'],
+          ],
         },
       },
     ],
     takeaways: [
-      '**`df`** = filesystem free space; **`du`** = folder usage.',
-      '**`tar`** bundles directories for backup or transfer; test list with **`-t`** before deleting sources.',
-      'Find large dirs before **`rm -r`** frenzy — archive first when possible.',
+      '**`df`** reports capacity for a mounted filesystem; **`du`** walks a path and totals file usage. Start with `df`, then narrow with `du -x`.',
+      'Check both **bytes** (`df -h`) and **inodes** (`df -i`), and use **`lsof +L1`** when deleted-open files make `df` and `du` disagree.',
+      '**Mounts** attach filesystems inside the one Linux tree. Use **`findmnt`** / **`lsblk`** to map them and test `/etc/fstab` with **`mount -a`** before rebooting.',
+      '**`tar`** bundles a tree; list and test-extract the archive before deleting source data.',
     ],
     relatedLabsIntro: '',
     relatedLabs: [
@@ -1688,42 +1917,259 @@ tar -tzvf ~/backup-photos-2025.tgz | head`,
     showBlogStamp: true,
     gatedByChallengeId: 'linux-20-why-cant-order-reach-payment',
     lede:
-      'Apps fail when **packets** cannot flow. A **clinic scheduling app** on **`app-1`** cannot reach **`db-1:5432`**. You check **addresses**, **routes**, **listening ports**, and **firewall** rules — tools any beginner can learn in one sitting.',
+      'When one service cannot reach another, “the network is down” is too broad to be useful. This post turns an endpoint such as **`http://payment:8080/health`** into small checks: resolve the name, choose a route, reach the host, confirm a process is listening, and verify that a firewall allows the connection.',
     sections: [
       {
-        id: 'clinic-story',
-        title: 'App up, database unreachable',
+        id: 'endpoint-parts',
+        title: 'Start with the exact endpoint',
         body: [
-          'The UI loads but appointments spin forever. **`curl`** from **`app-1`** to the DB host times out. Is DNS wrong? Cable? **`iptables`**? You work layer by layer.',
+          'Suppose **order-processor** must call **`http://payment:8080/health`**. Write that exact value down before testing. It contains a **protocol** (`http`), **host name** (`payment`), **port** (`8080`), and **path** (`/health`). Each part can fail independently.',
+          'Run tests from the machine where the failure occurs. A successful request from your laptop proves only that your laptop can connect; it does not prove that `order-processor` has the same DNS, route, or firewall access.',
         ],
-      },
-      {
-        id: 'inspect-tools',
-        title: 'Tools',
-        body: [],
         table: {
-          headers: ['Command', 'Checks'],
+          headers: ['Part', 'Example', 'Question'],
           rows: [
-            ['`ip addr` / `ip route`', 'Local IPs and default gateway'],
-            ['`ping host`', 'Basic reachability (ICMP may be blocked)'],
-            ['`ss -tlnp` / `ss -tnp`', 'Listening TCP ports / active connections'],
-            ['`curl -v http://host:port/`', 'HTTP reachability + TLS clues'],
-            ['`dig host` / `getent hosts`', 'Name resolution'],
+            ['Protocol', '`http`', 'What conversation should the client speak?'],
+            ['Host', '`payment`', 'What IP address should the name resolve to?'],
+            ['Port', '`8080`', 'Which process should receive the connection?'],
+            ['Path', '`/health`', 'Which HTTP resource should answer?'],
+          ],
+        },
+        callout: {
+          kind: 'tip',
+          title: 'Test from the failing side',
+          body: [
+            'If app A cannot reach app B, open a shell on app A’s host and test B from there. Source address and network policy are part of the result.',
           ],
         },
       },
       {
-        id: 'firewall-note',
-        title: 'Firewall mindset',
+        id: 'network-model',
+        title: 'What happens during a connection',
         body: [
-          '**nftables/iptables** or cloud security groups filter traffic. “Open **`5432`** only from **`app-1`**” is normal. Change one rule at a time; **`ss`** on the server confirms something is **listening** before you blame the network.',
+          'The client first turns the host name into an IP address, then checks its routing table to choose an interface and next hop. It sends packets toward that IP and port. On the destination, a process must be listening on the correct address, and every firewall along the path must allow the traffic.',
         ],
+        flows: [
+          {
+            title: 'From URL to response',
+            steps: [
+              'Resolve host name',
+              'Choose route and source address',
+              'Reach destination host',
+              'Pass network firewalls',
+              'Connect to listening port',
+              'Speak the application protocol',
+            ],
+          },
+        ],
+        after: [
+          'Debug in roughly that order, but also inspect the destination listener early. There is no value changing firewall rules if the application is stopped or listening only on `127.0.0.1`.',
+        ],
+      },
+      {
+        id: 'local-network',
+        title: 'Check local addresses and routes',
+        body: [
+          '**`ip addr`** shows addresses assigned to each network interface. **`ip route`** shows where packets go. A normal server usually has a route for its local network and a **default route** for everything else.',
+        ],
+        code: {
+          language: 'shell',
+          code: `ip -br addr                    # compact interface and address list
+ip route                       # routing table
+ip route get 10.20.4.18        # route, interface, and source IP for one target
+ip link show                   # interface state: UP or DOWN`,
+        },
+        subsections: [
+          {
+            id: 'route-output',
+            title: 'Read the route decision',
+            body: [
+              'Output such as `10.20.4.18 via 10.20.1.1 dev eth0 src 10.20.1.25` means: send through gateway `10.20.1.1`, using interface `eth0`, with source address `10.20.1.25`. “Network is unreachable” usually means no matching route exists or the interface is down.',
+              'The loopback address **`127.0.0.1`** means “this machine.” A service reachable at `127.0.0.1:8080` may still be unreachable from another host.',
+            ],
+          },
+        ],
+      },
+      {
+        id: 'dns',
+        title: 'Resolve names: getent and dig',
+        body: [
+          '**DNS** maps names to IP addresses. On Linux, **`getent hosts`** uses the same system resolver configuration that most applications use, including `/etc/hosts` and DNS. That makes it the best first check for “does this machine resolve this name?”',
+          '**`dig`** shows detailed DNS answers and which DNS server replied. It is useful when you need to distinguish no record, the wrong record, or a resolver problem.',
+        ],
+        code: {
+          language: 'shell',
+          code: `getent hosts payment
+getent ahostsv4 payment
+dig payment
+dig +short payment
+cat /etc/resolv.conf          # configured DNS resolver/search domains`,
+        },
+        callout: {
+          kind: 'warn',
+          title: 'An IP address can hide a DNS problem',
+          body: [
+            'If `curl http://10.20.4.18:8080` works but `curl http://payment:8080` does not, routing and the listener are probably fine. Investigate name resolution rather than opening ports.',
+          ],
+        },
+      },
+      {
+        id: 'reachability',
+        title: 'Reach the host: ping and tracepath',
+        body: [
+          '**`ping`** sends ICMP echo requests and measures replies. A reply proves basic IP reachability, but no reply does **not** prove the host is down: many firewalls block ICMP while allowing application traffic.',
+          '**`tracepath`** (or `traceroute`, when installed) shows the sequence of routers toward a destination. Missing hops are clues, not absolute proof, because routers may choose not to answer trace packets.',
+        ],
+        code: {
+          language: 'shell',
+          code: `ping -c 4 payment
+ping -c 4 10.20.4.18
+tracepath 10.20.4.18`,
+        },
+      },
+      {
+        id: 'listeners',
+        title: 'Check the destination: ss shows listening ports',
+        body: [
+          'A port is not a program by itself. A process creates a socket and **listens** on an address and port. Run **`ss`** on the destination server to see whether that socket exists.',
+        ],
+        code: {
+          language: 'shell',
+          code: `sudo ss -ltnp
+sudo ss -ltnp 'sport = :8080'
+ss -lnt                         # TCP listeners, without process names
+ss -tnp                         # established TCP connections`,
+        },
+        table: {
+          headers: ['Option', 'Meaning'],
+          rows: [
+            ['`-l`', 'Listening sockets only'],
+            ['`-t`', 'TCP sockets'],
+            ['`-u`', 'UDP sockets'],
+            ['`-n`', 'Numeric addresses and ports; do not resolve names'],
+            ['`-p`', 'Owning process (often needs `sudo`)'],
+          ],
+        },
+        subsections: [
+          {
+            id: 'bind-address',
+            title: 'The bind address matters',
+            body: [
+              '`127.0.0.1:8080` accepts connections only from the same machine. `0.0.0.0:8080` accepts IPv4 connections arriving on any local interface. `10.20.4.18:8080` accepts connections sent to that particular address.',
+              'If the service is listening on the wrong address, fix its bind/listen configuration and restart it. A firewall cannot make a loopback-only listener reachable remotely.',
+            ],
+          },
+        ],
+      },
+      {
+        id: 'test-port-protocol',
+        title: 'Test the port and the protocol',
+        body: [
+          '**`nc -vz`** tests whether a TCP connection can be established. **`curl`** goes further for HTTP: it connects, sends an HTTP request, and shows the response. Use the tool that speaks the service’s protocol whenever possible.',
+        ],
+        code: {
+          language: 'shell',
+          code: `nc -vz payment 8080
+curl -v --connect-timeout 5 http://payment:8080/health
+curl -vk --connect-timeout 5 https://payment:8443/health
+curl -sS -o /dev/null -w '%{http_code}\\n' http://payment:8080/health`,
+        },
+        subsections: [
+          {
+            id: 'read-errors',
+            title: 'Error messages narrow the problem',
+            body: [
+              '**Could not resolve host** points to DNS. **Network is unreachable** points to local addressing or routing. **Connection timed out** usually means packets or replies were dropped, often by routing or a firewall. **Connection refused** means the host replied but nothing accepted that port (or a firewall actively rejected it).',
+              'An HTTP status such as **404**, **401**, or **500** proves the network connection succeeded and an HTTP server answered. Move up to application configuration, authentication, or logs.',
+            ],
+          },
+          {
+            id: 'tls',
+            title: 'HTTPS adds TLS checks',
+            body: [
+              'With HTTPS, `curl -v` also reveals certificate and hostname failures. **`-k`** skips certificate verification and is useful only as a short diagnostic comparison; it is not a production fix. Correct the certificate, hostname, trust chain, or system clock instead.',
+            ],
+          },
+        ],
+      },
+      {
+        id: 'firewalls',
+        title: 'Firewalls: allow the smallest path',
+        body: [
+          'A host firewall (`nftables`, `iptables`, or `ufw`) can filter traffic on the server. Cloud security groups and network firewalls can filter it before packets reach the server. A valid rule needs the direction, protocol, destination port, and allowed source.',
+          'The safe requirement is specific: “allow TCP port 8080 on payment only from the order subnet,” not “turn off the firewall.” Confirm the listener first, inspect current rules, change one layer, then retest from the original client.',
+        ],
+        code: {
+          language: 'shell',
+          code: `sudo nft list ruleset          # nftables systems
+sudo iptables -L -n -v         # legacy iptables view
+sudo ufw status verbose        # when Ubuntu UFW is managing rules`,
+        },
+        callout: {
+          kind: 'warn',
+          title: 'Do not flush a remote server’s firewall',
+          body: [
+            'A broad reset can expose services or lock you out of SSH. Add the narrow required rule through the system’s established firewall tooling and preserve the current session while testing.',
+          ],
+        },
+      },
+      {
+        id: 'troubleshooting',
+        title: 'A layer-by-layer troubleshooting routine',
+        body: [
+          'Keep the client and destination checks separate. Record each result; do not jump from a timeout straight to changing firewall rules.',
+        ],
+        table: {
+          headers: ['Check', 'Run where?', 'Command'],
+          rows: [
+            ['Resolve the service name', 'Client', '`getent hosts payment`'],
+            ['Choose route and source IP', 'Client', '`ip route get IP`'],
+            ['Test the real HTTP endpoint', 'Client', '`curl -v --connect-timeout 5 URL`'],
+            ['Confirm service state', 'Destination', '`systemctl status service`'],
+            ['Confirm bind address and port', 'Destination', "`sudo ss -ltnp 'sport = :8080'`"],
+            ['Inspect host firewall', 'Destination', '`sudo nft list ruleset`'],
+            ['Read application errors', 'Destination', '`journalctl -u service -n 50`'],
+          ],
+        },
+        flows: [
+          {
+            title: 'Interpret the first failing layer',
+            steps: [
+              'Name resolves',
+              'Route exists',
+              'Packets reach host',
+              'Firewall permits source',
+              'Process listens correctly',
+              'Protocol returns expected response',
+            ],
+          },
+        ],
+      },
+      {
+        id: 'network-quick-reference',
+        title: 'Quick reference',
+        body: [],
+        tableAfter: {
+          headers: ['Question', 'Command'],
+          rows: [
+            ['What addresses do I have?', '`ip -br addr`'],
+            ['How will this target be reached?', '`ip route get IP`'],
+            ['What IP does this name resolve to?', '`getent hosts name`, `dig +short name`'],
+            ['Does the host answer ICMP?', '`ping -c 4 host`'],
+            ['What is listening locally?', '`sudo ss -ltnp`'],
+            ['Can TCP connect?', '`nc -vz host port`'],
+            ['Can the HTTP service answer?', '`curl -v URL`'],
+            ['What firewall rules are loaded?', '`nft list ruleset`, `iptables -L -n -v`'],
+          ],
+        },
       },
     ],
     takeaways: [
-      'Split problems: **local config**, **routing**, **listener**, **firewall**, **remote service**.',
-      '**`ip`**, **`ss`**, **`curl`**, **`ping`** are the first kit; ICMP blocked ≠ host down.',
-      'Open only required ports; verify with **`ss -tlnp`** on the destination.',
+      'Write down the exact **protocol, host, port, and path**, and test from the client that actually fails.',
+      'Work through **name resolution → route → reachability → firewall → listener → application response**; the first failing layer is your best clue.',
+      '**`ss -ltnp`** on the destination proves whether a process is listening and whether it is bound to loopback, one interface, or all interfaces.',
+      'A failed `ping` does not prove a host is down, while an HTTP status code proves the network path and TCP connection worked.',
+      'Keep firewall rules narrow by source, protocol, and port; never disable security controls just to make a test pass.',
     ],
     relatedLabsIntro: '',
     relatedLabs: [
@@ -1740,46 +2186,264 @@ tar -tzvf ~/backup-photos-2025.tgz | head`,
     showBlogStamp: true,
     gatedByChallengeId: 'linux-22-ssh-keys-for-the-deploy-bot',
     lede:
-      '**SSH** encrypts remote shell access. **Keys** beat passwords for automation: a **regional theater** **`deploy-bot`** user pushes builds without typing secrets. Learn **`ssh-keygen`**, **`authorized_keys`**, and **`ssh -i`**. ',
+      '**SSH** gives you an encrypted terminal on another Linux machine. This post starts with a normal login, explains host identity, builds a public/private **key pair**, installs the public key safely, and troubleshoots the permissions and configuration that commonly break key authentication.',
     sections: [
       {
-        id: 'theater-story',
-        title: 'Deploy bot, no shared password',
+        id: 'what-ssh-does',
+        title: 'SSH: a secure remote shell',
         body: [
-          'CI needs SSH as **`deploy`** to **`stage.theater.example`**. Shared passwords leak in chat logs. You generate a **key pair**, install the **public** key on the server, keep the **private** key on the runner only.',
+          'When you run **`ssh student@server`**, the `ssh` **client** on your machine opens an encrypted connection to the SSH **server** (`sshd`) on the remote machine. After authentication, the server starts a shell as the requested user. Commands run on the remote machine, not on your laptop.',
+          'SSH protects the connection from being read or changed in transit. It still has to answer two identity questions: **is this really the server I intended to reach?** and **am I allowed to log in as this user?** Host keys answer the first; a password or user key answers the second.',
         ],
-      },
-      {
-        id: 'keygen-authkeys',
-        title: 'Keys and authorized_keys',
-        body: [],
+        flows: [
+          {
+            title: 'One SSH login',
+            steps: [
+              'Connect to host and port',
+              'Verify the server host key',
+              'Authenticate the user',
+              'Start an encrypted remote shell',
+            ],
+          },
+        ],
         code: {
           language: 'shell',
-          code: `ssh-keygen -t ed25519 -f ~/.ssh/deploy_bot -C "deploy-bot"
-# Append pubkey to remote:
-ssh-copy-id -i ~/.ssh/deploy_bot.pub deploy@stage.theater.example
-ssh -i ~/.ssh/deploy_bot deploy@stage.theater.example`,
+          code: `ssh student@server.example
+ssh -p 2222 student@server.example  # non-default SSH port
+hostname                            # runs remotely after login
+exit                                # close the remote shell`,
         },
       },
       {
-        id: 'permissions',
-        title: 'Permissions matter',
+        id: 'host-keys',
+        title: 'First connection: verify the server',
         body: [
-          '**`~/.ssh`** must be **`700`**, **`authorized_keys`** **`600`**, or **`sshd`** refuses. Never paste **private** keys into tickets or git.',
+          'The first time you connect, SSH shows the server’s **host-key fingerprint** and asks whether to trust it. Compare that fingerprint with a value from a trusted source — your cloud console, administrator, or provisioning output — before answering `yes`.',
+          'Once accepted, the client stores the host key in **`~/.ssh/known_hosts`**. Future connections compare the presented key with that saved value. A loud “REMOTE HOST IDENTIFICATION HAS CHANGED” warning can mean a server was rebuilt, but it can also mean traffic is being intercepted; verify the new fingerprint before replacing the entry.',
         ],
+        code: {
+          language: 'shell',
+          code: `ssh-keygen -F server.example        # show saved host-key entries
+ssh-keyscan server.example           # fetches a key; does NOT prove it is trusted
+ssh-keygen -R server.example         # remove old entry only after verification`,
+        },
         callout: {
           kind: 'warn',
-          title: 'Private vs public',
+          title: 'Do not blindly accept a changed host key',
           body: [
-            '**`.pub`** goes on servers you log **into**. The file **without** **`.pub`** stays secret — treat it like a password.',
+            'Confirm why it changed and compare the new fingerprint through a separate trusted channel. Deleting `known_hosts` removes the warning, not the risk.',
+          ],
+        },
+      },
+      {
+        id: 'passwords-vs-keys',
+        title: 'User authentication: passwords and keys',
+        body: [
+          'A password proves identity by sending knowledge of one secret through the encrypted connection. It is easy for a person to use, but weak passwords can be guessed and automation has to store the password somewhere.',
+          'A key login uses a **key pair**. The public key is installed on the server. The private key remains with the client. During login, the client proves it possesses the private key without sending that private key across the network.',
+        ],
+        table: {
+          headers: ['Item', 'Where it belongs', 'Can it be shared?'],
+          rows: [
+            ['Public key (`.pub`)', 'Remote account’s `~/.ssh/authorized_keys`', 'Yes, with systems you want to access'],
+            ['Private key (no `.pub`)', 'Your machine, agent, or protected CI secret', 'No'],
+            ['Private-key passphrase', 'Known by the operator / unlocked in an agent', 'No'],
+            ['Server host private key', 'On the SSH server', 'No'],
+            ['Public host key / fingerprint', 'Distributed to clients for verification', 'Yes, through a trusted channel'],
+          ],
+        },
+      },
+      {
+        id: 'generate-key',
+        title: 'Generate a key pair',
+        body: [
+          '**Ed25519** is a strong, compact default on current systems. **`ssh-keygen`** creates two files: the private key at the path you choose and a public key with `.pub` appended. The comment is only a label that helps humans identify the key.',
+          'Use a passphrase for an interactive human key. It encrypts the private-key file at rest, so stealing the file alone is not enough. Automation may require a different protected setup, but should still use a dedicated key with the smallest necessary access.',
+        ],
+        code: {
+          language: 'shell',
+          code: `ssh-keygen -t ed25519 -f ~/.ssh/devsetu_lab -C "asha laptop"
+ls -l ~/.ssh/devsetu_lab*
+ssh-keygen -lf ~/.ssh/devsetu_lab.pub  # show public-key fingerprint
+cat ~/.ssh/devsetu_lab.pub             # safe public line to install`,
+        },
+        callout: {
+          kind: 'warn',
+          title: 'The file without .pub is private',
+          body: [
+            'Never paste it into chat, tickets, logs, or source control. If a private key may have leaked, remove its public key from every server and create a new pair.',
+          ],
+        },
+      },
+      {
+        id: 'install-public-key',
+        title: 'Install the public key on the server',
+        body: [
+          'The remote account accepts user keys listed in **`~/.ssh/authorized_keys`**, one public key per line. **`ssh-copy-id`** logs in using an existing method (often a password), creates the files, appends the public key, and normally fixes permissions.',
+        ],
+        code: {
+          language: 'shell',
+          code: `ssh-copy-id -i ~/.ssh/devsetu_lab.pub student@server.example
+ssh -i ~/.ssh/devsetu_lab student@server.example`,
+        },
+        subsections: [
+          {
+            id: 'manual-install',
+            title: 'Manual installation',
+            body: [
+              'If `ssh-copy-id` is unavailable, append the **single public-key line** while logged in through an existing trusted session. `umask 077` ensures newly created files are private.',
+            ],
+            code: {
+              language: 'shell',
+              code: `# Run on the remote server as the target user:
+umask 077
+mkdir -p ~/.ssh
+cat >> ~/.ssh/authorized_keys
+# paste the one-line contents of devsetu_lab.pub, then press Ctrl-D
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys`,
+            },
+          },
+          {
+            id: 'permissions-owner',
+            title: 'Permissions and ownership matter',
+            body: [
+              '`sshd` may reject `authorized_keys` if the home directory, `.ssh`, or the file can be changed by other users. The target user should own them; `.ssh` should normally be **700** and `authorized_keys` **600**.',
+            ],
+            code: {
+              language: 'shell',
+              code: `ls -ld ~ ~/.ssh ~/.ssh/authorized_keys
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys
+chown -R "$USER":"$(id -gn)" ~/.ssh`,
+            },
+          },
+        ],
+      },
+      {
+        id: 'using-keys',
+        title: 'Use keys without a long command',
+        body: [
+          '**`-i`** selects a private identity file. For hosts you use often, put the settings in **`~/.ssh/config`** and give the connection a short alias. The config file should be readable and writable only by you.',
+        ],
+        codes: [
+          {
+            language: 'ssh-config',
+            filename: '~/.ssh/config',
+            code: `Host orders-stage
+  HostName stage.example.com
+  User deploy
+  Port 22
+  IdentityFile ~/.ssh/orders_stage
+  IdentitiesOnly yes`,
+          },
+          {
+            language: 'shell',
+            code: `chmod 600 ~/.ssh/config
+ssh orders-stage
+ssh -G orders-stage | less  # print the final configuration SSH will use`,
+          },
+        ],
+        subsections: [
+          {
+            id: 'agent',
+            title: 'ssh-agent: unlock once per session',
+            body: [
+              '**`ssh-agent`** keeps an unlocked private key in memory so you do not type its passphrase for every connection. Desktop environments often start an agent already. **`ssh-add`** loads a key and **`ssh-add -l`** lists loaded fingerprints.',
+            ],
+            code: {
+              language: 'shell',
+              code: `ssh-add ~/.ssh/devsetu_lab
+ssh-add -l
+ssh student@server.example`,
+            },
+          },
+        ],
+      },
+      {
+        id: 'copy-files',
+        title: 'Copy files over SSH',
+        body: [
+          '**`scp`** copies a file or directory through SSH. **`rsync`** is better for repeated transfers because it compares source and destination and sends only changes. A colon separates the remote host from its path.',
+        ],
+        code: {
+          language: 'shell',
+          code: `scp report.txt student@server.example:/tmp/
+scp student@server.example:/var/log/app.log .
+scp -r release/ student@server.example:/opt/app/
+rsync -av --progress release/ student@server.example:/opt/app/`,
+        },
+        callout: {
+          kind: 'tip',
+          title: 'Watch the trailing slash in rsync',
+          body: [
+            '`rsync release/ host:/opt/app/` copies the **contents** of `release`. Without the source slash, it creates `/opt/app/release`.',
+          ],
+        },
+      },
+      {
+        id: 'automation',
+        title: 'Keys for automation',
+        body: [
+          'A deploy bot should have its own remote user and its own key pair; never copy a person’s private key into CI. Store the private key in the CI platform’s protected secret store, limit who can read it, and rotate it.',
+          'An `authorized_keys` entry can be restricted with options such as `from=` (allowed source addresses), `command=` (one forced command), and disabling forwarding or pseudo-terminals. Apply restrictions only after testing the exact automation flow.',
+        ],
+        code: {
+          language: 'text',
+          code: `from="10.20.0.0/16",no-agent-forwarding,no-port-forwarding,no-pty ssh-ed25519 AAAA... deploy-bot`,
+        },
+      },
+      {
+        id: 'ssh-debugging',
+        title: 'When key login fails',
+        body: [
+          'Add **`-v`** for diagnostic output (`-vvv` for more detail). It shows which config files were read, which keys were offered, whether the server accepted one, and where authentication stopped. The private key contents are not printed.',
+        ],
+        code: {
+          language: 'shell',
+          code: `ssh -v -i ~/.ssh/devsetu_lab student@server.example
+ssh -G server.example | grep -E '^(user|hostname|port|identityfile) '
+sudo journalctl -u ssh -n 50 --no-pager   # Ubuntu/Debian server
+sudo journalctl -u sshd -n 50 --no-pager  # many other distributions`,
+        },
+        table: {
+          headers: ['Symptom', 'Likely check'],
+          rows: [
+            ['`Permission denied (publickey)`', 'Correct remote user, key offered, public line installed'],
+            ['Key offered but rejected', '`authorized_keys` content, ownership, and permissions'],
+            ['Connection refused', '`sshd` state, listener, host, and port'],
+            ['Connection timed out', 'Route and firewall before authentication'],
+            ['Host identification changed', 'Verify the server’s new host-key fingerprint'],
+            ['Too many authentication failures', 'Use `IdentitiesOnly yes` with the intended key'],
+          ],
+        },
+      },
+      {
+        id: 'ssh-quick-reference',
+        title: 'Quick reference',
+        body: [],
+        tableAfter: {
+          headers: ['Goal', 'Command'],
+          rows: [
+            ['Log in', '`ssh user@host`'],
+            ['Use a chosen key / port', '`ssh -i key -p port user@host`'],
+            ['Create an Ed25519 pair', '`ssh-keygen -t ed25519 -f path`'],
+            ['Install a public key', '`ssh-copy-id -i key.pub user@host`'],
+            ['Load / list agent keys', '`ssh-add key`, `ssh-add -l`'],
+            ['Debug negotiation and authentication', '`ssh -v user@host`'],
+            ['Copy a file', '`scp file user@host:/path/`'],
+            ['Sync a directory', '`rsync -av source/ user@host:/path/`'],
+            ['Inspect final client config', '`ssh -G alias`'],
           ],
         },
       },
     ],
     takeaways: [
-      '**`ssh-keygen`** creates a pair; only the **public** key goes on the server **`authorized_keys`**. ',
-      'Use **`ssh -i`** (or config **`IdentityFile`**) for non-default key paths.',
-      'Fix **`~/.ssh`** permissions when **`sshd`** rejects key login.',
+      'SSH verifies both sides: the client checks the server’s **host key**, and the server authenticates the requested **user**.',
+      '**`ssh-keygen`** creates a pair. Install only the **public** `.pub` line in `authorized_keys`; the private key never leaves its protected client or secret store.',
+      'Use **`~/.ssh/config`** for repeatable host settings and **`ssh-agent`** to cache an unlocked human key in memory.',
+      'When login fails, use **`ssh -v`** and check the remote user, offered identity, `authorized_keys`, ownership, and permissions.',
+      'Automation gets a dedicated user and key with the smallest practical permissions—not a copied personal key.',
     ],
     relatedLabsIntro: '',
     relatedLabs: [
@@ -1795,55 +2459,393 @@ ssh -i ~/.ssh/deploy_bot deploy@stage.theater.example`,
     showBlogStamp: true,
     gatedByChallengeId: 'linux-23-script-the-health-check',
     lede:
-      'When you type the same five commands every morning, put them in a **`.sh`** file. A **ferry operator** runs **health checks** on ticket APIs and logs failures. This post covers **shebang**, **variables**, **tests**, **loops**, and a sane **`~/.bashrc`**. ',
+      'A shell script is a text file that runs commands in a repeatable order. This post builds one from the first **shebang** through variables, arguments, tests, loops, functions, exit codes, safer failure handling, and debugging—using a small service health check throughout.',
     sections: [
       {
-        id: 'ferry-story',
-        title: 'Same checks, every dawn',
+        id: 'first-script',
+        title: 'Your first script',
         body: [
-          'Before the first sailing, **`/usr/local/bin/ferry-health`** curls endpoints, checks disk, and appends to **`/var/log/ferry/health.log`**. If something fails, the pier office gets a clear exit code for their monitor.',
+          'Typing commands at the prompt is ideal for exploration. Once the same steps must run every morning, on several servers, or from cron, place them in a file so the computer follows the same sequence every time.',
+          'The first line, **`#!/usr/bin/env bash`**, is the **shebang**. When you execute the file directly, it tells the kernel to find `bash` in the current environment and use it to interpret the file. Comments start with `#`; the shebang is the special first-line exception.',
         ],
-      },
-      {
-        id: 'script-skeleton',
-        title: 'Script skeleton',
-        body: [],
         code: {
           language: 'shell',
-          code: `#!/bin/bash
-set -euo pipefail
-LOG=/var/log/ferry/health.log
-echo "$(date -Is) start" >> "$LOG"
-curl -sf http://127.0.0.1:8080/health || exit 1
-echo "$(date -Is) ok" >> "$LOG"`,
+          filename: 'hello.sh',
+          code: `#!/usr/bin/env bash
+
+# Print a timestamped message.
+echo "$(date -Is) hello from $(hostname)"`,
         },
-      },
-      {
-        id: 'conditionals-loops',
-        title: 'Tests and loops',
-        body: [],
-        table: {
-          headers: ['Syntax', 'Use'],
-          rows: [
-            ['`if [ "$x" = ok ]; then ... fi`', 'Compare strings (quote variables)'],
-            ['`for f in /var/log/*.log; do ... done`', 'Loop over globs'],
-            ['`while read line; do ... done < file`', 'Line-by-line processing'],
-            ['`$?`', 'Exit code of last command — 0 = success'],
+        after: [
+          'Save the file, make it executable once, then run it with `./`. The `./` matters because the current directory is normally not searched for commands.',
+        ],
+        codes: [
+          {
+            language: 'shell',
+            code: `chmod +x hello.sh
+./hello.sh
+bash hello.sh       # also works; bash reads the file directly`,
+          },
+        ],
+        callout: {
+          kind: 'tip',
+          title: 'Use Unix line endings',
+          body: [
+            'A script copied from Windows may fail with `/usr/bin/env: bash\\r: No such file or directory`. Convert CRLF line endings to LF with your editor or `dos2unix`.',
           ],
         },
       },
       {
-        id: 'bashrc',
-        title: 'Interactive vs script',
+        id: 'variables',
+        title: 'Variables and quoting',
         body: [
-          '**`~/.bashrc`** runs for interactive shells (aliases, **`PS1`**). Scripts use **`#!/bin/bash`** and should not rely on aliases. Put shared functions in **`/etc/profile.d/`** or a sourced file if many scripts need them.',
+          'Assign a variable with **no spaces** around `=`. Read it with `$name` or `${name}`. The braces make the boundary clear when text follows the variable name.',
+          'Double quotes allow variable and command substitution while keeping the result one argument. Single quotes preserve text literally. Unquoted variables are split on spaces and may expand wildcard characters, so **quote variable expansions by default**.',
         ],
+        code: {
+          language: 'shell',
+          code: `service_name="order processor"
+port=8080
+url="http://127.0.0.1:\${port}/health"
+now="$(date -Is)"
+
+echo "$service_name"
+echo "checking $url at $now"
+echo '$url stays literal inside single quotes'`,
+        },
+        table: {
+          headers: ['Form', 'What Bash does'],
+          rows: [
+            ['`"$name"`', 'Substitute the value and keep it as one argument'],
+            ["`'$name'`", 'Keep the dollar sign and text literally'],
+            ['`${name}_log`', 'Substitute `name`, then append `_log`'],
+            ['`$(command)`', 'Run a command and substitute its output'],
+            ['`$((count + 1))`', 'Evaluate integer arithmetic'],
+          ],
+        },
+        callout: {
+          kind: 'warn',
+          title: 'Make "$var" a reflex',
+          body: [
+            'A path such as `Daily Reports/report 1.csv` becomes several arguments when `$path` is unquoted. Write `"$path"` unless you specifically intend word splitting or glob expansion.',
+          ],
+        },
+      },
+      {
+        id: 'arguments',
+        title: 'Inputs: positional arguments',
+        body: [
+          'Arguments let one script work with different values. **`$0`** is the script name, **`$1`** and **`$2`** are the first two arguments, **`$#`** is the count, and **`"$@"`** represents all arguments while preserving each one separately.',
+        ],
+        code: {
+          language: 'shell',
+          filename: 'check-url.sh',
+          code: `#!/usr/bin/env bash
+
+url="\${1:-http://127.0.0.1:8080/health}"
+timeout="\${2:-5}"
+
+echo "checking $url (timeout: \${timeout}s)"
+curl -fsS --max-time "$timeout" "$url"`,
+        },
+        after: [
+          '**`${1:-default}`** means “use `$1` when it is set and non-empty; otherwise use this default.” Run it as `./check-url.sh` or provide both values: `./check-url.sh https://example.com/health 10`.',
+        ],
+        subsections: [
+          {
+            id: 'required-argument',
+            title: 'Reject missing required input',
+            body: [
+              'Some values should not have a default. Check the argument count, print a useful **usage** line to stderr, and exit with a non-zero status.',
+            ],
+            code: {
+              language: 'shell',
+              code: `if (( $# < 1 )); then
+  echo "usage: $0 URL [TIMEOUT_SECONDS]" >&2
+  exit 2
+fi`,
+            },
+          },
+        ],
+      },
+      {
+        id: 'exit-status',
+        title: 'Exit status: how commands report success',
+        body: [
+          'Every command returns a small integer when it finishes: **0 means success** and a non-zero value means failure. The shell stores the most recent status in **`$?`**, but scripts are clearer when they test the command directly.',
+          'A script returns the status of its last command unless it uses **`exit N`**. Monitoring, cron, systemd, and CI use that final status to decide whether the script succeeded.',
+        ],
+        code: {
+          language: 'shell',
+          code: `if curl -fsS --max-time 5 "$url" >/dev/null; then
+  echo "healthy: $url"
+  exit 0
+else
+  echo "unhealthy: $url" >&2
+  exit 1
+fi`,
+        },
+        callout: {
+          kind: 'idea',
+          title: 'Test the command, not $?',
+          body: [
+            '`if command; then ...` is easier to read and harder to break than running `command`, doing something else, and later inspecting `$?`.',
+          ],
+        },
+      },
+      {
+        id: 'tests-conditionals',
+        title: 'Tests and conditionals',
+        body: [
+          '**`if`** runs commands based on an exit status. The **`[[ ... ]]`** form performs Bash tests without many of the quoting and pattern pitfalls of the older `[ ... ]` command. Use spaces inside the brackets.',
+        ],
+        code: {
+          language: 'shell',
+          code: `if [[ -f "$config" ]]; then
+  echo "config exists"
+elif [[ -d "$config" ]]; then
+  echo "that path is a directory" >&2
+else
+  echo "config missing: $config" >&2
+  exit 1
+fi`,
+        },
+        table: {
+          headers: ['Test', 'True when…'],
+          rows: [
+            ['`[[ -f "$path" ]]`', 'Path is a regular file'],
+            ['`[[ -d "$path" ]]`', 'Path is a directory'],
+            ['`[[ -r "$path" ]]` / `-w` / `-x`', 'Path is readable / writable / executable'],
+            ['`[[ -z "$value" ]]` / `-n`', 'String is empty / non-empty'],
+            ['`[[ "$a" == "$b" ]]`', 'Strings are equal'],
+            ['`(( count > 10 ))`', 'Integer comparison is true'],
+          ],
+        },
+        subsections: [
+          {
+            id: 'and-or',
+            title: 'AND and OR command lists',
+            body: [
+              '**`&&`** runs the next command only after success; **`||`** runs it only after failure. They are convenient for short actions, but use a full `if` when you need logging, cleanup, or more than one command.',
+            ],
+            code: {
+              language: 'shell',
+              code: `mkdir -p "$output_dir" && echo "output directory ready"
+curl -fsS "$url" >/dev/null || { echo "health check failed" >&2; exit 1; }`,
+            },
+          },
+        ],
+      },
+      {
+        id: 'loops',
+        title: 'Repeat work with loops',
+        body: [
+          'A **`for`** loop repeats once for each supplied word or matched path. Quote variables inside the loop, but leave an intentional glob such as `/var/log/*.log` unquoted so the shell can expand it.',
+        ],
+        code: {
+          language: 'shell',
+          code: `for url in \
+  "http://order:8080/health" \
+  "http://payment:8081/health"
+do
+  echo "checking $url"
+  curl -fsS --max-time 5 "$url" >/dev/null
+done`,
+        },
+        subsections: [
+          {
+            id: 'glob-loop',
+            title: 'Loop over files',
+            body: [
+              'If a Bash glob matches nothing, it normally remains as literal text. **`[[ -e "$file" ]] || continue`** safely skips that no-match value.',
+            ],
+            code: {
+              language: 'shell',
+              code: `for file in /var/log/order/*.log; do
+  [[ -e "$file" ]] || continue
+  echo "$file: $(wc -l < "$file") lines"
+done`,
+            },
+          },
+          {
+            id: 'while-read',
+            title: 'Read a file line by line',
+            body: [
+              '**`IFS= read -r`** is the safe standard shape: an empty `IFS` preserves leading and trailing spaces, and `-r` keeps backslashes literal. The final condition also processes a last line that lacks a newline.',
+            ],
+            code: {
+              language: 'shell',
+              code: `while IFS= read -r url || [[ -n "$url" ]]; do
+  [[ -z "$url" || "$url" == \\#* ]] && continue
+  curl -fsS --max-time 5 "$url" >/dev/null
+done < endpoints.txt`,
+            },
+          },
+        ],
+      },
+      {
+        id: 'functions',
+        title: 'Functions: name a reusable step',
+        body: [
+          'A function groups commands under a name. Function arguments use the same `$1`, `$2`, and `"$@"` variables as script arguments, but they refer to the function call while the function is running. Declare variables with **`local`** so they do not accidentally overwrite script-wide values.',
+        ],
+        code: {
+          language: 'shell',
+          code: `check_url() {
+  local url="$1"
+  local timeout="\${2:-5}"
+
+  if curl -fsS --max-time "$timeout" "$url" >/dev/null; then
+    printf 'OK   %s\\n' "$url"
+  else
+    printf 'FAIL %s\\n' "$url" >&2
+    return 1
+  fi
+}
+
+check_url "http://127.0.0.1:8080/health" 3`,
+        },
+      },
+      {
+        id: 'strict-mode',
+        title: 'Safer failure handling',
+        body: [
+          '**`set -u`** treats an unset variable as an error. **`set -o pipefail`** makes a pipeline fail when any stage fails, not only the last one. **`set -e`** exits after many unhandled command failures, but has exceptions in tests, `&&` / `||` lists, and other shell grammar.',
+          'Together, **`set -Eeuo pipefail`** is a useful baseline for small operational scripts when you understand those rules. It is not a replacement for explicit `if` statements where failure is expected and needs a message or recovery.',
+        ],
+        code: {
+          language: 'shell',
+          code: `set -Eeuo pipefail
+
+trap 'echo "error on line $LINENO" >&2' ERR
+
+if ! curl -fsS --max-time 5 "$url" >/dev/null; then
+  echo "health check failed: $url" >&2
+  exit 1
+fi`,
+        },
+        callout: {
+          kind: 'warn',
+          title: 'Do not add set -e blindly',
+          body: [
+            'Commands that are allowed to fail should be placed in `if`, `! command`, or an explicit `||` handler. Test the script’s failure paths, not only its success path.',
+          ],
+        },
+      },
+      {
+        id: 'complete-script',
+        title: 'Put it together: a health-check script',
+        body: [
+          'This version accepts any number of endpoints, prints one result per endpoint, and returns failure if at least one check fails. It keeps checking after an individual failure so the operator gets the full picture.',
+        ],
+        code: {
+          language: 'shell',
+          filename: 'health-check.sh',
+          code: `#!/usr/bin/env bash
+set -u
+set -o pipefail
+
+if (( $# == 0 )); then
+  echo "usage: $0 URL [URL ...]" >&2
+  exit 2
+fi
+
+failures=0
+
+check_url() {
+  local url="$1"
+
+  if curl -fsS --max-time 5 "$url" >/dev/null; then
+    printf '%s OK   %s\\n' "$(date -Is)" "$url"
+  else
+    printf '%s FAIL %s\\n' "$(date -Is)" "$url" >&2
+    (( failures += 1 ))
+  fi
+}
+
+for url in "$@"; do
+  check_url "$url"
+done
+
+if (( failures > 0 )); then
+  echo "$failures check(s) failed" >&2
+  exit 1
+fi`,
+        },
+        after: [
+          'Run it directly, redirect its output from cron, or call it from a systemd unit. The **exit status** is the machine-readable result; the timestamped lines are the human-readable evidence.',
+        ],
+      },
+      {
+        id: 'debug-test',
+        title: 'Check and debug a script',
+        body: [
+          '**`bash -n`** parses a script without running it and catches syntax errors. **`bash -x`** prints expanded commands before executing them; use it carefully because expanded secrets can appear in terminal output or logs. **ShellCheck** adds static warnings for common quoting, test, and portability mistakes.',
+        ],
+        code: {
+          language: 'shell',
+          code: `bash -n health-check.sh       # syntax check only
+shellcheck health-check.sh    # if ShellCheck is installed
+bash -x health-check.sh http://127.0.0.1:8080/health
+
+PS4='+ \${BASH_SOURCE}:\${LINENO}: '
+bash -x health-check.sh       # trace with file and line number`,
+        },
+      },
+      {
+        id: 'interactive-vs-script',
+        title: 'Interactive shell versus script',
+        body: [
+          '**`~/.bashrc`** configures interactive Bash sessions: aliases, prompt (`PS1`), completion, and shell options for your own terminal. A non-interactive script does not normally read it and should not depend on aliases or a person’s custom `PATH`.',
+          'Set required variables in the script, pass them as arguments or environment variables, or load a deliberate configuration file. Use full paths when a restricted environment such as cron or systemd may have a smaller `PATH`.',
+        ],
+        code: {
+          language: 'shell',
+          code: `# Interactive convenience in ~/.bashrc:
+alias ll='ls -alF'
+
+# Script input from the environment, with a default:
+APP_PORT="\${APP_PORT:-8080}"
+
+# Deliberately load a trusted config file:
+source /etc/order-processor/health-check.conf`,
+        },
+        callout: {
+          kind: 'warn',
+          title: 'Source only trusted files',
+          body: [
+            '`source file` executes that file as shell code in the current script. It is not a general parser for untrusted key/value input.',
+          ],
+        },
+      },
+      {
+        id: 'bash-quick-reference',
+        title: 'Quick reference',
+        body: [],
+        tableAfter: {
+          headers: ['Goal', 'Syntax'],
+          rows: [
+            ['Choose Bash', '`#!/usr/bin/env bash`'],
+            ['Make / run a script', '`chmod +x script.sh`, `./script.sh`'],
+            ['Expand safely', '`"$var"`, `"${var}_suffix"`, `"$(command)"`'],
+            ['Read arguments', '`$1`, `${1:-default}`, `"$@"`, `$#`'],
+            ['Test a command', '`if command; then ... else ... fi`'],
+            ['Test values / files', '`[[ ... ]]`, `(( ... ))`'],
+            ['Loop over values', '`for item in "$@"; do ...; done`'],
+            ['Read lines safely', '`while IFS= read -r line; do ...; done < file`'],
+            ['Define a function', '`name() { local value="$1"; ...; }`'],
+            ['Fail explicitly', '`echo "message" >&2; exit 1`'],
+            ['Check / trace', '`bash -n script`, `shellcheck script`, `bash -x script`'],
+          ],
+        },
       },
     ],
     takeaways: [
-      'Start scripts with **`#!/bin/bash`**; use **`set -euo pipefail`** when you want fail-fast behavior.',
-      'Quote **`"$var"`**; **`if [ ... ]`** and **`for`** loops cover most glue logic.',
-      '**`~/.bashrc`** is for your shell comfort, not for production script logic.',
+      'A script is a repeatable command sequence: add a **shebang**, make it executable, and return meaningful **exit statuses** for callers.',
+      'Quote expansions as **`"$var"`** and pass collections as **`"$@"`**; use defaults or explicit usage errors for missing arguments.',
+      'Use **`if`**, **`[[ ... ]]`**, loops, and functions to express decisions and repetition while keeping expected failures explicit.',
+      '**`set -u`** and **`pipefail`** catch common mistakes; use **`set -e`** only with an understanding of its exceptions.',
+      'Validate with **`bash -n`** and **ShellCheck**, debug carefully with **`bash -x`**, and keep production scripts independent of interactive `.bashrc` customizations.',
     ],
     relatedLabsIntro: '',
     relatedLabs: [

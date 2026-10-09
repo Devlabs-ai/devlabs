@@ -1,0 +1,151 @@
+{
+  "id": "ds-09-btree-page-split",
+  "number": 509,
+  "finalized": true,
+  "title": "Insert into a full B-tree page",
+  "description": "A new order ID lands on a leaf page with no room left. Trace the insert through the split and the write-ahead log.",
+  "difficulty": "L2",
+  "tags": [
+    "data-systems",
+    "storage-engines",
+    "b-tree",
+    "page-split",
+    "wal",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "The orders table in Postgres has a B-tree index on `order_id`. Unlike an LSM tree, a B-tree keeps data in fixed-size pages (8 KB in Postgres, 16 KB in InnoDB) and updates them in place.\n\nThat makes reads fast and predictable: a few page hops from root to leaf. The hard part is an insert into a page that's already full. The page must split, the parent must learn about the new page, and all of it must survive a crash halfway through.\n\nThe outline follows one insert. Fill the blocks. Traps describe an LSM tree or skip the safety net.",
+    "yourTask": "Order the steps of inserting a key into a full B-tree leaf, from the root down to pages reaching disk.",
+    "yourTaskSteps": [
+      "Read every card.",
+      "Fill each empty block from Unused.",
+      "The dashed block is optional.",
+      "Submit."
+    ],
+    "hints": [
+      "Find the right leaf before worrying about space.",
+      "A split touches the leaf, a new page, and the parent.",
+      "Changed pages can stay in memory for a while, as long as the log is on disk."
+    ],
+    "moat": "Setter notes, not shown to learners.\n\nRequired chain: descend-to-leaf → leaf-full → split-leaf → update-parent → write-wal → flush-later.\nOptional splice: split-root on update-parent → write-wal.\nFive traps."
+  },
+  "platformSpec": {
+    "kicker": "Storage engines · B-tree insert",
+    "passMessage": "Descend, split, update the parent, log it, flush later. That's a B-tree insert.",
+    "pieces": [
+      {
+        "id": "descend-to-leaf",
+        "title": "Descend from the root to the leaf",
+        "blurb": "Start at the root page and follow the child pointer whose key range contains the new order ID, down to a leaf page.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "leaf-full",
+        "title": "The leaf page has no free space",
+        "blurb": "Pages have a fixed size. This leaf can't fit another entry.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "descend-to-leaf",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "split-leaf",
+        "title": "Split the leaf into two pages",
+        "blurb": "Allocate a new page, move the upper half of the keys into it, and insert the new key into whichever half it belongs to.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "leaf-full",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "update-parent",
+        "title": "Add a pointer to the new page in the parent",
+        "blurb": "Insert a separator key and a pointer to the new page into the parent, so searches can find both halves.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "split-leaf",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "split-root",
+        "title": "Parent full too: split up to the root",
+        "blurb": "If the parent has no room, it splits as well, possibly all the way up. A root split creates a new root and the tree grows one level taller.",
+        "kind": "mechanism",
+        "gold": "optional",
+        "parent": "update-parent",
+        "child": "write-wal",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "write-wal",
+        "title": "Log every changed page to the WAL",
+        "blurb": "Write-ahead log records describing the split and the insert are written, and reach disk before any of the changed pages do.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "update-parent",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "flush-later",
+        "title": "Dirty pages are written to disk later",
+        "blurb": "The modified pages stay in the buffer pool. A checkpoint or background writer flushes them eventually; after a crash, the WAL redoes them.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "write-wal",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "append-merge-later",
+        "title": "Append to a new file and merge later",
+        "blurb": "Write the key to a fresh sorted file and let background compaction fold it into the index.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "That's an LSM tree. A B-tree updates fixed-size pages in place."
+      },
+      {
+        "id": "shift-pages",
+        "title": "Shift the following pages to make room",
+        "blurb": "Move every page after the full leaf one slot along the file so the leaf can grow.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Pages don't need to be contiguous. The new page can be allocated anywhere; pointers link them."
+      },
+      {
+        "id": "rebalance-all",
+        "title": "Rebalance the whole tree",
+        "blurb": "After the insert, redistribute keys across every page so all leaves are equally full.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Only pages on the path from the leaf to the root are touched. A full rebalance would be absurdly expensive."
+      },
+      {
+        "id": "grow-downward",
+        "title": "Add a new level below the leaves",
+        "blurb": "When pages fill up, the tree grows deeper by hanging new pages underneath the current leaves.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "B-trees grow at the top. Only a root split adds a level, which keeps every leaf at the same depth."
+      },
+      {
+        "id": "skip-wal",
+        "title": "Write the pages straight to disk, no log",
+        "blurb": "Flush the leaf, the new page and the parent immediately, so there's nothing to log.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "A crash between those writes leaves a page pointing nowhere. The WAL is what makes a split atomic."
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

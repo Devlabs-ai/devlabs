@@ -86,7 +86,9 @@ export EKS_DOCKER_LAUNCH_TEMPLATE="${EKS_DOCKER_LAUNCH_TEMPLATE:-${EKS_CLUSTER_N
 # MINIMUM_IP_TARGET=80 keeps 5 prefixes per node: 42 pods plus the IPs of just-deleted pods,
 # which stay unusable for IP_COOLDOWN_PERIOD (30 s). With only one spare prefix, bursts of
 # pod churn (balloons replaced by learner pods) waited ~40 s for an IP.
-_default_vpc_cni_config='{"env":{"ENABLE_PREFIX_DELEGATION":"true","MINIMUM_IP_TARGET":"80","WARM_IP_TARGET":"16"}}'
+# enableNetworkPolicy runs the network policy agent, without which every NetworkPolicy
+# (dl-box-isolation in lx-* / dk-*, learners' own in ns-*) is stored but not enforced.
+_default_vpc_cni_config='{"enableNetworkPolicy":"true","env":{"ENABLE_PREFIX_DELEGATION":"true","MINIMUM_IP_TARGET":"80","WARM_IP_TARGET":"16"}}'
 export EKS_VPC_CNI_CONFIG="${EKS_VPC_CNI_CONFIG:-$_default_vpc_cni_config}"
 unset _default_vpc_cni_config
 

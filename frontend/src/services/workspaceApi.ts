@@ -274,18 +274,6 @@ export async function fetchK8sCapacity(): Promise<K8sCapacityState> {
   return { waiting: d.waiting || [], reservingSeconds: d.reservingSeconds ?? null };
 }
 
-export async function execK8sCommand(
-  sessionId: string,
-  command: string,
-): Promise<{ code: number; stdout: string; stderr: string; k8sNamespace?: string }> {
-  const { data } = await axios.post(
-    `/api/session/${sessionId}/k8s/exec`,
-    { command },
-    { headers: getAuthHeader() },
-  );
-  return data as { code: number; stdout: string; stderr: string; k8sNamespace?: string };
-}
-
 export async function gradeK8sSession(
   sessionId: string,
 ): Promise<{

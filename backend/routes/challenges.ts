@@ -29,6 +29,7 @@ const {
   listSolutionViews,
 } = require('../challenges/solutionViews');
 const { canViewChallenge } = require('../challenges/access');
+const { unlockedTracks, isLabLocked, assertLabUnlocked, paidTrackOf } = require('../billing/labAccess');
 const { isClusterLabType } = require('../challenges/labTypes');
 const { catalogSettingsLocked, writePackSettings } = require('../challenges/catalogSettings');
 const reviewStore = require('../challenges/reviewStore');
@@ -72,19 +73,22 @@ router.get('/', optionalAuth, async (req: ExpressRequest, res: ExpressResponse, 
     const userId = (req.user as { sub?: string; id?: string } | undefined)?.sub
       || (req.user as { sub?: string; id?: string } | undefined)?.id
       || null;
-    const [solveTimes, solutionViews, submitterCounts] = await Promise.all([
+    const [solveTimes, solutionViews, submitterCounts, unlocked] = await Promise.all([
       listFirstSolveTimes(userId),
       listSolutionViews(userId),
       countSubmittersByChallenge(),
+      unlockedTracks(req.user),
     ]);
     const challenges = loader
       .listPublicChallenges()
       .filter((c: { visibleTo?: string }) => canViewChallenge(req.user, c.visibleTo))
-      .map((c: { id: string; tokens?: number; problemStatement?: unknown }) => {
+      .map((c: { id: string; category?: string; tokens?: number; problemStatement?: unknown }) => {
         const solvedAt = solveTimes.get(c.id) ?? null;
         const viewedAt = solutionViews.get(c.id) ?? null;
         return {
           ...c,
+          locked: isLabLocked(c, unlocked),
+          paidTrack: paidTrackOf(c),
           solved: solvedAt != null,
           earnedTokens: earnedTokens(tokensOf(c), solvedAt, viewedAt),
           solutionViewedAt: viewedAt,
@@ -112,6 +116,12 @@ router.get('/:id', requireInterviewer, async (req: ExpressRequest, res: ExpressR
     if (!c) return res.status(404).json({ error: 'challenge not found' });
     if (!canViewChallenge(req.user, (c as { visibleTo?: string }).visibleTo)) {
       return res.status(403).json({ error: 'This lab is not available for your role' });
+    }
+    try {
+      await assertLabUnlocked(req.user, c as { id: string; category?: string });
+    } catch (e) {
+      const err = e as Error & { code?: string; details?: Record<string, unknown> };
+      return res.status(402).json({ error: err.message, code: err.code, ...(err.details || {}) });
     }
     const hydrated = await hydrateChallengeFromMinio(c);
     const userId = (req.user as { sub?: string; id?: string } | undefined)?.sub

@@ -1,0 +1,181 @@
+{
+  "id": "x6-lsm-evidence-wall",
+  "number": 596,
+  "finalized": true,
+  "title": "X6 · Evidence wall: why did orders-db take 9 minutes to restart?",
+  "description": "The postmortem team pinned logs and metrics to the wall. Put each piece of evidence under the write-path step it’s about, ignore the red herrings, then name the root cause.",
+  "difficulty": "L1",
+  "tags": [
+    "data-systems",
+    "board-experiment",
+    "lsm-tree",
+    "evidence",
+    "postmortem",
+    "finale",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "**Postmortem, Wednesday.** Last night orders-db was restarted for a routine patch. It took **9 minutes** to come back because it replayed **38 GB of WAL**. Orders were down the whole time.\n\nThe team pinned everything they found to the wall: log lines, metrics, a few things that turned out to be unrelated.\n\n**The board is the write path.** Each block is labelled with a step. Drag the evidence that’s *about* that step onto it. Read the evidence as you go; it tells a story.\n\nSome evidence is a **red herring**. It’s real, but it has nothing to do with this incident. Leave it on the wall.\n\nThen name the root cause.",
+    "yourTask": "Match six pieces of evidence to the six write-path steps, leave the red herrings, and name the root cause.",
+    "yourTaskSteps": [
+      "Read each block’s step name.",
+      "Drop the log line or metric that tells you what that step was doing.",
+      "Submit, then answer the root-cause question."
+    ],
+    "hints": [
+      "Look for the step whose evidence is an ERROR.",
+      "The WAL is only deleted after something succeeds."
+    ],
+    "moat": "Evidence cards on the write chain. Finale answer = sst-full."
+  },
+  "platformSpec": {
+    "kicker": "Experiment X6 · Evidence wall",
+    "passMessage": "The wall reads left to right: writes fine, memtables freezing, flush failing, WAL piling up.",
+    "trayLabel": "Evidence",
+    "finale": {
+      "prompt": "Root cause for the postmortem. Why did the restart replay 38 GB of WAL?",
+      "options": [
+        {
+          "id": "wal-slow",
+          "label": "The WAL disk was too slow"
+        },
+        {
+          "id": "sst-full",
+          "label": "The SSTable volume filled up, so flushes failed and the WAL could never be trimmed"
+        },
+        {
+          "id": "memtable-small",
+          "label": "The memtable limit was set too low"
+        },
+        {
+          "id": "compaction",
+          "label": "Compaction was too aggressive"
+        }
+      ],
+      "answer": "sst-full",
+      "explanation": "Flush failed with “No space left on device” on /data/sst starting at 01:52. Without a successful flush no WAL segment could be deleted, so 38 GB piled up, and all of it had to be replayed on restart. The WAL appends themselves were fast (0.4 ms fsync)."
+    },
+    "pieces": [
+      {
+        "id": "wal-append",
+        "kind": "stage",
+        "title": "02:58:41 wal: append seq=99120344 bytes=212 fsync=0.4ms",
+        "blurb": "Log line from orders-db.",
+        "prompt": "Step · append to WAL",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "memtable-insert",
+        "kind": "mechanism",
+        "title": "memtable.active_bytes = 61.8 MB, entries = 402,113",
+        "blurb": "Metric snapshot at 02:58.",
+        "prompt": "Step · insert into memtable",
+        "gold": "required",
+        "parent": "wal-append",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "memtable-freeze",
+        "kind": "stage",
+        "title": "memtable.immutable_count = 4 / 4 — write stall imminent",
+        "blurb": "Metric snapshot at 02:58.",
+        "prompt": "Step · freeze full memtable",
+        "gold": "required",
+        "parent": "memtable-insert",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "flush-sstable",
+        "kind": "stage",
+        "title": "01:52:03 flush: ERROR open /data/sst/000913.sst: No space left on device",
+        "blurb": "Log line, repeated every 30 s since 01:52.",
+        "prompt": "Step · flush to SSTable",
+        "gold": "required",
+        "parent": "memtable-freeze",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "bloom-index",
+        "kind": "mechanism",
+        "title": "01:51:58 bloom: wrote filter for 000912.sst (1.1 MB)",
+        "blurb": "The last filter written before things went quiet.",
+        "prompt": "Optional · Bloom filter",
+        "gold": "optional",
+        "parent": "flush-sstable",
+        "child": "wal-discard",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "wal-discard",
+        "kind": "stage",
+        "title": "wal.segments_retained = 412 (38 GB), oldest from 01:52",
+        "blurb": "Metric snapshot at 02:58.",
+        "prompt": "Step · delete old WAL",
+        "gold": "required",
+        "parent": "flush-sstable",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "compaction",
+        "kind": "mechanism",
+        "title": "compaction: L0→L1 skipped, no new L0 files since 01:52",
+        "blurb": "Log line from the compaction thread.",
+        "prompt": "Step · compaction",
+        "gold": "required",
+        "parent": "wal-discard",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "gc-pause",
+        "kind": "stage",
+        "title": "payment-handler: GC pause 41 ms",
+        "blurb": "From the payment-handler JVM logs.",
+        "trapIfPlaced": "Red herring. That’s a different service, and 41 ms doesn’t cause a 9-minute restart.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "btree-splits",
+        "kind": "mechanism",
+        "title": "postgres-replica: btree page splits 1.2k/s",
+        "blurb": "From the reporting replica.",
+        "trapIfPlaced": "Red herring. That’s Postgres. orders-db is an LSM store with no pages.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "cpu",
+        "kind": "stage",
+        "title": "orders-db CPU 34%",
+        "blurb": "Host metric at 02:58.",
+        "trapIfPlaced": "Red herring. CPU was fine. This wasn’t a compute problem.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "tls-cert",
+        "kind": "stage",
+        "title": "tls: certificate for orders-db expires in 19 days",
+        "blurb": "Weekly cert scanner.",
+        "trapIfPlaced": "Red herring. Worth a ticket, unrelated to the restart.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "client-retries",
+        "kind": "stage",
+        "title": "order-processor: 3 retries on PUT (timeouts 03:04–03:13)",
+        "blurb": "Client-side log during the restart window.",
+        "trapIfPlaced": "Red herring here. It’s a consequence of the outage, not evidence about a write-path step.",
+        "gold": "tray",
+        "parent": null
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

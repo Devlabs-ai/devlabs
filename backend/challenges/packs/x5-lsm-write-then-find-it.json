@@ -1,0 +1,157 @@
+{
+  "id": "x5-lsm-write-then-find-it",
+  "number": 595,
+  "finalized": true,
+  "title": "X5 · Write it, then find it",
+  "description": "The order was written two minutes ago and has since been flushed. Support needs it now. Trace the write and the read on one board.",
+  "difficulty": "L1",
+  "tags": [
+    "data-systems",
+    "board-experiment",
+    "lsm-tree",
+    "campaign",
+    "read-path",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "**14:00:** order-processor writes `PUT order:88213 → status=paid`.\n\n**14:01:** the memtable fills up and is flushed. order:88213 is now in `000913.sst`, the newest of 212 SSTables.\n\n**14:02:** a customer calls support. Support runs `GET order:88213`.\n\nKavya (from X4) is back: *\"OK, I get writes. But with 212 files on disk, how does a read find one key without opening all of them?\"*\n\nDraw both halves on one board: three write steps, then three read steps.",
+    "yourTask": "Trace order:88213 from the PUT into an SSTable, then trace the GET that finds it.",
+    "yourTaskSteps": [
+      "Steps 1–3: the write, down to an SSTable.",
+      "Steps 4–6: the read, from memory down to one disk block.",
+      "One optional block sits in the read path."
+    ],
+    "hints": [
+      "Reads look where the newest data lives first.",
+      "A Bloom filter can say “definitely not here”. It can never say “definitely here”."
+    ],
+    "moat": "Campaign: unlockAfter x4. Chain: wal-append → memtable-insert → flush-sstable → read-memtables → read-bloom → read-block. Optional: block-cache between read-bloom and read-block."
+  },
+  "platformSpec": {
+    "kicker": "Experiment X5 · Campaign · Write + read",
+    "passMessage": "Kavya: “So a read checks memory, asks each file’s Bloom filter newest-first, and only opens one block. Nice.”",
+    "unlockAfter": "x4-lsm-kavyas-question",
+    "pieces": [
+      {
+        "id": "wal-append",
+        "kind": "stage",
+        "title": "Append to the WAL and fsync",
+        "blurb": "The write is crash-safe.",
+        "prompt": "Write · crash-proof it",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "memtable-insert",
+        "kind": "mechanism",
+        "title": "Insert into the memtable, reply OK",
+        "blurb": "The write is readable and acknowledged.",
+        "prompt": "Write · make it readable",
+        "gold": "required",
+        "parent": "wal-append",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "flush-sstable",
+        "kind": "stage",
+        "title": "Freeze and flush to 000913.sst",
+        "blurb": "At 64 MB the memtable is frozen and written out as the newest SSTable.",
+        "prompt": "Write · move it to disk",
+        "gold": "required",
+        "parent": "memtable-insert",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "read-memtables",
+        "kind": "mechanism",
+        "title": "GET checks the memtables first",
+        "blurb": "Active, then frozen. The newest data lives here. Miss: order:88213 was already flushed.",
+        "prompt": "Read · newest data first",
+        "gold": "required",
+        "parent": "flush-sstable",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "read-bloom",
+        "kind": "mechanism",
+        "title": "Ask each SSTable’s Bloom filter, newest first",
+        "blurb": "000913.sst says “maybe”. The other files it asks say “definitely not”, so they’re skipped without touching disk.",
+        "prompt": "Read · skip files cheaply",
+        "gold": "required",
+        "parent": "read-memtables",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "block-cache",
+        "kind": "mechanism",
+        "title": "Check the block cache",
+        "blurb": "If the block is already in memory from a recent read, skip the disk entirely.",
+        "prompt": "Optional · skip the disk",
+        "gold": "optional",
+        "parent": "read-bloom",
+        "child": "read-block",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "read-block",
+        "kind": "stage",
+        "title": "Use the sparse index to read one block",
+        "blurb": "Binary-search 000913.sst’s index, read the single block that covers order:88213, and return status=paid.",
+        "prompt": "Read · one disk read",
+        "gold": "required",
+        "parent": "read-bloom",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "read-oldest-first",
+        "kind": "mechanism",
+        "title": "Search SSTables oldest first",
+        "blurb": "Start with 000001.sst and work forward.",
+        "trapIfPlaced": "You might return a stale version. The newest file wins, so search newest first.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "scan-wal",
+        "kind": "stage",
+        "title": "Scan the WAL for the key",
+        "blurb": "The log has every write, so search it.",
+        "trapIfPlaced": "The WAL isn’t indexed, and that segment was already deleted after the flush.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "bloom-definite-yes",
+        "kind": "mechanism",
+        "title": "Bloom filter says yes, so return without reading",
+        "blurb": "If the filter matches, the key is there.",
+        "trapIfPlaced": "A Bloom filter can give false positives. A match only means “maybe”; you still read the block.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "open-every-file",
+        "kind": "stage",
+        "title": "Open all 212 SSTables and search each",
+        "blurb": "Thorough, guaranteed to find it.",
+        "trapIfPlaced": "That’s exactly what Bloom filters and indexes exist to avoid.",
+        "gold": "tray",
+        "parent": null
+      },
+      {
+        "id": "update-in-place",
+        "kind": "stage",
+        "title": "Overwrite the order’s page on disk",
+        "blurb": "Write path: find the page, overwrite it.",
+        "trapIfPlaced": "B-tree, not LSM.",
+        "gold": "tray",
+        "parent": null
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

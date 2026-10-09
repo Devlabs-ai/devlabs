@@ -8,8 +8,7 @@ export const PRICING_PATH = '/pricing';
 
 export const LAUNCH_OFFER = {
   percentOff: 40,
-  endsAt: new Date('2026-10-31T23:59:59+05:30'),
-  paymentsOpenLabel: 'October 15',
+  endsAt: new Date('2026-11-30T23:59:59+05:30'),
 };
 
 export function offerPrice(price: number): number {

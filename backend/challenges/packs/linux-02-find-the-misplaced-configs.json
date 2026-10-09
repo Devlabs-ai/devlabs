@@ -19,7 +19,7 @@
   },
   "problemStatement": {
     "hints": [
-      "You are learner on a real Ubuntu machine with systemd; sudo works without a password.",
+      "You are learner on a real Ubuntu machine — plain shell work, no sudo needed.",
       "Reset gives you a fresh machine (your changes are wiped).",
       "Read SPEC carefully, then Submit — the grader checks the machine itself."
     ],
@@ -31,7 +31,8 @@
   },
   "platformSpec": {
     "box": {
-      "hostname": "order-box"
+      "hostname": "order-box",
+      "unprivileged": true
     },
     "setup": {
       "script": "setup.sh"
@@ -41,6 +42,6 @@
       "timeoutSeconds": 60
     }
   },
-  "visibleTo": "admin",
+  "visibleTo": "users",
   "tokens": 5
 }

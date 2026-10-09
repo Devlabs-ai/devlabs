@@ -24,15 +24,16 @@ echo "# main" > /srv/apps/order-processor/main.conf; chown orders /srv/apps/orde
 echo "# legacy" > /srv/apps/order-processor/legacy/old.conf; chown orders /srv/apps/order-processor/legacy/old.conf
 echo "# owned by root" > /srv/apps/shared/conf.d/root-only.conf
 
-# Dumps under /var/tmp: a few larger than 10 MiB.
-install -d /var/tmp/order-dumps/2026-09 /var/tmp/order-dumps/2026-10
+# Dumps under /var/tmp, owned by learner so they can be cleaned up without sudo: a few
+# larger than 10 MiB.
+install -d -o learner -g learner /var/tmp/order-dumps/2026-09 /var/tmp/order-dumps/2026-10
 for i in $(seq 1 8); do
   size=$(( (RANDOM % 2) ? (RANDOM % 6 + 11) : (RANDOM % 6 + 1) ))
   head -c "$((size * 1024 * 1024))" /dev/zero > "/var/tmp/order-dumps/$(pick 2026-09 2026-10)/dump-$i.bin"
 done
 head -c $((15 * 1024 * 1024)) /dev/zero > /var/tmp/order-dumps/2026-10/dump-big.bin
 head -c $((9 * 1024 * 1024)) /dev/zero > /var/tmp/order-dumps/2026-10/dump-just-under.bin
-chmod -R a+rX /var/tmp/order-dumps
+chown -R learner:learner /var/tmp/order-dumps
 
 # /etc/order-processor: everything old, except a few changed in the last 2 days.
 install -d /etc/order-processor/conf.d

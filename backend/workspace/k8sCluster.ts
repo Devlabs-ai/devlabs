@@ -10,8 +10,8 @@
  *   K8S_LAB_LEARNER_KUBE_ROOT — where minted learner kubeconfigs are cached
  *
  * Isolation: each learner gets Namespace ns-<user> plus a ServiceAccount
- * bound via Role/RoleBinding. Interactive shell + /k8s/exec use a token
- * kubeconfig for that SA (not the controller admin kubeconfig).
+ * bound via Role/RoleBinding. The interactive shell uses a token kubeconfig
+ * for that SA (not the controller admin kubeconfig).
  *
  * Session park: on end, every learner-manageable object in the namespace
  * (+ learner-labeled PVs / StorageClasses) is snapshotted under
@@ -1594,108 +1594,6 @@ async function runChallengeScript(
   });
 }
 
-const ALLOWED_KUBECTL_VERBS = new Set([
-  'get',
-  'describe',
-  'logs',
-  'apply',
-  'create',
-  'delete',
-  'replace',
-  'patch',
-  'label',
-  'annotate',
-  'expose',
-  'run',
-  'set',
-  'scale',
-  'rollout',
-  'wait',
-  'top',
-  'explain',
-  'api-resources',
-  'version',
-  'auth',
-  'exec',
-  'cp',
-  'diff',
-]);
-
-function assertSafeLearnerArgs(args: string[]): void {
-  if (!args.length) {
-    throw Object.assign(new Error('kubectl args required'), { status: 400 });
-  }
-  const verb = args[0];
-  if (!ALLOWED_KUBECTL_VERBS.has(verb)) {
-    throw Object.assign(new Error(`kubectl verb not allowed: ${verb}`), { status: 400 });
-  }
-  const joined = args.join(' ');
-  if (/\s-A\b/.test(` ${joined}`) || args.includes('--all-namespaces')) {
-    throw Object.assign(new Error('--all-namespaces is not allowed'), { status: 400 });
-  }
-  if (verb === 'delete' && args.some((a) => a === 'ns' || a === 'namespace' || a === 'namespaces')) {
-    throw Object.assign(new Error('deleting namespaces is not allowed'), { status: 400 });
-  }
-  if (
-    (verb === 'create' || verb === 'apply')
-    && args.some((a) => a === 'ns' || a === 'namespace' || a === 'namespaces')
-  ) {
-    throw Object.assign(new Error('creating namespaces is not allowed in this lab'), { status: 400 });
-  }
-}
-
-/** Run learner kubectl as their SA, forced into their namespace. */
-async function learnerKubectl(
-  ns: string,
-  args: string[],
-  _opts: { challengeId?: string | null } = {},
-): Promise<KubectlResult> {
-  const cleaned: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '-n' || args[i] === '--namespace') {
-      i += 1;
-      continue;
-    }
-    cleaned.push(args[i]);
-  }
-  assertSafeLearnerArgs(cleaned);
-
-  const kubeconfigPath = await createLearnerKubeconfig(ns);
-  try {
-    const timeoutMs = 45_000;
-    // Do not pass admin --context; learner kubeconfig is self-contained.
-    const fullArgs = ['--kubeconfig', kubeconfigPath, '-n', ns, ...cleaned];
-    return await new Promise((resolve, reject) => {
-      const child = spawn('kubectl', fullArgs, {
-        env: { ...process.env },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      let stdout = '';
-      let stderr = '';
-      const timer = setTimeout(() => {
-        child.kill('SIGKILL');
-        reject(Object.assign(new Error(`kubectl timed out after ${timeoutMs}ms`), { status: 504 }));
-      }, timeoutMs);
-      child.stdout.on('data', (d: Buffer) => {
-        stdout += d.toString();
-      });
-      child.stderr.on('data', (d: Buffer) => {
-        stderr += d.toString();
-      });
-      child.on('error', (err: Error) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-      child.on('close', (code: number | null) => {
-        clearTimeout(timer);
-        resolve({ code: code ?? 1, stdout, stderr });
-      });
-    });
-  } finally {
-    removeLearnerKubeconfig(kubeconfigPath);
-  }
-}
-
 module.exports = {
   CHALLENGE_LABEL,
   LEARNER_SA,
@@ -1725,6 +1623,4 @@ module.exports = {
   resolveLearnerHome,
   scriptsDir,
   runChallengeScript,
-  learnerKubectl,
-  assertSafeLearnerArgs,
 };

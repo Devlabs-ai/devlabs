@@ -13,7 +13,6 @@ const boardLifecycle = require('../workspace/boardLifecycle');
 const k8sLifecycle = require('../workspace/k8sLifecycle');
 const k8sCapacity = require('../workspace/k8sCapacity');
 const k8sGrade = require('../workspace/k8sGrade');
-const k8sCluster = require('../workspace/k8sCluster');
 const k8sLabFiles = require('../workspace/k8sLabFiles');
 const { isBoxLabType } = require('../challenges/labTypes');
 const { publicBoardSpec } = require('../workspace/boardGrade');
@@ -22,6 +21,8 @@ const sessionStore = require('../db/sessionStore');
 const loader = require('../challenges/loader');
 const { hydrateChallengeFromMinio, applyMoatPolicy } = require('../challenges/minioChallengeAssets');
 const { canViewChallenge } = require('../challenges/access');
+const { assertLabUnlocked } = require('../billing/labAccess');
+const { listSolvedChallengeIds } = require('../challenges/userProgress');
 const terminalEventBus = require('../observability/terminalEventBus');
 const sessionIdle = require('../workspace/sessionIdle');
 const sessionExclusivity = require('../workspace/sessionExclusivity');
@@ -295,6 +296,7 @@ router.post('/start', requireSessionAccess, async (req: ExpressRequest, res: Exp
   try {
     const body = (req.body as Record<string, unknown>) || {};
     const { challengeId } = body;
+    await assertChallengeAccess(req, challengeId as string);
     const { session, challenge } = await lifecycle.start({ challengeId });
 
     const pub = publicSession(session, challenge, req.user);
@@ -339,14 +341,14 @@ async function claimLabSlot(
 /** Conflicts carry a machine-readable code the client uses to offer "end it" / "use here". */
 function sendStartError(e: unknown, res: ExpressResponse, next: ExpressNextFunction): void {
   const err = e as Error & { status?: number; code?: string; details?: Record<string, unknown> };
-  if (err && (err.status === 409 || err.status === 503) && err.code) {
+  if (err && (err.status === 402 || err.status === 409 || err.status === 503) && err.code) {
     res.status(err.status).json({ error: err.message, code: err.code, ...(err.details || {}) });
     return;
   }
   next(e);
 }
 
-function assertChallengeAccess(req: ExpressRequest, challengeId: string | null | undefined): void {
+async function assertChallengeAccess(req: ExpressRequest, challengeId: string | null | undefined): Promise<void> {
   if (!challengeId || challengeId === 'spark-playground') return;
   const listed = loader.getChallenge(challengeId);
   if (!listed) return;
@@ -360,6 +362,7 @@ function assertChallengeAccess(req: ExpressRequest, challengeId: string | null |
     (err as Error & { status?: number }).status = 403;
     throw err;
   }
+  await assertLabUnlocked(req.user, listed);
 }
 
 // POST /api/session/spark/start  { challengeId, starterFiles?, entrypoint? }
@@ -374,7 +377,7 @@ router.post('/spark/start', requireSessionAccess, async (req: ExpressRequest, re
       || (req.user as { sub?: string; id?: string } | undefined)?.id
       || null;
 
-    assertChallengeAccess(req, challengeId);
+    await assertChallengeAccess(req, challengeId);
     const clientId = await claimLabSlot(req, challengeId, userId);
 
     const { session, created } = await sparkLifecycle.startSparkSession({
@@ -413,7 +416,15 @@ router.post('/board/start', requireSessionAccess, async (req: ExpressRequest, re
       || (req.user as { sub?: string; id?: string } | undefined)?.id
       || null;
 
-    assertChallengeAccess(req, challengeId);
+    await assertChallengeAccess(req, challengeId);
+    const prerequisite = boardLifecycle.specFromChallenge(loader.getChallenge(challengeId))?.unlockAfter;
+    if (prerequisite) {
+      const solved = await listSolvedChallengeIds(userId);
+      if (!solved.has(prerequisite)) {
+        const title = loader.getChallenge(prerequisite)?.title || prerequisite;
+        return res.status(403).json({ error: `Solve "${title}" first to unlock this board.` });
+      }
+    }
     const clientId = await claimLabSlot(req, challengeId, userId);
 
     const { session, created } = await boardLifecycle.startBoardSession({
@@ -451,7 +462,7 @@ router.post('/k8s/start', requireSessionAccess, async (req: ExpressRequest, res:
       ? email.slice(0, email.indexOf('@'))
       : (email || null);
 
-    assertChallengeAccess(req, challengeId);
+    await assertChallengeAccess(req, challengeId);
     const clientId = await claimLabSlot(req, challengeId, userId);
 
     const { session, created, provisioned } = await k8sLifecycle.startK8sSession({
@@ -496,7 +507,7 @@ router.get('/k8s/capacity', requireSessionAccess, (req: ExpressRequest, res: Exp
 router.get('/k8s/availability', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
   try {
     const challengeId = String(req.query.challengeId || '');
-    assertChallengeAccess(req, challengeId);
+    await assertChallengeAccess(req, challengeId);
     res.json(await k8sLifecycle.labAvailability(challengeId));
   } catch (e) {
     next(e);
@@ -548,35 +559,6 @@ router.get('/:id/k8s/submissions', requireSessionAccess, async (req: ExpressRequ
     if (!session) return;
     const submissions = await k8sGrade.listK8sSubmissionsForSession(session.id);
     res.json({ sessionId: session.id, submissions });
-  } catch (e) {
-    next(e);
-  }
-});
-
-router.post('/:id/k8s/exec', requireSessionAccess, async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
-  try {
-    const session = getKubectlLabSession(req.params.id, res);
-    if (!session) return;
-    const ns = String(session.k8sNamespace || session.workspacePrefix);
-    const body = (req.body as Record<string, unknown>) || {};
-    let args: string[] = [];
-    if (Array.isArray(body.args)) {
-      args = body.args.map((a) => String(a));
-    } else if (typeof body.command === 'string') {
-      const raw = body.command.trim();
-      const stripped = raw.replace(/^kubectl\s+/i, '');
-      args = stripped ? stripped.split(/\s+/) : [];
-    }
-    const result = await k8sCluster.learnerKubectl(ns, args, {
-      challengeId: session.challengeId,
-    });
-    res.status(result.code === 0 ? 200 : 400).json({
-      sessionId: session.id,
-      k8sNamespace: ns,
-      code: result.code,
-      stdout: result.stdout,
-      stderr: result.stderr,
-    });
   } catch (e) {
     next(e);
   }
@@ -708,9 +690,44 @@ router.post('/:id/board/submit', requireSessionAccess, express.json({ limit: '25
       boardState: state,
     });
   } catch (e) {
-    next(e);
+    sendBoardGameError(e, res, next);
   }
 });
+
+function sendBoardGameError(e: unknown, res: ExpressResponse, next: ExpressNextFunction): void {
+  const err = e as Error & { status?: number };
+  if (err && (err.status === 400 || err.status === 409)) {
+    res.status(err.status).json({ error: err.message });
+    return;
+  }
+  next(e);
+}
+
+/** Board game actions: unlock-mode step checks, debate claims, the closing question. */
+const boardGameActions: Record<string, 'checkStep' | 'judgeClaims' | 'answerFinale'> = {
+  check: 'checkStep',
+  claims: 'judgeClaims',
+  finale: 'answerFinale',
+};
+
+for (const [path, action] of Object.entries(boardGameActions)) {
+  router.post(`/:id/board/${path}`, requireSessionAccess, express.json({ limit: '64kb' }), async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+    try {
+      const session = getBoardSession(req.params.id, res);
+      if (!session) return;
+      const challenge = session.challengeId ? loader.getChallenge(session.challengeId) : null;
+      const spec = boardLifecycle.specFromChallenge(challenge);
+      if (!spec) return res.status(500).json({ error: 'board spec missing' });
+      session.status = 'active';
+      session.endTime = null;
+      const result = await boardLifecycle[action](session, spec, (req.body as Record<string, unknown>) || {});
+      const { state, ...rest } = result;
+      res.json({ ok: true, ...rest, boardState: state });
+    } catch (e) {
+      sendBoardGameError(e, res, next);
+    }
+  });
+}
 
 // GET /api/session/:id/workspace
 router.get('/:id/workspace', async (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {

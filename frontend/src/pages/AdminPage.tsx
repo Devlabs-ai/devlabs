@@ -52,7 +52,6 @@ export default function AdminPage(): JSX.Element {
   const [usersError, setUsersError] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, RoleDraft>>({});
-
   const loadUsers = useCallback(async () => {
     setUsersLoading(true);
     setUsersError(null);
@@ -372,6 +371,15 @@ export default function AdminPage(): JSX.Element {
               <span className="admin-insight-copy">
                 <strong>Lab feedback</strong>
                 <span>Feedback from reviewers and admins across every lab, with trends and filters.</span>
+              </span>
+              <span className="admin-insight-arrow" aria-hidden>
+                →
+              </span>
+            </Link>
+            <Link to="/admin/waitlist" className="admin-insight-link">
+              <span className="admin-insight-copy">
+                <strong>Waitlist</strong>
+                <span>Landing page sign-ups by day, group, source, and college or company.</span>
               </span>
               <span className="admin-insight-arrow" aria-hidden>
                 →

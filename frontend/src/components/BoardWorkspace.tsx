@@ -2,13 +2,18 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { IconLibrary, IconSubmit } from './ChromeIcons';
 import MarkdownProse from './MarkdownProse';
 import {
+  answerBoardFinale,
+  checkBoardStep,
   fetchBoardState,
+  judgeBoardClaims,
   saveBoardGraph,
   submitBoard,
 } from '../services/sessionApi';
 import type {
   ActiveSession,
+  BoardGameState,
   BoardGradeResult,
+  BoardState,
   ChallengeFull,
   ChallengePublic,
   PublicBoardPiece,
@@ -102,6 +107,24 @@ function edgePath(a: PublicBoardSlot, b: PublicBoardSlot): string {
   ].join(' ');
 }
 
+function errorMessage(err: unknown, fallback: string): string {
+  return (err as { response?: { data?: { error?: string } }; message?: string })?.response?.data?.error
+    || (err as { message?: string })?.message
+    || fallback;
+}
+
+function Hearts({ game }: { game: BoardGameState }): JSX.Element | null {
+  if (game.livesMax == null || game.lives == null) return null;
+  const lives = game.lives;
+  return (
+    <span className={`board-lives${lives === 0 ? ' is-out' : ''}`} title={`${lives} of ${game.livesMax} lives left`}>
+      {Array.from({ length: game.livesMax }, (_, i) => (
+        <span key={i} aria-hidden>{i < lives ? '♥' : '♡'}</span>
+      ))}
+    </span>
+  );
+}
+
 function hitBoardDrop(clientX: number, clientY: number): { slotId: string | null; palette: boolean } {
   const stack = document.elementsFromPoint(clientX, clientY);
   for (const node of stack) {
@@ -168,6 +191,20 @@ export default function BoardWorkspace({
   const [dropSlot, setDropSlot] = useState<string | null>(null);
   const [dropPalette, setDropPalette] = useState(false);
   const [storyOpen, setStoryOpen] = useState(true);
+  const [game, setGame] = useState<BoardGameState | null>(null);
+  const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null);
+  const [verdicts, setVerdicts] = useState<Record<string, boolean>>({});
+  const [showClaimResults, setShowClaimResults] = useState(false);
+  const [finaleFeedback, setFinaleFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const mode = spec?.game?.mode || 'classic';
+  const finale = spec?.finale || null;
+  const trayLabel = spec?.trayLabel || 'Unused';
+  const requiredSlots = useMemo(() => slots.filter((s) => !s.optional), [slots]);
+  const currentStepSlotId = mode === 'unlock' && game ? requiredSlots[game.step]?.id ?? null : null;
+  const isRequiredSlot = (slotId: string): boolean => requiredSlots.some((s) => s.id === slotId);
+  const gameOver = Boolean(game?.over);
+  const claimsPending = mode === 'debate' && game != null && !game.claims;
   const [pieceDragPos, setPieceDragPos] = useState<{
     pieceId: string;
     fromSlotId: string;
@@ -219,6 +256,13 @@ export default function BoardWorkspace({
     saveTimer.current = window.setTimeout(run, 400);
   }, [session.id]);
 
+  const applyServerState = (state: BoardState | null | undefined): void => {
+    if (!state) return;
+    if (state.fills) setFills(state.fills);
+    if (state.trayOrder?.length) setTrayOrder(state.trayOrder);
+    setGame(state.game ?? null);
+  };
+
   const applyFills = useCallback((nextFills: Record<string, string | null>, reset = false) => {
     setFills(nextFills);
     setSaveError(null);
@@ -236,6 +280,7 @@ export default function BoardWorkspace({
         else setTrayOrder(pieces.map((p) => p.id));
         setFills(state?.fills && typeof state.fills === 'object' ? state.fills : {});
         setGrade(state?.lastGrade ?? null);
+        setGame(state?.game ?? null);
         setDirtySinceGrade(false);
       })
       .catch((err: unknown) => {
@@ -316,8 +361,38 @@ export default function BoardWorkspace({
     return grade.checks.filter((c) => !c.passed);
   }, [grade, dirtySinceGrade]);
 
+  const lockedStep = (slotId: string): boolean => mode === 'unlock' && isRequiredSlot(slotId);
+
+  const checkStep = async (slotId: string, pieceId: string): Promise<void> => {
+    if (slotId !== currentStepSlotId) {
+      setFlash({ ok: false, text: 'That step is still locked. Fill the highlighted step first.' });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await checkBoardStep(session.id, { slotId, pieceId });
+      applyServerState(res.boardState);
+      if (res.grade) setGrade(res.grade);
+      setFlash(
+        res.correct
+          ? { ok: true, text: res.clue ? `Locked in. New clue: ${res.clue}` : 'Locked in.' }
+          : { ok: false, text: res.detail },
+      );
+      setSelectedPieceId(null);
+    } catch (err: unknown) {
+      setFlash({ ok: false, text: errorMessage(err, 'Check failed') });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const fillSlot = (slotId: string, pieceId: string): void => {
     if (!slotById.has(slotId) || !byId.has(pieceId)) return;
+    if (gameOver || busy) return;
+    if (lockedStep(slotId)) {
+      if (!fillsRef.current[slotId]) void checkStep(slotId, pieceId);
+      return;
+    }
     const next: Record<string, string | null> = { ...fillsRef.current };
     for (const [sid, pid] of Object.entries(next)) {
       if (pid === pieceId) next[sid] = null;
@@ -329,6 +404,7 @@ export default function BoardWorkspace({
   };
 
   const clearSlot = (slotId: string): void => {
+    if (lockedStep(slotId) || gameOver) return;
     applyFills({ ...fillsRef.current, [slotId]: null });
     if (selectedSlotId === slotId) setSelectedPieceId(null);
   };
@@ -337,24 +413,25 @@ export default function BoardWorkspace({
     const next: Record<string, string | null> = { ...fillsRef.current };
     let changed = false;
     for (const [sid, pid] of Object.entries(next)) {
-      if (pid === pieceId) {
+      if (pid === pieceId && !lockedStep(sid)) {
         next[sid] = null;
         changed = true;
       }
     }
-    if (!changed) return;
+    if (!changed || gameOver) return;
     applyFills(next);
     setSelectedPieceId(pieceId);
     setSelectedSlotId(null);
   };
 
   const resetBoard = (): void => {
-    if (!window.confirm('Reset the plan to empty shadows? Every widget goes back to Unused.')) {
+    if (!window.confirm('Reset the board? Every card goes back to Unused.')) {
       return;
     }
     const empty: Record<string, string | null> = {};
     for (const slot of slots) empty[slot.id] = null;
-    applyFills(empty, true);
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    setFills(empty);
     setTrayOrder(pieces.map((p) => p.id));
     setGrade(null);
     setDirtySinceGrade(false);
@@ -362,6 +439,40 @@ export default function BoardWorkspace({
     setSelectedPieceId(null);
     setDropSlot(null);
     setDropPalette(false);
+    setFlash(null);
+    setVerdicts({});
+    setShowClaimResults(false);
+    setFinaleFeedback(null);
+    void saveBoardGraph(session.id, { fills: empty, reset: true })
+      .then((state) => applyServerState(state))
+      .catch((err: unknown) => setSaveError(errorMessage(err, 'Reset failed')));
+  };
+
+  const submitClaims = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      const res = await judgeBoardClaims(session.id, verdicts);
+      applyServerState(res.boardState);
+      setShowClaimResults(true);
+    } catch (err: unknown) {
+      setFlash({ ok: false, text: errorMessage(err, 'Could not judge the claims') });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitFinale = async (optionId: string): Promise<void> => {
+    setBusy(true);
+    try {
+      const res = await answerBoardFinale(session.id, optionId);
+      applyServerState(res.boardState);
+      setGrade(res.grade);
+      setFinaleFeedback({ ok: res.correct, text: res.explanation });
+    } catch (err: unknown) {
+      setFinaleFeedback({ ok: false, text: errorMessage(err, 'Could not check the answer') });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleSubmit = async (): Promise<void> => {
@@ -371,7 +482,7 @@ export default function BoardWorkspace({
       const res = await submitBoard(session.id, { fills: fillsRef.current });
       setGrade(res.grade);
       setDirtySinceGrade(false);
-      if (res.boardState?.fills) setFills(res.boardState.fills);
+      applyServerState(res.boardState);
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { error?: string } }; message?: string })?.response?.data
@@ -393,6 +504,11 @@ export default function BoardWorkspace({
     const check = checkById.get(slot.id);
     if (check && filled) parts.push(check.passed ? 'is-ok' : 'is-bad');
     if (pieceDragPos && fills[slot.id] === pieceDragPos.pieceId) parts.push('is-dragging');
+    if (mode === 'unlock' && !slot.optional) {
+      if (slot.id === currentStepSlotId) parts.push('is-current');
+      else if (!filled) parts.push('is-locked');
+      else parts.push('is-ok');
+    }
     return parts.join(' ');
   };
 
@@ -431,6 +547,10 @@ export default function BoardWorkspace({
   ): void => {
     if (e.button !== 0) return;
     e.stopPropagation();
+    if (lockedStep(slot.id) || gameOver) {
+      setSelectedSlotId(slot.id);
+      return;
+    }
     const drag = {
       pointerId: e.pointerId,
       pieceId: piece.id,
@@ -489,12 +609,23 @@ export default function BoardWorkspace({
     <div className="workspace board-workspace">
       <header className="board-top">
         <div className="board-top-copy">
-          <p className="board-kicker">Spark · Fill the plan</p>
+          <p className="board-kicker">{spec?.kicker || 'Whiteboard · Fill the board'}</p>
           <h1 className="board-title">{challenge?.title || 'Board'}</h1>
         </div>
         <div className="board-top-actions">
           {saveError && <span className="board-save-error">{saveError}</span>}
-          {grade && !dirtySinceGrade && (
+          {game && <Hearts game={game} />}
+          {grade?.passed && grade.stars != null && (
+            <span className="board-stars" title={`${grade.stars} of 3 stars`}>
+              {'★'.repeat(grade.stars)}{'☆'.repeat(3 - grade.stars)}
+            </span>
+          )}
+          {mode === 'unlock' && game && !grade?.boardPassed && (
+            <span className="board-score">
+              Step {Math.min(game.step + 1, requiredSlots.length)} of {requiredSlots.length}
+            </span>
+          )}
+          {grade && !dirtySinceGrade && mode !== 'unlock' && (
             <span className={`board-score${grade.passed ? ' pass' : ' fail'}`}>
               {grade.correctRequired}/{grade.requiredCount}
               {grade.passed ? ' passed' : ''}
@@ -508,31 +639,48 @@ export default function BoardWorkspace({
           <button
             type="button"
             className="board-reset-btn"
-            title="Reset to empty shadows"
+            title="Reset to an empty board"
             onClick={resetBoard}
-            disabled={submitting || (usedIds.size === 0 && !grade)}
+            disabled={submitting || (usedIds.size === 0 && !grade && !game?.claims && !gameOver)}
           >
             Reset
           </button>
-          <button
-            type="button"
-            className="board-submit-btn"
-            onClick={() => void handleSubmit()}
-            disabled={submitting}
-          >
-            <IconSubmit color="currentColor" />
-            {submitting ? 'Submitting…' : 'Submit'}
-          </button>
+          {mode !== 'unlock' && !claimsPending && (
+            <button
+              type="button"
+              className="board-submit-btn"
+              onClick={() => void handleSubmit()}
+              disabled={submitting || gameOver}
+            >
+              <IconSubmit color="currentColor" />
+              {submitting ? 'Submitting…' : 'Submit'}
+            </button>
+          )}
         </div>
       </header>
 
       {loadError && <div className="alert">{loadError}</div>}
+
+      {gameOver && (
+        <div className="board-flash bad">
+          <strong>Out of lives.</strong> Reset the board to try again. A reset caps this board at one star.
+        </div>
+      )}
+      {!gameOver && flash && (
+        <div className={`board-flash${flash.ok ? ' ok' : ' bad'}`}>
+          <span>{flash.text}</span>
+          <button type="button" className="board-place-btn" onClick={() => setFlash(null)}>Dismiss</button>
+        </div>
+      )}
 
       {grade && (
         <div className={`board-grade-strip${grade.passed ? ' pass' : ' fail'}${dirtySinceGrade ? ' stale' : ''}`}>
           <strong>
             {dirtySinceGrade ? 'Blocks changed — submit again to regrade.' : grade.summary}
           </strong>
+          {!dirtySinceGrade && game?.finaleCorrect && game.finaleExplanation && (
+            <p className="board-grade-note">{game.finaleExplanation}</p>
+          )}
           {!dirtySinceGrade && failedChecks.length > 0 && (
             <details>
               <summary>{failedChecks.length} to fix</summary>
@@ -547,6 +695,28 @@ export default function BoardWorkspace({
             </details>
           )}
         </div>
+      )}
+
+      {finale && grade?.needsFinale && !gameOver && (
+        <section className="board-finale" aria-label="Final question">
+          <h2>{finale.prompt}</h2>
+          <div className="board-finale-options">
+            {finale.options.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                className="board-finale-btn"
+                disabled={busy}
+                onClick={() => void submitFinale(o.id)}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          {finaleFeedback && !finaleFeedback.ok && (
+            <p className="board-finale-feedback">{finaleFeedback.text}</p>
+          )}
+        </section>
       )}
 
       <div className={`board-body${storyOpen ? '' : ' board-body--story-closed'}`}>
@@ -566,6 +736,20 @@ export default function BoardWorkspace({
               <div className="board-story-body">
                 {story.overview && (
                   <MarkdownProse text={story.overview} className="markdown-prose board-story-prose" />
+                )}
+                {mode === 'unlock' && (
+                  <section className="board-story-clues">
+                    <h3>Clues found · {game?.clues.length ?? 0}</h3>
+                    {game && game.clues.length > 0 ? (
+                      <ol>
+                        {game.clues.map((clue) => (
+                          <li key={clue}>{clue}</li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p>Lock in the first step to get your first clue.</p>
+                    )}
+                  </section>
                 )}
                 {(story.yourTask || story.steps.length > 0) && (
                   <section className="board-story-task">
@@ -603,9 +787,78 @@ export default function BoardWorkspace({
           )}
         </div>
 
+        {(claimsPending || showClaimResults) && (
+          <section className="board-claims" aria-label="Claims">
+            <header className="board-claims-head">
+              <h2>{claimsPending ? 'Who’s right?' : 'How did you call it?'}</h2>
+              <p>
+                {claimsPending
+                  ? `Mark every claim True or False before you touch the board.${game?.livesMax != null ? ' Each wrong call costs a life.' : ''}`
+                  : 'False claims are off the table. Build the board from the true ones.'}
+              </p>
+            </header>
+            <ul className="board-claims-list">
+              {[...pieces]
+                .sort((a, b) => trayOrder.indexOf(a.id) - trayOrder.indexOf(b.id))
+                .map((p) => {
+                  const result = game?.claims?.[p.id];
+                  const verdict = result ? result.verdict : verdicts[p.id];
+                  return (
+                    <li
+                      key={p.id}
+                      className={`board-claim${result ? (result.correct ? ' is-right' : ' is-wrong') : ''}`}
+                    >
+                      <div className="board-claim-copy">
+                        {p.speaker && <span className="board-claim-speaker">{p.speaker}</span>}
+                        <strong>“{p.title}”</strong>
+                        <p>{p.blurb}</p>
+                        {result && (
+                          <p className="board-claim-verdict">
+                            {result.correct ? 'You called it. ' : 'Missed. '}
+                            {result.explanation ? `False: ${result.explanation}` : 'True: this belongs on the board.'}
+                          </p>
+                        )}
+                      </div>
+                      <div className="board-claim-actions">
+                        {[true, false].map((v) => (
+                          <button
+                            key={String(v)}
+                            type="button"
+                            className={`board-claim-btn${verdict === v ? ' is-on' : ''}`}
+                            disabled={Boolean(result) || busy}
+                            onClick={() => setVerdicts((cur) => ({ ...cur, [p.id]: v }))}
+                          >
+                            {v ? 'True' : 'False'}
+                          </button>
+                        ))}
+                      </div>
+                    </li>
+                  );
+                })}
+            </ul>
+            <footer className="board-claims-foot">
+              {claimsPending ? (
+                <button
+                  type="button"
+                  className="board-submit-btn"
+                  disabled={busy || gameOver || Object.keys(verdicts).length < pieces.length}
+                  onClick={() => void submitClaims()}
+                >
+                  Submit verdicts ({Object.keys(verdicts).length}/{pieces.length})
+                </button>
+              ) : (
+                <button type="button" className="board-submit-btn" onClick={() => setShowClaimResults(false)}>
+                  Go to the whiteboard →
+                </button>
+              )}
+            </footer>
+          </section>
+        )}
+
         <div
           ref={canvasRef}
           className="board-canvas"
+          style={claimsPending || showClaimResults ? { display: 'none' } : undefined}
           onPointerDown={onCanvasPointerDown}
           onPointerMove={onCanvasPointerMove}
           onPointerUp={onCanvasPointerUp}
@@ -616,7 +869,7 @@ export default function BoardWorkspace({
             setZoom(next);
           }}
           role="application"
-          aria-label="Physical plan shadow"
+          aria-label="Board"
         >
           <div
             className="board-world"
@@ -726,7 +979,7 @@ export default function BoardWorkspace({
                   </span>
                   {piece ? (
                     <>
-                      <span className="board-node-kind">{piece.kind}</span>
+                      <span className="board-node-kind">{slot.prompt || piece.kind}</span>
                       <span className="board-node-title">{piece.title}</span>
                     </>
                   ) : (
@@ -734,7 +987,7 @@ export default function BoardWorkspace({
                       <span className="board-slot-kicker">
                         {slot.optional ? 'Optional' : `Step ${step}`}
                       </span>
-                      <span className="board-slot-label">Drop a widget</span>
+                      <span className="board-slot-label">{slot.prompt || 'Drop a card'}</span>
                     </>
                   )}
                 </div>
@@ -747,7 +1000,7 @@ export default function BoardWorkspace({
           <div className="board-inspector">
             <header className="board-rail-head">
               <h2>
-                {selectedSlot && selectedFillId ? 'Block' : selectedPiece ? 'Widget' : 'Plan'}
+                {selectedSlot && selectedFillId ? 'Block' : selectedPiece ? 'Card' : 'Board'}
               </h2>
             </header>
             {selectedSlot && selectedPiece && selectedFillId ? (
@@ -766,17 +1019,22 @@ export default function BoardWorkspace({
                 </div>
               </>
             ) : selectedSlot && !selectedFillId ? (
-              <p className="board-rail-hint">
-                {selectedSlot.optional
-                  ? 'Optional step — fill it from Unused, or leave it empty.'
-                  : 'Empty step on the plan. Drop a widget here from Unused.'}
-              </p>
+              <>
+                {selectedSlot.prompt && (
+                  <h3 className="board-inspector-title">{selectedSlot.prompt}</h3>
+                )}
+                <p className="board-rail-hint">
+                  {selectedSlot.optional
+                    ? 'Optional step — fill it from Unused, or leave it empty.'
+                    : 'Empty step on the board. Drop a card here from Unused.'}
+                </p>
+              </>
             ) : selectedPiece ? (
               <>
                 <p className="board-node-kind" data-kind={selectedPiece.kind}>{selectedPiece.kind}</p>
                 <h3 className="board-inspector-title">{selectedPiece.title}</h3>
                 <p className="board-inspector-blurb">{selectedPiece.blurb}</p>
-                <p className="board-rail-hint">Click an empty step to place this operator.</p>
+                <p className="board-rail-hint">Click an empty step to place this card.</p>
               </>
             ) : (
               <p className="board-rail-hint">
@@ -786,7 +1044,7 @@ export default function BoardWorkspace({
           </div>
           <aside
             className={`board-palette${dropPalette ? ' is-drop' : ''}`}
-            aria-label="Unused operators"
+            aria-label="Unused cards"
             onDragOver={(e) => {
               e.preventDefault();
               e.dataTransfer.dropEffect = 'move';
@@ -804,15 +1062,15 @@ export default function BoardWorkspace({
             }}
           >
             <header className="board-rail-head">
-              <h2>Unused</h2>
+              <h2>{trayLabel}</h2>
               <span>{trayPieces.length}</span>
             </header>
             <p className="board-rail-hint">
-              Drag onto a step. Drag a placed widget back here to unused.
+              Drag onto a step. Drag a placed card back here to remove it.
             </p>
             <div className="board-palette-list">
               {trayPieces.length === 0 && (
-                <p className="board-empty">Every widget is on the plan.</p>
+                <p className="board-empty">Every card is on the board.</p>
               )}
               {trayPieces.map((p) => (
                 <button

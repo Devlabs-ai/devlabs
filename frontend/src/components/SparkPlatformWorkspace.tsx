@@ -1141,7 +1141,7 @@ export default function SparkPlatformWorkspace({
                   type="button"
                   role="tab"
                   aria-selected={briefTab === id}
-                  className={`spark-brief-tab${briefTab === id ? ' active' : ''}${id === 'moat' || id === 'cluster' || id === 'visibility' || id === 'review' ? ' spark-brief-tab--setter' : ''}`}
+                  className={`spark-brief-tab${briefTab === id ? ' active' : ''}${id === 'moat' || id === 'cluster' || id === 'visibility' || id === 'review' ? ' spark-brief-tab--setter' : ''}${id === 'visibility' || id === 'review' ? ' spark-brief-tab--admin-row' : ''}`}
                   onClick={() => {
                     if (id === 'solution' && !hasAcknowledgedSolution(challenge.id)) {
                       setSolutionGateOpen(true);

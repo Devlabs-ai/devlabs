@@ -1,0 +1,150 @@
+{
+  "id": "ds-02-leader-failover",
+  "number": 502,
+  "finalized": true,
+  "title": "Leader failover without split brain",
+  "description": "The orders database leader just went silent. Walk through a safe failover, from the missed heartbeat to the old leader rejoining.",
+  "difficulty": "L2",
+  "tags": [
+    "data-systems",
+    "replication",
+    "failover",
+    "split-brain",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "The orders database uses single-leader replication. Every write goes to the leader, which streams its log to two followers asynchronously.\n\nAt 02:14 the leader stops answering. Maybe it crashed. Maybe the network is just slow. The followers can't tell the difference, and that is what makes failover hard.\n\nA safe failover has to pick the right follower, make sure the old leader can't keep accepting writes, and move traffic over. The outline is on the board. Fill the blocks. Traps lose data or create two leaders.",
+    "yourTask": "Order the steps of an automatic failover, from detecting the dead leader to the old leader coming back.",
+    "yourTaskSteps": [
+      "Read every card. Some sound decisive but break safety.",
+      "Fill each empty block from Unused.",
+      "The dashed block is optional.",
+      "Submit."
+    ],
+    "hints": [
+      "Nodes can't know a peer is dead, only that it hasn't answered within a timeout.",
+      "With asynchronous replication, followers are not identical.",
+      "A returning leader must learn it is no longer the leader before it can do harm."
+    ],
+    "moat": "Setter notes, not shown to learners.\n\nRequired chain: heartbeat-timeout → declare-dead → elect-most-current → fence-old-leader → reroute-writes → old-leader-rejoins.\nOptional splice: manual-approval on declare-dead → elect-most-current.\nFive traps."
+  },
+  "platformSpec": {
+    "kicker": "Replication · Leader failover",
+    "passMessage": "Safe failover: detect, elect the most current follower, fence, reroute, rejoin.",
+    "pieces": [
+      {
+        "id": "heartbeat-timeout",
+        "title": "Heartbeats stop past the timeout",
+        "blurb": "Followers have not heard from the leader for longer than the configured timeout, say 30 seconds.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "declare-dead",
+        "title": "Declare the leader dead",
+        "blurb": "The cluster treats the leader as failed. This is a judgement based on the timeout, not proof.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "heartbeat-timeout",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "manual-approval",
+        "title": "Page on-call to approve the promotion",
+        "blurb": "Some teams require a human to confirm failover, trading recovery time for fewer false failovers.",
+        "kind": "mechanism",
+        "gold": "optional",
+        "parent": "declare-dead",
+        "child": "elect-most-current",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "elect-most-current",
+        "title": "Promote the most up-to-date follower",
+        "blurb": "Choose the follower whose replication log position is furthest ahead, so the fewest writes are lost.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "declare-dead",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "fence-old-leader",
+        "title": "Fence the old leader",
+        "blurb": "Bump the epoch (generation number) and revoke the old leader's write access, so writes stamped with the old epoch are rejected.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "elect-most-current",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "reroute-writes",
+        "title": "Point clients at the new leader",
+        "blurb": "Update the proxy, DNS record or service discovery entry so order-processor sends writes to the new leader.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "fence-old-leader",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "old-leader-rejoins",
+        "title": "Old leader rejoins as a follower",
+        "blurb": "When it comes back it sees the higher epoch, steps down, drops writes that never replicated, and resyncs from the new leader.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "reroute-writes",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "random-follower",
+        "title": "Promote any follower",
+        "blurb": "All followers replicate the same log, so any of them makes an equally good leader.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "With async replication followers lag by different amounts. A random pick can lose more writes."
+      },
+      {
+        "id": "one-missed-beat",
+        "title": "Fail over after one missed heartbeat",
+        "blurb": "React instantly: a single missed heartbeat triggers promotion.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Too short a timeout causes needless failovers during load spikes or brief network blips."
+      },
+      {
+        "id": "dual-leaders",
+        "title": "Let both leaders accept writes for now",
+        "blurb": "Keep the old and new leader both writable until an operator decides which one wins.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "That's split brain. Two leaders accepting writes will produce conflicting data."
+      },
+      {
+        "id": "merge-unreplicated",
+        "title": "Merge the old leader's unreplicated writes",
+        "blurb": "Copy the writes that only reached the old leader into the new leader's log.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "The new leader has already issued its own writes. Merging can reuse IDs and corrupt data; those writes are usually discarded."
+      },
+      {
+        "id": "zero-loss",
+        "title": "Failover guarantees zero data loss",
+        "blurb": "Because the followers replicate continuously, promoting one never loses an acknowledged write.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "With asynchronous replication, writes acknowledged by the old leader but not yet replicated are lost."
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

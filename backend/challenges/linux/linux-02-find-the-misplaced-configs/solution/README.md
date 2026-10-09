@@ -21,7 +21,7 @@ Always look before you delete:
 
 ```bash
 find /var/tmp/order-dumps -type f -size +10M -exec ls -lh {} \;
-sudo find /var/tmp/order-dumps -type f -size +10M -delete
+find /var/tmp/order-dumps -type f -size +10M -delete
 find /var/tmp/order-dumps -type f -exec ls -lh {} \;     # only small ones left
 ```
 

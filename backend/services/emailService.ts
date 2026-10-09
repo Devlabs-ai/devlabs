@@ -119,4 +119,35 @@ async function sendSalesLead({ companyName, email, domain, teamSize, plan, messa
   });
 }
 
-module.exports = { sendOtp, sendSalesLead };
+async function sendWaitlistConfirmation(email: string): Promise<void> {
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@devlabs.app';
+
+  if (!transport) {
+    console.log(`[email] Waitlist confirmation for ${email} (SMTP not configured)`);
+    return;
+  }
+
+  await transport.sendMail({
+    from,
+    to: email,
+    subject: "You're on the DevSetu waitlist",
+    text: [
+      "Thanks for joining the DevSetu waitlist.",
+      '',
+      "We're launching in the first week of November. You'll hear from us before then with early access and 40% off your first month.",
+      '',
+      'Team DevSetu',
+      'devsetu.io',
+    ].join('\n'),
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
+        <h2 style="color:#111">You're on the DevSetu waitlist</h2>
+        <p style="font-size:15px;color:#444">Thanks for joining. We're launching in the <strong>first week of November</strong>.</p>
+        <p style="font-size:15px;color:#444">You'll hear from us before then with early access and <strong>40% off your first month</strong>.</p>
+        <p style="font-size:14px;color:#888">Team DevSetu · devsetu.io</p>
+      </div>
+    `,
+  });
+}
+
+module.exports = { sendOtp, sendSalesLead, sendWaitlistConfirmation };

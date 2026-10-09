@@ -44,6 +44,7 @@ terminalEventBus.on('session_end', ({ sessionId }: { sessionId?: string }) => {
   const terms = sessionId ? openTerminals.get(sessionId) : undefined;
   if (!terms) return;
   openTerminals.delete(sessionId!);
+  introShownSessions.delete(sessionId!);
   for (const t of terms) t.close();
 });
 
@@ -192,7 +193,7 @@ function handleConnection(ws: ObservabilityWebSocket, req: IncomingMessage): voi
       ? await startBoxShell(ws, target, flavor)
       : await startKubectlShell(ws, target, session);
     if (!started) return;
-    attachShell(ws, sessionId, clientId, started);
+    attachShell(ws, sessionId, clientId, started, cols);
   })();
 }
 
@@ -212,16 +213,97 @@ function spawnFailed(ws: ObservabilityWebSocket, sessionId: string, err: unknown
   return null;
 }
 
-const BOX_BANNERS: Record<BoxFlavor, string> = {
+// The subtitle under the logo. Same for free and paid (no sudo/root wording): the tiers
+// differ under the hood, but the pitch to the learner is identical.
+const BOX_SUBTITLES: Record<BoxFlavor, string> = {
   linux:
-    `\r\n\x1b[1mDevLabs Linux lab\x1b[0m\r\n`
-    + `You are \x1b[32m${linuxBox.LEARNER_USER}\x1b[0m on your own machine, with sudo. `
-    + `It starts fresh every time you open the lab.\r\n\r\n`,
+    `\x1b[1;36m⚡ This box is yours\x1b[0m \x1b[1m— a real Linux machine, powered by a real kernel.\x1b[0m\r\n`
+    + `\x1b[38;5;245mExplore it, break it, rebuild it — it comes back fresh every time you open the lab.\x1b[0m\r\n`,
   docker:
-    `\r\n\x1b[1mDevLabs Docker lab\x1b[0m\r\n`
-    + `You are \x1b[32m${linuxBox.LEARNER_USER}\x1b[0m on your own machine, with sudo and Docker `
-    + `(no sudo needed for docker). It starts fresh every time you open the lab.\r\n\r\n`,
+    `\x1b[1;36m🐳 This box is yours\x1b[0m \x1b[1m— a real Linux machine with Docker baked in.\x1b[0m\r\n`
+    + `\x1b[38;5;245mBuild it, run it, break it, rebuild it — it comes back fresh every time you open the lab.\x1b[0m\r\n`,
 };
+
+// ---- Intro banner: DEVSETU wordmark with a left-to-right colour sweep ------------
+// Shown once per session (animated), then static on reconnects. Each glyph is a fixed
+// set of rows so the wordmark is assembled column-aligned and coloured per column.
+
+const LOGO_FONT: Record<string, string[]> = {
+  D: ['█████ ', '██  ██', '██  ██', '██  ██', '█████ '],
+  E: ['█████', '██   ', '████ ', '██   ', '█████'],
+  V: ['██  ██', '██  ██', '██  ██', ' ████ ', '  ██  '],
+  S: ['█████', '██   ', '█████', '   ██', '█████'],
+  T: ['██████', '  ██  ', '  ██  ', '  ██  ', '  ██  '],
+  U: ['██  ██', '██  ██', '██  ██', '██  ██', ' ████ '],
+};
+const LOGO_WORD = 'DEVSETU';
+const LOGO_ROWS = 5;
+const LOGO_LINES = Array.from({ length: LOGO_ROWS }, (_unused, r) =>
+  LOGO_WORD.split('').map((ch) => LOGO_FONT[ch][r]).join(' '),
+);
+const LOGO_WIDTH = LOGO_LINES[0].length;
+/** Below this terminal width, skip the logo (would wrap): fall back to a plain line. */
+const LOGO_MIN_COLS = LOGO_WIDTH + 2;
+
+const CSI = '\x1b[';
+const RESET = '\x1b[0m';
+// Settled wordmark colours, left→right (xterm-256): cyan into indigo.
+const SWEEP_GRADIENT = [51, 50, 44, 38, 39, 33, 69, 63, 99, 135, 171, 177];
+const SWEEP_DIM = '\x1b[38;5;238m';
+const SWEEP_GLOW = '\x1b[1;38;5;231m';
+const SWEEP_BAND = 6;
+const SWEEP_STEP = 3;
+const SWEEP_FRAME_MS = 24;
+
+function sweepColor(col: number, sweep: number): string {
+  if (col > sweep) return SWEEP_DIM;
+  if (col > sweep - SWEEP_BAND) return SWEEP_GLOW;
+  const i = Math.min(SWEEP_GRADIENT.length - 1, Math.floor((col / LOGO_WIDTH) * SWEEP_GRADIENT.length));
+  return `\x1b[38;5;${SWEEP_GRADIENT[i]}m`;
+}
+
+/** The wordmark at one sweep position (sweep ≥ LOGO_WIDTH+band ⇒ settled gradient). */
+function logoFrame(sweep: number): string {
+  let out = '';
+  for (let r = 0; r < LOGO_ROWS; r++) {
+    const line = LOGO_LINES[r];
+    let active = '';
+    for (let c = 0; c < line.length; c++) {
+      const ch = line[c];
+      const code = ch === ' ' ? '' : sweepColor(c, sweep);
+      if (code !== active) {
+        out += code || RESET;
+        active = code;
+      }
+      out += ch;
+    }
+    out += `${RESET}${CSI}K\r\n`;
+  }
+  return out;
+}
+
+const LOGO_SETTLED = LOGO_WIDTH + SWEEP_BAND;
+const delay = (ms: number): Promise<void> => new Promise((res) => setTimeout(res, ms));
+
+/** Full intro, no motion: settled logo (when it fits) + subtitle. */
+function staticBanner(subtitle: string, cols: number): string {
+  if (cols < LOGO_MIN_COLS) return `\r\n${subtitle}\r\n`;
+  return `\r\n${logoFrame(LOGO_SETTLED)}\r\n${subtitle}\r\n`;
+}
+
+/** Play the colour sweep in place, then print the subtitle. */
+async function animateBanner(ws: ObservabilityWebSocket, subtitle: string): Promise<void> {
+  send(ws, Buffer.from(`${CSI}?25l\r\n${logoFrame(-SWEEP_BAND)}`));
+  for (let sweep = -SWEEP_BAND + SWEEP_STEP; sweep <= LOGO_SETTLED; sweep += SWEEP_STEP) {
+    if (ws.readyState !== ws.OPEN) break;
+    await delay(SWEEP_FRAME_MS);
+    send(ws, Buffer.from(`${CSI}${LOGO_ROWS}A${logoFrame(sweep)}`));
+  }
+  send(ws, Buffer.from(`${CSI}?25h\r\n${subtitle}\r\n`));
+}
+
+/** Sessions that have already seen the animated intro (static on later opens). */
+const introShownSessions = new Set<string>();
 
 /** Box labs: login shell as `learner` inside the lab's box pod. */
 async function startBoxShell(
@@ -245,7 +327,7 @@ async function startBoxShell(
   return {
     child,
     cleanup: () => undefined,
-    banner: BOX_BANNERS[flavor],
+    banner: BOX_SUBTITLES[flavor],
   };
 }
 
@@ -339,9 +421,9 @@ async function startKubectlShell(
       k8sCluster.removeLearnerKubeconfig(kubeconfigPath);
     },
     banner:
-      `\r\n\x1b[1mDevLabs Kubernetes lab\x1b[0m\r\n`
+      `\x1b[1mKubernetes lab\x1b[0m\r\n`
       + `Home: \x1b[36m${displayHome}\x1b[0m   Namespace: \x1b[32m${ns}\x1b[0m\r\n`
-      + `Files saved in the Editor tab land here — try: ls, then kubectl apply -f <file>\r\n\r\n`,
+      + `Files saved in the Editor tab land here — try: ls, then kubectl apply -f <file>\r\n`,
   };
 }
 
@@ -351,6 +433,7 @@ function attachShell(
   sessionId: string,
   clientId: string | null,
   { child, cleanup, banner }: StartedShell,
+  cols: number,
 ): void {
   sessionIdle.touch(sessionId);
 
@@ -409,8 +492,17 @@ function attachShell(
     }
   });
 
+  // Hold the shell's output until the intro banner is on screen, so the prompt can't
+  // interleave with (or race ahead of) the banner / sweep animation.
+  let introDone = false;
+  const pending: Buffer[] = [];
   child.onData((data: string) => {
-    send(ws, Buffer.from(data, 'utf8'));
+    const buf = Buffer.from(data, 'utf8');
+    if (!introDone) {
+      pending.push(buf);
+      return;
+    }
+    send(ws, buf);
   });
 
   child.onExit(({ exitCode, signal }: { exitCode: number; signal: number }) => {
@@ -421,7 +513,16 @@ function attachShell(
   ws.on('close', () => closeAll());
   ws.on('error', () => closeAll());
 
-  send(ws, Buffer.from(banner));
+  // Animate on the first open per session (if the terminal is wide enough), static after.
+  const animate = cols >= LOGO_MIN_COLS && !introShownSessions.has(sessionId);
+  if (animate) introShownSessions.add(sessionId);
+  void (async () => {
+    if (animate) await animateBanner(ws, banner);
+    else send(ws, Buffer.from(staticBanner(banner, cols)));
+    introDone = true;
+    for (const buf of pending) send(ws, buf);
+    pending.length = 0;
+  })();
 }
 
 module.exports = { handleConnection };

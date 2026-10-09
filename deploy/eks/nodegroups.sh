@@ -56,9 +56,12 @@ ensure_nodegroup() {
 }
 
 # Launch template for learner nodes: AL2023 nodeadm NodeConfig (maxPods + explicit
-# kubeReserved, so the reserve matches the pod count; podPidsLimit on Linux) and the root
-# volume. Idempotent: creates the template, or a new default version when the content changed.
-# Existing node groups only pick up a new version via `aws eks update-nodegroup-version`.
+# kubeReserved, so the reserve matches the pod count; podPidsLimit on Linux), a boot script
+# that disables io_uring, the root volume, and IMDS limited to the host (hop limit 1, so
+# learner pods cannot fetch the node role's credentials; host-network DaemonSets still can).
+# Idempotent: creates the template, or a new default version when the content changed
+# (tracked by a checksum in the version description). Existing node groups only pick up a
+# new version via eks-nodegroup-update.sh (`aws eks update-nodegroup-version`).
 ensure_launch_template() {
   local ng="$1" name max_pods reserved disk pool extra=""
   case "$ng" in
@@ -82,7 +85,7 @@ ensure_launch_template() {
       ;;
     *) echo "no launch template for $ng" >&2; return 1 ;;
   esac
-  local userdata data current
+  local userdata data checksum current
   userdata="$(cat <<EOF | base64 | tr -d '\n'
 MIME-Version: 1.0
 Content-Type: multipart/mixed; boundary="BOUNDARY"
@@ -100,6 +103,14 @@ ${extra}      kubeReserved:
         cpu: 70m
         memory: ${reserved}
         ephemeral-storage: 1Gi
+--BOUNDARY
+Content-Type: text/x-shellscript; charset="us-ascii"
+
+#!/bin/bash
+# Nothing in the labs uses io_uring, and it is a frequent source of kernel privilege
+# escalation bugs reachable from containers.
+printf 'kernel.io_uring_disabled = 2\n' > /etc/sysctl.d/90-devlabs-learner.conf
+sysctl -p /etc/sysctl.d/90-devlabs-learner.conf
 --BOUNDARY--
 EOF
 )"
@@ -110,23 +121,25 @@ EOF
     "DeviceName": "/dev/xvda",
     "Ebs": {"VolumeSize": ${disk}, "VolumeType": "gp3", "Encrypted": true, "DeleteOnTermination": true}
   }],
-  "MetadataOptions": {"HttpTokens": "required", "HttpPutResponseHopLimit": 2},
+  "MetadataOptions": {"HttpTokens": "required", "HttpPutResponseHopLimit": 1},
   "TagSpecifications": [{"ResourceType": "instance", "Tags": [{"Key": "devlabs.io/pool", "Value": "${pool}"}]}]
 }
 EOF
 )"
+  checksum="devlabs-cksum-$(printf '%s' "$data" | cksum | awk '{print $1}')"
   if ! aws ec2 describe-launch-templates --region "$AWS_REGION" \
     --launch-template-names "$name" >/dev/null 2>&1; then
     echo "==> creating launch template $name (maxPods=${max_pods}, kubeReserved.memory=${reserved})"
     aws ec2 create-launch-template --region "$AWS_REGION" \
       --launch-template-name "$name" \
+      --version-description "$checksum" \
       --launch-template-data "$data" >/dev/null
     return
   fi
   current="$(aws ec2 describe-launch-template-versions --region "$AWS_REGION" \
     --launch-template-name "$name" --versions '$Default' \
-    --query 'LaunchTemplateVersions[0].LaunchTemplateData.UserData' --output text)"
-  if [[ "$current" == "$userdata" ]]; then
+    --query 'LaunchTemplateVersions[0].VersionDescription' --output text)"
+  if [[ "$current" == "$checksum" ]]; then
     echo "==> launch template $name up to date"
     return
   fi
@@ -134,6 +147,7 @@ EOF
   local version
   version="$(aws ec2 create-launch-template-version --region "$AWS_REGION" \
     --launch-template-name "$name" \
+    --version-description "$checksum" \
     --launch-template-data "$data" \
     --query 'LaunchTemplateVersion.VersionNumber' --output text)"
   aws ec2 modify-launch-template --region "$AWS_REGION" \

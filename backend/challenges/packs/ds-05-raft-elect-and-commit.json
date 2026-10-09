@@ -1,0 +1,150 @@
+{
+  "id": "ds-05-raft-elect-and-commit",
+  "number": 505,
+  "finalized": true,
+  "title": "Raft: elect a leader and commit an entry",
+  "description": "A five-node Raft cluster has lost its leader. Elect a new one and commit the next payment config change.",
+  "difficulty": "L2",
+  "tags": [
+    "data-systems",
+    "consensus",
+    "raft",
+    "leader-election",
+    "board"
+  ],
+  "category": "data-systems",
+  "sandboxType": "board",
+  "problemStatement": {
+    "overview": "payment-handler keeps its configuration in a five-node Raft cluster, the same algorithm behind etcd and Consul. The leader just crashed.\n\nRaft gets the remaining nodes to agree on a single new leader for a new term, and then on the exact order of log entries. Everything rests on majorities: with five nodes, three is a majority, and any two majorities share at least one node.\n\nThe outline runs from the election timeout to the client getting its reply. Fill the blocks. Traps break safety or stall the cluster.",
+    "yourTask": "Order the steps from a follower noticing the missing leader to a committed, applied log entry.",
+    "yourTaskSteps": [
+      "Read every card.",
+      "Fill each empty block from Unused.",
+      "The dashed block is optional.",
+      "Submit."
+    ],
+    "hints": [
+      "Terms act as a logical clock. Higher terms win.",
+      "A vote is only granted to a candidate whose log is at least as up to date.",
+      "Committed means stored on a majority, not just on the leader."
+    ],
+    "moat": "Setter notes, not shown to learners.\n\nRequired chain: election-timeout → become-candidate → win-majority → leader-append → majority-replicated → apply-reply.\nOptional splice: split-vote on become-candidate → win-majority.\nFive traps."
+  },
+  "platformSpec": {
+    "kicker": "Consensus · Raft",
+    "passMessage": "New term, majority vote, majority replication, then apply. That's Raft.",
+    "pieces": [
+      {
+        "id": "election-timeout",
+        "title": "Election timeout fires",
+        "blurb": "A follower hears no heartbeat before its randomized timeout (for example 150 to 300 ms) expires.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": null,
+        "trapIfPlaced": null
+      },
+      {
+        "id": "become-candidate",
+        "title": "Become a candidate in a new term",
+        "blurb": "It increments its term, votes for itself, and sends RequestVote to every other node.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "election-timeout",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "split-vote",
+        "title": "Split vote, then retry",
+        "blurb": "If two candidates split the votes and nobody reaches a majority, each waits a new random timeout and starts another term.",
+        "kind": "mechanism",
+        "gold": "optional",
+        "parent": "become-candidate",
+        "child": "win-majority",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "win-majority",
+        "title": "Win votes from a majority",
+        "blurb": "Three of five nodes grant their vote. Each votes at most once per term, and only if the candidate's log is at least as up to date as its own.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "become-candidate",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "leader-append",
+        "title": "Leader appends the entry and replicates",
+        "blurb": "The new leader appends the client's config change to its log and sends AppendEntries to the followers.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "win-majority",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "majority-replicated",
+        "title": "Entry stored on a majority: committed",
+        "blurb": "Once the entry is in the logs of three of five nodes, the leader advances its commit index.",
+        "kind": "mechanism",
+        "gold": "required",
+        "parent": "leader-append",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "apply-reply",
+        "title": "Apply to the state machine and reply",
+        "blurb": "The leader applies the entry and answers the client. Followers apply it when they learn the new commit index.",
+        "kind": "stage",
+        "gold": "required",
+        "parent": "majority-replicated",
+        "trapIfPlaced": null
+      },
+      {
+        "id": "fixed-timeout",
+        "title": "Every node uses the same fixed timeout",
+        "blurb": "All followers wait exactly 200 ms, so the cluster reacts at a predictable moment.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Identical timeouts make every node stand at once, so votes keep splitting. Raft randomizes them."
+      },
+      {
+        "id": "half-votes",
+        "title": "Win with votes from half the cluster",
+        "blurb": "Half the nodes is enough to lead. In a four-node cluster, your own vote plus one more makes you leader.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Raft needs a strict majority. Half is not enough, otherwise two leaders could win the same term."
+      },
+      {
+        "id": "leader-disk-commit",
+        "title": "Commit once the leader's disk has it",
+        "blurb": "As soon as the leader fsyncs the entry locally, it is committed.",
+        "kind": "mechanism",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "If that leader crashes, a new leader without the entry could be elected. Commit needs a majority."
+      },
+      {
+        "id": "stale-term-ok",
+        "title": "Accept entries from a lower term",
+        "blurb": "A follower accepts AppendEntries from any node that claims to be leader, regardless of its term.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "Requests from an older term are rejected. That is how a deposed leader is stopped."
+      },
+      {
+        "id": "leader-trims-own",
+        "title": "New leader deletes entries to match followers",
+        "blurb": "If followers are missing entries, the leader removes those entries from its own log to agree with them.",
+        "kind": "stage",
+        "gold": "tray",
+        "parent": null,
+        "trapIfPlaced": "A Raft leader never overwrites or deletes its own log. Followers are brought in line with the leader."
+      }
+    ]
+  },
+  "visibleTo": "users",
+  "tokens": 10
+}

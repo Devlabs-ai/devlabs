@@ -239,6 +239,6 @@
     "jobYaml": "job.yaml",
     "s3Prefix": "challenges/l3-interchange-fee-settlement"
   },
-  "visibleTo": "admin",
+  "visibleTo": "users",
   "tokens": 10
 }

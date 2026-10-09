@@ -46,7 +46,7 @@ function razorpayPlanId(plan: BillingPlan): string {
 /** Launch offer: percent off the first month for subscriptions created before LAUNCH_OFFER_ENDS_AT. */
 function launchOffer(): { percentOff: number; endsAt: number } | null {
   const percentOff = parseInt(process.env.LAUNCH_OFFER_PERCENT || '40', 10);
-  const endsAt = Date.parse(process.env.LAUNCH_OFFER_ENDS_AT || '2026-10-31T23:59:59+05:30');
+  const endsAt = Date.parse(process.env.LAUNCH_OFFER_ENDS_AT || '2026-11-30T23:59:59+05:30');
   if (!percentOff || percentOff <= 0 || percentOff >= 100 || Number.isNaN(endsAt)) return null;
   if (Date.now() > endsAt) return null;
   return { percentOff, endsAt };

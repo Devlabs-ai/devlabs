@@ -5,6 +5,7 @@
  *
  * - Starting a lab while another lab is active → 409 ACTIVE_LAB_ELSEWHERE
  *   (client may retry with force=true to end the other lab first).
+ *   Whiteboard sessions never conflict; starting anything ends them silently.
  * - Each tab sends a random clientId and heartbeats; a second tab on the same
  *   session gets 409 LAB_OPEN_IN_OTHER_TAB until it takes over with force=true.
  */
@@ -81,7 +82,10 @@ async function assertCanStart({
   const owner = ownerOf(userId);
   const active = activeLabSessionsFor(owner);
 
-  const others = active.filter((s) => s.challengeId !== challengeId);
+  // Boards hold no cluster resources, so a board left open never blocks a start;
+  // it is closed quietly once the new start is allowed.
+  const staleBoards = active.filter((s) => s.challengeId !== challengeId && s.runtime === 'board');
+  const others = active.filter((s) => s.challengeId !== challengeId && s.runtime !== 'board');
   if (others.length && !force) {
     const first = others[0];
     throw conflict('ACTIVE_LAB_ELSEWHERE', `You already have "${titleOf(first.challengeId) || first.challengeId}" open. End it before starting another lab.`, {
@@ -100,11 +104,10 @@ async function assertCanStart({
     });
   }
 
-  if (force) {
-    for (const s of others) {
-      leases.delete(s.id);
-      await endSession(s.id);
-    }
+  const toEnd = force ? [...staleBoards, ...others] : staleBoards;
+  for (const s of toEnd) {
+    leases.delete(s.id);
+    await endSession(s.id);
   }
 }
 

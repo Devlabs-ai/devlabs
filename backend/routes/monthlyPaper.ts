@@ -3,7 +3,7 @@
 import type { ExpressRequest, ExpressResponse, ExpressNextFunction } from '../types/express';
 
 const express = require('express');
-const { optionalAuth, requireInterviewer, requireAdmin } = require('../auth/middleware');
+const { optionalAuth, requireInterviewer, requireAdmin, isAdminUser } = require('../auth/middleware');
 const { sanitizeOwner } = require('../workspace/workspaceStore');
 const pool = require('../db/pool');
 const {
@@ -135,6 +135,7 @@ router.post('/attempt', requireInterviewer, async (req: ExpressRequest, res: Exp
   try {
     const userId = ownerKey(req);
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!isAdminUser(req.user)) return res.status(403).json({ error: 'The paper quiz is not open yet.' });
     const body = (req.body || {}) as { paperId?: unknown; answers?: unknown };
     const paper = await currentPaper();
     if (String(body.paperId || '') !== paper.id) {

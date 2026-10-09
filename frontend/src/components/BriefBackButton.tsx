@@ -24,7 +24,7 @@ export default function BriefBackButton(): JSX.Element {
             strokeLinejoin="round"
           />
         </svg>
-        Back
+        <span className="spark-brief-back-label">Back</span>
       </button>
       <span className="spark-brief-back-divider" aria-hidden="true" />
     </>

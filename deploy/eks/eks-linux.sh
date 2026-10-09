@@ -6,12 +6,15 @@
 #
 #   base   create the labs-linux managed node group + launch template if missing, scale to 1
 #          (AWS admin creds: EKS + EC2 launch templates)
-#   up     apply the labs-linux-elastic EC2NodeClass + NodePool and the NRI plugin (kubectl)
+#   up     apply the labs-linux-elastic EC2NodeClass + NodePool, the NRI plugin and the box
+#          seccomp profiles (kubectl)
 #   sleep  park Linux capacity: elastic limit → 0 and its nodes removed, labs-linux → 0
 #   wake   labs-linux → 1, then `up` (restores the elastic limit)
 #   spike  up + start the phase-0 spike boxes (deploy/eks/linux/spike.yaml), then check
 #   check  re-run the capability checks against running spike boxes
-#   down   delete the spike boxes, the NRI plugin and labs-linux-elastic; labs-linux → 0
+#   seccomp  (re)install only the box seccomp profiles
+#   down   delete the spike boxes, the NRI plugin, the seccomp profiles and labs-linux-elastic;
+#          labs-linux → 0
 #
 # Needs Karpenter installed (eks-karpenter.sh) and devsetu/linux-lab pushed
 # (./images/build-all.sh linux-lab).
@@ -61,6 +64,19 @@ up() {
   kubectl get nodepool "$POOL"
   echo "==> NRI plugin nri-cgroup-rw (dl-system, every devlabs.io/pool=linux node)"
   kubectl apply -f "$ROOT/linux/nri-cgroup-rw.yaml"
+  seccomp_profiles
+}
+
+# Box seccomp profiles (linux/seccomp/*.json) on every labs-linux node. Boxes fail to start
+# until their node has the profile, so wait for the installer when a node is up.
+seccomp_profiles() {
+  echo "==> seccomp profiles (dl-system/seccomp-profiles → /var/lib/kubelet/seccomp/devlabs/)"
+  kubectl apply -f "$ROOT/linux/seccomp-profiles.yaml"
+  kubectl -n dl-system create configmap seccomp-profiles \
+    --from-file="$ROOT/linux/seccomp/" --dry-run=client -o yaml | kubectl apply -f -
+  if kubectl get nodes -l devlabs.io/pool=linux -o name | grep -q .; then
+    kubectl -n dl-system rollout status ds/seccomp-profiles --timeout=3m
+  fi
 }
 
 park_elastic() {
@@ -100,7 +116,11 @@ CHECKS=(
   "loop + ext4 mount (optional)|truncate -s 32M /tmp/disk.img && mkfs.ext4 -qF /tmp/disk.img && mkdir -p /mnt/spike && mount -o loop /tmp/disk.img /mnt/spike && umount /mnt/spike"
   "renice below 0|nice -n -5 true"
   "strace|strace -o /dev/null true"
-  "apt egress|timeout 90 apt-get update -qq"
+  "apt egress (fails once NetworkPolicy is enforced)|timeout 90 apt-get update -qq"
+  "seccomp filter on PID 1|grep -Eq '^Seccomp:[[:space:]]+2' /proc/1/status"
+  "io_uring blocked by seccomp|perl -e 'syscall(425, 1, 0); exit(\$!==38 ? 0 : 1)'"
+  "nested user namespace blocked|! unshare -Ur true"
+  "no failed units|[ -z \"\$(systemctl --failed --no-legend --plain)\" ]"
 )
 
 check_pod() {
@@ -150,7 +170,8 @@ spike() {
 down() {
   echo "==> delete spike boxes"
   kubectl delete namespace "$NS" --ignore-not-found --wait=true
-  kubectl -n dl-system delete daemonset nri-cgroup-rw --ignore-not-found
+  kubectl -n dl-system delete daemonset nri-cgroup-rw seccomp-profiles --ignore-not-found
+  kubectl -n dl-system delete configmap seccomp-profiles --ignore-not-found
   echo "==> delete NodePool $POOL (Karpenter terminates its nodes)"
   kubectl delete nodepool "$POOL" --ignore-not-found --wait=true --timeout=10m
   kubectl delete ec2nodeclass "$POOL" --ignore-not-found --wait=true --timeout=10m
@@ -162,10 +183,11 @@ down() {
 case "${1:-}" in
   base) base ;;
   up) up ;;
+  seccomp) seccomp_profiles ;;
   sleep) sleep_linux ;;
   wake) wake_linux ;;
   spike) spike ;;
   check) check ;;
   down) down ;;
-  *) echo "usage: $0 base|up|sleep|wake|spike|check|down" >&2; exit 2 ;;
+  *) echo "usage: $0 base|up|seccomp|sleep|wake|spike|check|down" >&2; exit 2 ;;
 esac

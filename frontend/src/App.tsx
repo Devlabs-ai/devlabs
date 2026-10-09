@@ -28,11 +28,13 @@ import K8sReadingPage from './pages/K8sReadingPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminPage from './pages/AdminPage';
 import AdminFeedbackPage from './pages/AdminFeedbackPage';
+import AdminWaitlistPage from './pages/AdminWaitlistPage';
 import DbExplorerPage from './pages/DbExplorerPage';
 import TrackLeaderboardPage from './pages/TrackLeaderboardPage';
 import PricingPage from './pages/PricingPage';
 import MonthlyPaperPage from './pages/MonthlyPaperPage';
 import PlatformLeaderboardPage from './pages/PlatformLeaderboardPage';
+import LearnerProfilePage from './pages/LearnerProfilePage';
 import AppLayout from './layouts/AppLayout';
 import { AppStateProvider, useAppState } from './context/AppStateContext';
 import { getToken, getCurrentUser, logout, fetchMe, takePostLoginPath } from './services/authApi';
@@ -61,6 +63,7 @@ import { isSparkPlatformChallenge } from './components/SparkPlatformWorkspace';
 import { isBoardChallenge } from './components/BoardWorkspace';
 import { isKubernetesChallenge } from './components/K8sLabWorkspace';
 import { SPARK_PLAYGROUND_CHALLENGE_ID } from './constants/playgroundDatasets';
+import { PRICING_PATH } from './constants/pricing';
 import { catalogPathForChallenge, isPlayDomainId, looksLikePlaySessionId } from './constants/playCatalog';import type {
   AuthMode,
   PlayState,
@@ -285,6 +288,10 @@ export default function App(): React.JSX.Element {
   ): Promise<void> => {
     if (authMode !== 'interviewer') {
       requestLogin();
+      return;
+    }
+    if ((challenge as ChallengePublic).locked) {
+      navigate(PRICING_PATH);
       return;
     }
     const force = Boolean(opts.force);
@@ -1039,6 +1046,7 @@ export default function App(): React.JSX.Element {
     onEnd: handleEnd,
     onLogout: handleLogout,
     onRequestLogin: requestLogin,
+    refreshChallenges,
   }), [
     authMode,
     currentUser,
@@ -1099,9 +1107,14 @@ export default function App(): React.JSX.Element {
             path="minors/:minorId"
             element={<SignedInOnlyRoute fallback={parentPath} unopened={minorUnopened}><MinorsPage /></SignedInOnlyRoute>}
           />
+          <Route
+            path="minors/:minorId/:chapterId"
+            element={<SignedInOnlyRoute fallback={parentPath} unopened={minorUnopened}><MinorsPage /></SignedInOnlyRoute>}
+          />
           <Route path="pricing" element={<PricingPage />} />
           <Route path="monthly-paper" element={<MonthlyPaperPage />} />
           <Route path="leaderboard" element={<PlatformLeaderboardPage />} />
+          <Route path="learners/:learnerId" element={<LearnerProfilePage />} />
           <Route path="track/spark-playground/open" element={<SparkPlaygroundOpenPage />} />
           <Route path="track/spark-playground" element={<SparkPlaygroundPage />} />
           <Route path="track/data-engineer/spark/intro" element={<SparkPrimerPage />} />
@@ -1124,6 +1137,7 @@ export default function App(): React.JSX.Element {
           <Route path="profile" element={<SignedInOnlyRoute><ProfilePage /></SignedInOnlyRoute>} />
           <Route path="admin" element={<SignedInOnlyRoute><AdminPage /></SignedInOnlyRoute>} />
           <Route path="admin/feedback" element={<SignedInOnlyRoute><AdminFeedbackPage /></SignedInOnlyRoute>} />
+          <Route path="admin/waitlist" element={<SignedInOnlyRoute><AdminWaitlistPage /></SignedInOnlyRoute>} />
           {import.meta.env.DEV && (
             <Route path="dev/db" element={<SignedInOnlyRoute><DbExplorerPage /></SignedInOnlyRoute>} />
           )}

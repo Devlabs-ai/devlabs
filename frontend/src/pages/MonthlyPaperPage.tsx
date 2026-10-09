@@ -68,6 +68,7 @@ export default function MonthlyPaperPage(): JSX.Element {
   };
 
   const attempt = state?.attempt;
+  const quizOpenToUser = isAdminUser(currentUser);
 
   return (
     <div className="app-page play-problems-page monthly-page">
@@ -75,8 +76,9 @@ export default function MonthlyPaperPage(): JSX.Element {
         <div className="play-problems-hero-copy">
           <h1 className="play-problems-title">Paper of the Month</h1>
           <p className="play-problems-lead">
-            One landmark systems paper each month. Read it, answer five questions, and earn
-            tokens for what you understood.
+            {quizOpenToUser
+              ? 'One landmark systems paper each month. Read it, answer five questions, and earn tokens for what you understood.'
+              : 'One landmark systems paper each month. A short quiz on each paper is coming soon.'}
           </p>
         </div>
       </header>
@@ -89,16 +91,22 @@ export default function MonthlyPaperPage(): JSX.Element {
               month={monthLabel(state.pickedAt)}
               current
               badge={
-                attempt ? (
+                !quizOpenToUser ? null : attempt ? (
                   <TokenBadge label={`+${attempt.tokens}`} title={`${attempt.correct}/${attempt.total} correct`} />
                 ) : (
                   <TokenBadge label={String(state.tokensPerPaper)} title={`Earn up to ${state.tokensPerPaper} tokens`} />
                 )
               }
             >
-              <button type="button" className="monthly-tile-btn" onClick={attempt ? () => setQuizOpen(true) : openQuiz}>
-                {attempt ? 'Review answers' : 'Test yourself'}
-              </button>
+              {quizOpenToUser ? (
+                <button type="button" className="monthly-tile-btn" onClick={attempt ? () => setQuizOpen(true) : openQuiz}>
+                  {attempt ? 'Review answers' : 'Test yourself'}
+                </button>
+              ) : (
+                <button type="button" className="monthly-tile-btn" disabled title="The paper quiz is not open yet">
+                  Quiz coming soon
+                </button>
+              )}
             </PaperTile>
 
             {state.earlier.map((p) => (
@@ -121,7 +129,7 @@ export default function MonthlyPaperPage(): JSX.Element {
             </div>
           )}
 
-          {quizOpen && (
+          {quizOpen && quizOpenToUser && (
             <MonthlyPaperQuizModal
               state={state}
               onClose={() => setQuizOpen(false)}

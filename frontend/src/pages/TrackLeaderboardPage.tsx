@@ -11,6 +11,8 @@ import {
 import { fetchTrackLeaderboard, type Leaderboard } from '../services/leaderboardApi';
 import { IconCoins } from '../components/ChromeIcons';
 import { LeaderboardIcon } from '../components/TrackStatusIcons';
+import LeaderboardSignInPrompt from '../components/LeaderboardSignInPrompt';
+import { useAppState } from '../context/AppStateContext';
 
 const FULL_LIMIT = 1000;
 
@@ -27,12 +29,14 @@ export default function TrackLeaderboardPage(): JSX.Element {
   const challengeIds = panel?.challengeIds ?? [];
   const idsKey = challengeIds.join(',');
 
+  const { authMode } = useAppState();
+  const signedIn = authMode === 'interviewer';
   const [board, setBoard] = useState<Leaderboard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
 
   useEffect(() => {
-    if (!challengeIds.length) return undefined;
+    if (!signedIn || !challengeIds.length) return undefined;
     let cancelled = false;
     setBoard(null);
     setError(null);
@@ -43,7 +47,7 @@ export default function TrackLeaderboardPage(): JSX.Element {
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idsKey]);
+  }, [idsKey, signedIn]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -55,26 +59,41 @@ export default function TrackLeaderboardPage(): JSX.Element {
 
   const trackPath = playCatalogPath(domain.id, panel.id);
 
+  const header = (
+    <header className="leaderboard-page-header">
+      <p className="spark-primer-crumb">
+        <Link to="/track">Tracks</Link>
+        <span aria-hidden> / </span>
+        <Link to={playCatalogPath(domain.id)}>{domain.label}</Link>
+        <span aria-hidden> / </span>
+        <Link to={trackPath}>{panel.label}</Link>
+        <span aria-hidden> / </span>
+        Leaderboard
+      </p>
+      <div className="leaderboard-page-title-row">
+        <LeaderboardIcon className="leaderboard-header-icon" title="" />
+        <h1 className="leaderboard-page-title">{panel.label} leaderboard</h1>
+      </div>
+      <p className="leaderboard-sub">
+        Ranked by tokens earned from solved labs in this track. Ties go to more labs solved, then to whoever got there first.
+      </p>
+    </header>
+  );
+
+  if (!signedIn) {
+    return (
+      <div className="app-page leaderboard-page">
+        {header}
+        <section className="leaderboard-page-card">
+          <LeaderboardSignInPrompt />
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="app-page leaderboard-page">
-      <header className="leaderboard-page-header">
-        <p className="spark-primer-crumb">
-          <Link to="/track">Tracks</Link>
-          <span aria-hidden> / </span>
-          <Link to={playCatalogPath(domain.id)}>{domain.label}</Link>
-          <span aria-hidden> / </span>
-          <Link to={trackPath}>{panel.label}</Link>
-          <span aria-hidden> / </span>
-          Leaderboard
-        </p>
-        <div className="leaderboard-page-title-row">
-          <LeaderboardIcon className="leaderboard-header-icon" title="" />
-          <h1 className="leaderboard-page-title">{panel.label} leaderboard</h1>
-        </div>
-        <p className="leaderboard-sub">
-          Ranked by tokens earned from solved labs in this track. Ties go to more labs solved, then to whoever got there first.
-        </p>
-      </header>
+      {header}
 
       {board?.me && (
         <div className="leaderboard-page-me">

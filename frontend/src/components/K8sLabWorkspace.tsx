@@ -165,6 +165,7 @@ export default function K8sLabWorkspace({
   const [mainTab, setMainTab] = useState<MainTab>(box ? 'terminal' : 'editor');
   const showBrief = isNarrow ? mobilePane === 'brief' : !briefCollapsed;
   const showWorkspace = isNarrow ? mobilePane === 'workspace' : true;
+  const desktopOnly = isNarrow && challenge?.sandboxType !== 'linux';
   const showResize = !isNarrow && !briefCollapsed;
   const [briefTab, setBriefTab] = useState<ProblemStatementTab>('description');
   const [briefChallenge, setBriefChallenge] = useState<ChallengePublic | ChallengeFull | null>(challenge);
@@ -485,7 +486,7 @@ export default function K8sLabWorkspace({
                   type="button"
                   role="tab"
                   aria-selected={briefTab === 'visibility'}
-                  className={`spark-brief-tab spark-brief-tab--setter${briefTab === 'visibility' ? ' active' : ''}`}
+                  className={`spark-brief-tab spark-brief-tab--setter spark-brief-tab--admin-row${briefTab === 'visibility' ? ' active' : ''}`}
                   onClick={() => setBriefTab('visibility')}
                 >
                   Visibility
@@ -496,7 +497,7 @@ export default function K8sLabWorkspace({
                   type="button"
                   role="tab"
                   aria-selected={briefTab === 'review'}
-                  className={`spark-brief-tab spark-brief-tab--setter${briefTab === 'review' ? ' active' : ''}`}
+                  className={`spark-brief-tab spark-brief-tab--setter spark-brief-tab--admin-row${briefTab === 'review' ? ' active' : ''}`}
                   onClick={() => setBriefTab('review')}
                 >
                   Review
@@ -667,10 +668,10 @@ export default function K8sLabWorkspace({
         </button>
       )}
 
-      {showWorkspace && isNarrow && (
+      {showWorkspace && desktopOnly && (
         <DesktopOnlyNotice tools="terminal and editor" onShowBrief={() => setMobilePane('brief')} />
       )}
-      {showWorkspace && !isNarrow && (
+      {showWorkspace && !desktopOnly && (
       <div className="col col-main">
         <div className="panel spark-ide-panel" style={{ flex: 1 }}>
           <div className="spark-ide-actionbar">

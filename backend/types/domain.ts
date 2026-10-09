@@ -170,6 +170,13 @@ export interface LinuxBoxSpec {
   /** Defaults to the flavor's image: LINUX_LAB_IMAGE / DOCKER_LAB_IMAGE. */
   image?: string;
   hostname?: string;
+  /**
+   * linux flavor only: run the box without systemd or the added capabilities, for
+   * no-root labs (the free shell/file-navigation set). Keeps only the caps needed to
+   * seed the lab and switch to the learner; drops SYS_ADMIN/NET_ADMIN and the custom
+   * seccomp profile, shrinking the kernel attack surface for the untrusted free tier.
+   */
+  unprivileged?: boolean;
   resources?: {
     requests?: { cpu?: string; memory?: string };
     limits?: { cpu?: string; memory?: string };
@@ -195,10 +202,52 @@ export interface BoardPiece {
   /** Optional splice: if this node is placed, it sits on the gold edge parent → child. */
   child: string | null;
   trapIfPlaced: string | null;
+  /** Short question shown on this piece's slot, e.g. "On every write · survive a crash". */
+  prompt: string | null;
+  /** Unlock mode: revealed once this piece's step is locked in. */
+  clue: string | null;
+  /** Debate mode: who said this card's claim. */
+  speaker: string | null;
+}
+
+/**
+ * classic — place everything, then submit.
+ * unlock  — one required step at a time; each correct step reveals its clue.
+ * debate  — mark every card's claim true/false first, then build from the true ones.
+ */
+export type BoardGameMode = 'classic' | 'unlock' | 'debate';
+
+export interface BoardGameConfig {
+  mode: BoardGameMode;
+  /** Mistakes allowed before the board must be reset. Null = unlimited, no stars. */
+  lives: number | null;
+}
+
+export interface BoardFinaleOption {
+  id: string;
+  label: string;
+}
+
+/** Closing multiple-choice question, asked once the board itself is correct. */
+export interface BoardFinale {
+  prompt: string;
+  options: BoardFinaleOption[];
+  answer: string;
+  explanation: string;
 }
 
 export interface BoardSpec {
   pieces: BoardPiece[];
+  /** Workspace header label, e.g. "Replication · Order the failover". */
+  kicker?: string | null;
+  /** Grade summary shown when every block is correct. */
+  passMessage?: string | null;
+  game?: BoardGameConfig;
+  finale?: BoardFinale | null;
+  /** Heading for the unused-card tray, e.g. "Evidence". */
+  trayLabel?: string | null;
+  /** Challenge id that must be solved before this board opens. */
+  unlockAfter?: string | null;
 }
 
 export interface PublicBoardPiece {
@@ -206,6 +255,7 @@ export interface PublicBoardPiece {
   title: string;
   blurb: string;
   kind: 'stage' | 'mechanism';
+  speaker?: string | null;
 }
 
 export interface PublicBoardSlot {
@@ -213,6 +263,7 @@ export interface PublicBoardSlot {
   optional: boolean;
   x: number;
   y: number;
+  prompt?: string | null;
 }
 
 export interface PublicBoardShadow {
@@ -223,6 +274,11 @@ export interface PublicBoardShadow {
 export interface PublicBoardSpec {
   pieces: PublicBoardPiece[];
   shadow: PublicBoardShadow;
+  kicker?: string | null;
+  game?: BoardGameConfig;
+  finale?: { prompt: string; options: BoardFinaleOption[] } | null;
+  trayLabel?: string | null;
+  unlockAfter?: string | null;
 }
 
 export interface BoardGraphNode {
@@ -259,6 +315,32 @@ export interface BoardGradeResult {
   correctRequired: number;
   requiredCount: number;
   trapsPlaced: number;
+  /** Blocks are all correct (the finale may still be open). */
+  boardPassed?: boolean;
+  needsFinale?: boolean;
+  /** 1–3 when the board has lives and is passed. */
+  stars?: number | null;
+}
+
+export interface BoardClaimResult {
+  verdict: boolean;
+  correct: boolean;
+  /** Why the claim is false; only for false claims. */
+  explanation: string | null;
+}
+
+export interface BoardGameState {
+  lives: number | null;
+  livesMax: number | null;
+  /** Unlock mode: number of required steps locked in. */
+  step: number;
+  clues: string[];
+  /** Debate mode: verdicts once submitted. */
+  claims: Record<string, BoardClaimResult> | null;
+  finaleCorrect: boolean;
+  finaleExplanation: string | null;
+  resets: number;
+  over: boolean;
 }
 
 export interface BoardState {
@@ -268,6 +350,7 @@ export interface BoardState {
   nodes?: BoardGraphNode[];
   edges?: BoardGraphEdge[];
   lastGrade?: BoardGradeResult | null;
+  game?: BoardGameState;
 }
 
 export interface ChallengeFull extends ChallengePublic {

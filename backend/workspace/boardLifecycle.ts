@@ -6,7 +6,19 @@ const { v4: uuidv4 } = require('uuid');
 const pool = require('../db/pool');
 const sessionStore = require('../db/sessionStore');
 const loader = require('../challenges/loader');
-const { parseBoardSpec, gradeBoard, publicBoardSpec, emptyBoardState, coerceBoardState } = require('./boardGrade');
+const {
+  parseBoardSpec,
+  gradeBoard,
+  publicBoardSpec,
+  emptyBoardState,
+  coerceBoardState,
+  defaultGame,
+  loseLife,
+  assertPlayable,
+  checkStep: checkStepPure,
+  judgeClaims: judgeClaimsPure,
+  answerFinale: answerFinalePure,
+} = require('./boardGrade');
 const { sanitizeOwner } = require('./workspaceStore');
 
 function emptyState(spec: BoardSpec): BoardState {
@@ -162,30 +174,33 @@ function savePlaced(session: GameSession, spec: BoardSpec, bodyRaw: unknown): Bo
     bodyRaw && typeof bodyRaw === 'object' && !Array.isArray(bodyRaw)
       && (bodyRaw as { reset?: unknown }).reset,
   );
+  const prevGame = prev.game || defaultGame(spec);
+  let fills = incoming.fills;
+  if (!reset && spec.game?.mode === 'unlock') {
+    // Required steps only change through checkStep; only optional blocks are free.
+    const optionalIds = new Set(
+      Object.keys(fills).filter((sid) => sid.startsWith('o')),
+    );
+    fills = Object.fromEntries(
+      Object.keys(fills).map((sid) => [sid, optionalIds.has(sid) ? fills[sid] : prev.fills[sid] ?? null]),
+    );
+  }
   const next: BoardState = {
-    trayOrder: prev.trayOrder?.length ? prev.trayOrder : spec.pieces.map((p) => p.id),
-    fills: incoming.fills,
+    trayOrder: reset
+      ? spec.pieces.map((p) => p.id)
+      : (prev.trayOrder?.length ? prev.trayOrder : spec.pieces.map((p) => p.id)),
+    fills,
     nodes: [],
     edges: [],
     lastGrade: reset ? null : (prev.lastGrade ?? null),
+    game: reset ? defaultGame(spec, prevGame.resets + 1) : prevGame,
   };
   session.boardState = next;
   session.workspaceUpdatedAt = Date.now();
   return next;
 }
 
-async function submitBoard(
-  session: GameSession,
-  spec: BoardSpec,
-  bodyRaw: unknown,
-): Promise<{ state: BoardState; grade: ReturnType<typeof gradeBoard> }> {
-  const state = savePlaced(session, spec, bodyRaw);
-  const grade = gradeBoard(spec, state);
-  state.lastGrade = grade;
-  session.boardState = state;
-  session.workspaceUpdatedAt = Date.now();
-  await sessionStore.persistRow(session);
-
+async function recordSubmission(session: GameSession, grade: ReturnType<typeof gradeBoard>): Promise<void> {
   const jobId = uuidv4();
   const now = Date.now();
   await pool.query(
@@ -208,7 +223,64 @@ async function submitBoard(
       now,
     ],
   );
+}
 
+async function persistGame(session: GameSession, state: BoardState): Promise<void> {
+  session.boardState = state;
+  session.workspaceUpdatedAt = Date.now();
+  await sessionStore.persistRow(session);
+}
+
+async function checkStep(
+  session: GameSession,
+  spec: BoardSpec,
+  body: { slotId?: unknown; pieceId?: unknown },
+) {
+  const state = coerceBoardState(session.boardState, spec);
+  const result = checkStepPure(spec, state, String(body.slotId || ''), String(body.pieceId || ''));
+  const required = spec.pieces.filter((p) => p.gold === 'required').length;
+  let grade = null;
+  if (result.correct && result.state.game.step >= required) {
+    grade = gradeBoard(spec, result.state);
+    result.state.lastGrade = grade;
+    await recordSubmission(session, grade);
+  }
+  await persistGame(session, result.state);
+  return { ...result, grade };
+}
+
+async function judgeClaims(session: GameSession, spec: BoardSpec, body: { verdicts?: unknown }) {
+  const state = coerceBoardState(session.boardState, spec);
+  const result = judgeClaimsPure(spec, state, body.verdicts);
+  await persistGame(session, result.state);
+  return result;
+}
+
+async function answerFinale(session: GameSession, spec: BoardSpec, body: { optionId?: unknown }) {
+  const state = coerceBoardState(session.boardState, spec);
+  const result = answerFinalePure(spec, state, body.optionId);
+  const grade = gradeBoard(spec, result.state);
+  result.state.lastGrade = grade;
+  if (result.correct) await recordSubmission(session, grade);
+  await persistGame(session, result.state);
+  return { ...result, grade };
+}
+
+async function submitBoard(
+  session: GameSession,
+  spec: BoardSpec,
+  bodyRaw: unknown,
+): Promise<{ state: BoardState; grade: ReturnType<typeof gradeBoard> }> {
+  assertPlayable(coerceBoardState(session.boardState, spec).game);
+  const state = savePlaced(session, spec, bodyRaw);
+  let grade = gradeBoard(spec, state);
+  if (!grade.boardPassed && state.game) {
+    loseLife(state.game);
+    grade = gradeBoard(spec, state);
+  }
+  state.lastGrade = grade;
+  await persistGame(session, state);
+  await recordSubmission(session, grade);
   return { state, grade };
 }
 
@@ -229,6 +301,9 @@ module.exports = {
   startBoardSession,
   savePlaced,
   submitBoard,
+  checkStep,
+  judgeClaims,
+  answerFinale,
   endBoardSession,
   specFromChallenge,
   publicBoardSpec,

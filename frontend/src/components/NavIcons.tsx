@@ -1,6 +1,7 @@
 import React from 'react';
 
 export type NavIconName =
+  | 'track'
   | 'majors'
   | 'minors'
   | 'papers'
@@ -8,9 +9,20 @@ export type NavIconName =
   | 'leaderboard'
   | 'pricing'
   | 'profile'
-  | 'signin';
+  | 'subscriptions'
+  | 'contact'
+  | 'admin'
+  | 'signin'
+  | 'signout';
 
 const PATHS: Record<NavIconName, JSX.Element> = {
+  track: (
+    <>
+      <circle cx="6" cy="18" r="2" />
+      <circle cx="18" cy="6" r="2" />
+      <path d="M8 18h7a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h7" />
+    </>
+  ),
   majors: (
     <>
       <path d="M12 3 3 8l9 5 9-5-9-5Z" />
@@ -54,10 +66,34 @@ const PATHS: Record<NavIconName, JSX.Element> = {
       <path d="M4 21a8 8 0 0 1 16 0" />
     </>
   ),
+  subscriptions: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3 10h18M7 15h4" />
+    </>
+  ),
+  contact: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m3 7 9 6 9-6" />
+    </>
+  ),
+  admin: (
+    <>
+      <path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6l-8-3Z" />
+      <path d="m9 12 2 2 4-4" />
+    </>
+  ),
   signin: (
     <>
       <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
       <path d="M10 17l5-5-5-5M15 12H3" />
+    </>
+  ),
+  signout: (
+    <>
+      <path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4" />
+      <path d="m16 17 5-5-5-5M21 12H9" />
     </>
   ),
 };

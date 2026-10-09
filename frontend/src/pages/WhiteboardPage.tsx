@@ -65,7 +65,10 @@ export default function WhiteboardPage(): JSX.Element {
         {sectionBoards.length > 0 && (
           <div className="play-paper-tile-grid" aria-label={`${section.label} whiteboard sessions`}>
             {sectionBoards.map((challenge) => {
-              const playable = Boolean(challenge.finalized);
+              const prereqId = challenge.boardSpec?.unlockAfter;
+              const prereq = prereqId ? boards.find((b) => b.id === prereqId) : undefined;
+              const locked = Boolean(prereq && !prereq.solved);
+              const playable = Boolean(challenge.finalized) && !locked;
               return (
                 <button
                   key={challenge.id}
@@ -85,7 +88,7 @@ export default function WhiteboardPage(): JSX.Element {
                   {markdownExcerpt(challenge.description, { maxLen: 110, title: challenge.title })}
                 </p>
                   <span className="play-paper-tile-cta">
-                    {playable ? 'Open board' : 'Coming soon'}
+                    {locked ? `🔒 Solve “${prereq?.title}” to unlock` : playable ? 'Open board' : 'Coming soon'}
                     <span aria-hidden>→</span>
                   </span>
                 </button>
@@ -108,7 +111,7 @@ export default function WhiteboardPage(): JSX.Element {
           </p>
           <h1 className="play-problems-title">Whiteboard</h1>
           <p className="play-problems-lead">
-            Reconstruct what the engine does. The plan’s outline is given; you fill the blocks. No cluster.
+            Data systems theory, one mechanism at a time. The outline is drawn; you fill the blocks. No cluster.
           </p>
         </div>
       </header>

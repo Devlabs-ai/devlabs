@@ -73,7 +73,7 @@ function RichTextInline({ text }: { text: string }): JSX.Element {
 }
 
 /** Light inline **bold**, *italic*, `code`, and [label](url) links for reading copy. */
-function RichText({ text }: { text: string }): JSX.Element {
+export function RichText({ text }: { text: string }): JSX.Element {
   const linkRe = /\[([^\]]+)\]\(([^)]+)\)/g;
   const nodes: React.ReactNode[] = [];
   let last = 0;
@@ -221,7 +221,7 @@ function ReadingFlow({ flow }: { flow: K8sReadingFlow }): JSX.Element {
   );
 }
 
-function ReadingSection({
+export function ReadingSection({
   section,
   readingPrefix,
 }: {

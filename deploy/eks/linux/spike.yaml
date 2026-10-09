@@ -1,7 +1,8 @@
 # Phase-0 spike for the Linux module: a learner machine running systemd as PID 1 with
 # root/sudo inside, on the labs-linux pool, without host privileges. Container root is an
 # unprivileged node UID (user namespace) with namespaced capabilities only; the
-# nri-cgroup-rw plugin makes the cgroupfs writable so systemd can boot.
+# nri-cgroup-rw plugin makes the cgroupfs writable so systemd can boot, and the
+# devlabs/linux-box.json seccomp profile (seccomp-profiles.yaml) blocks risky syscalls.
 #
 # Driven by ./deploy/eks/eks-linux.sh spike (applies, waits, runs the capability checks).
 apiVersion: v1
@@ -38,7 +39,8 @@ spec:
         capabilities:
           add: [SYS_ADMIN, NET_ADMIN, NET_RAW, SYS_PTRACE, SYS_RESOURCE, SYS_NICE, AUDIT_WRITE]
         seccompProfile:
-          type: Unconfined
+          type: Localhost
+          localhostProfile: devlabs/linux-box.json
       resources:
         requests: {cpu: 250m, memory: 384Mi}
         limits: {cpu: "1", memory: 1Gi}

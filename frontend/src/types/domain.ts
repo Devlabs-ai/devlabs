@@ -171,6 +171,10 @@ export interface ChallengePublic {
   visibilityNotes?: string;
   /** Reward tokens earned when the lab is solved. */
   tokens?: number;
+  /** Paid subtrack (linux / docker / kubernetes) this lab belongs to, if any. */
+  paidTrack?: string | null;
+  /** True when the user's plan doesn't cover this lab's subtrack and it isn't a free lab. */
+  locked?: boolean;
   /** True when this user has ≥1 submit graded passed. */
   solved?: boolean;
   /** Tokens this user actually earned (halved if the solution was opened before solving). */
@@ -201,6 +205,19 @@ export interface PublicBoardPiece {
   title: string;
   blurb: string;
   kind: 'stage' | 'mechanism';
+  speaker?: string | null;
+}
+
+export type BoardGameMode = 'classic' | 'unlock' | 'debate';
+
+export interface BoardGameConfig {
+  mode: BoardGameMode;
+  lives: number | null;
+}
+
+export interface BoardFinaleOption {
+  id: string;
+  label: string;
 }
 
 export interface PublicBoardSlot {
@@ -208,6 +225,7 @@ export interface PublicBoardSlot {
   optional: boolean;
   x: number;
   y: number;
+  prompt?: string | null;
 }
 
 export interface PublicBoardShadow {
@@ -218,6 +236,11 @@ export interface PublicBoardShadow {
 export interface PublicBoardSpec {
   pieces: PublicBoardPiece[];
   shadow: PublicBoardShadow;
+  kicker?: string | null;
+  game?: BoardGameConfig;
+  finale?: { prompt: string; options: BoardFinaleOption[] } | null;
+  trayLabel?: string | null;
+  unlockAfter?: string | null;
 }
 
 export interface BoardGraphNode {
@@ -247,6 +270,27 @@ export interface BoardGradeResult {
   correctRequired: number;
   requiredCount: number;
   trapsPlaced: number;
+  boardPassed?: boolean;
+  needsFinale?: boolean;
+  stars?: number | null;
+}
+
+export interface BoardClaimResult {
+  verdict: boolean;
+  correct: boolean;
+  explanation: string | null;
+}
+
+export interface BoardGameState {
+  lives: number | null;
+  livesMax: number | null;
+  step: number;
+  clues: string[];
+  claims: Record<string, BoardClaimResult> | null;
+  finaleCorrect: boolean;
+  finaleExplanation: string | null;
+  resets: number;
+  over: boolean;
 }
 
 export interface BoardState {
@@ -255,6 +299,7 @@ export interface BoardState {
   nodes?: BoardGraphNode[];
   edges?: BoardGraphEdge[];
   lastGrade?: BoardGradeResult | null;
+  game?: BoardGameState;
 }
 
 export interface ChallengeFull extends ChallengePublic {
@@ -409,6 +454,8 @@ export interface AppState {
   onLogout: () => void;
   /** Guests browse freely; this opens the sign-in modal. */
   onRequestLogin: (returnTo?: string) => void;
+  /** Reload the lab list (e.g. after a purchase changes which labs are locked). */
+  refreshChallenges: () => Promise<void>;
 }
 
 // ── API / service helpers ─────────────────────────────────────────────────────
