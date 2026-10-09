@@ -1091,8 +1091,8 @@ export default function App(): React.JSX.Element {
           <Route path="track/quiz/:quizId" element={<SignedInOnlyRoute><QuizPage /></SignedInOnlyRoute>} />
           <Route path="track/papers" element={<AdminOnlyRoute><WhitePapersPage /></AdminOnlyRoute>} />
           <Route path="track/papers/:sectionId" element={<AdminOnlyRoute><WhitePapersPage /></AdminOnlyRoute>} />
-          <Route path="track/whiteboard" element={<WhiteboardPage />} />
-          <Route path="track/whiteboard/:sectionId" element={<WhiteboardPage />} />
+          <Route path="track/whiteboard" element={<AdminOnlyRoute><WhiteboardPage /></AdminOnlyRoute>} />
+          <Route path="track/whiteboard/:sectionId" element={<AdminOnlyRoute><WhiteboardPage /></AdminOnlyRoute>} />
           <Route path="track/quests" element={<SideQuestsPage />} />
           <Route path="track/quests/:topicId" element={<SideQuestsPage />} />
           <Route path="track/playgrounds" element={<PlaygroundsPage />} />
