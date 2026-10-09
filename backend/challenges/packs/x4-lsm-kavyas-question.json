@@ -151,6 +151,6 @@
       }
     ]
   },
-  "visibleTo": "users",
+  "visibleTo": "admin",
   "tokens": 10
 }

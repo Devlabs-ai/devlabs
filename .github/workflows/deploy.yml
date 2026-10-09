@@ -68,6 +68,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.ECR_REGISTRY }}/devlabs/backend:${{ github.sha }}
+          # ECR basic scanning skips image indexes; a plain manifest gets scanned on push.
+          provenance: false
           cache-from: type=gha,scope=backend
           cache-to: type=gha,scope=backend,mode=max
 
@@ -79,6 +81,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.ECR_REGISTRY }}/devlabs/lab-shell:${{ github.sha }}
+          provenance: false
           cache-from: type=gha,scope=lab-shell
           cache-to: type=gha,scope=lab-shell,mode=max
 

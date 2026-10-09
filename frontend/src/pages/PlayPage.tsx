@@ -95,9 +95,9 @@ function labTrackId(challenge: ChallengePublic): string {
 function LibraryView({ challenges, challengesError, startError, onSelectChallenge }: LibraryViewProps): JSX.Element {
   const navigate = useNavigate();
   const { currentUser } = useAppState();
+  const isAdmin = isAdminUser(currentUser) || isAdminUser(getCurrentUser());
   const showVisibilityMarks =
-    isAdminUser(currentUser) ||
-    isAdminUser(getCurrentUser()) ||
+    isAdmin ||
     isReviewStaff(currentUser) ||
     isReviewStaff(getCurrentUser());
   const params = useParams<{ domainId?: string; panelId?: string }>();
@@ -307,16 +307,21 @@ function LibraryView({ challenges, challengesError, startError, onSelectChalleng
       <h1 className="sr-only">Play</h1>
 
       <div className="play-problems-layout">
-        <aside className="play-problems-sidebar" aria-label="Paper of the Month, Whiteboard and leaderboard">
+        <aside
+          className="play-problems-sidebar"
+          aria-label={isAdmin ? 'Paper of the Month, Whiteboard and leaderboard' : 'Paper of the Month and leaderboard'}
+        >
           <MonthlyPaperCard />
-          <Link to={WHITEBOARD_PATH} className="play-sidebar-card play-sidebar-papers play-sidebar-board">
-            <strong>Whiteboard</strong>
-            <p>Data systems theory: replication, consensus, transactions and more. No cluster.</p>
-            <span className="play-sidebar-papers-cta">
-              Browse boards
-              <span aria-hidden>→</span>
-            </span>
-          </Link>
+          {isAdmin && (
+            <Link to={WHITEBOARD_PATH} className="play-sidebar-card play-sidebar-papers play-sidebar-board">
+              <strong>Whiteboard</strong>
+              <p>Data systems theory: replication, consensus, transactions and more. No cluster.</p>
+              <span className="play-sidebar-papers-cta">
+                Browse boards
+                <span aria-hidden>→</span>
+              </span>
+            </Link>
+          )}
           <PlatformLeaderboardCard />
         </aside>
 
