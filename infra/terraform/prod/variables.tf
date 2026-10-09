@@ -8,9 +8,9 @@ variable "region" {
   default = "ap-south-2"
 }
 
-variable "github_repository" {
+variable "github_oidc_subject_prefix" {
   type        = string
-  description = "owner/name of the repo whose workflows may assume the CI roles. Case-sensitive."
+  description = "Prefix of the OIDC `sub` claim for this repo's workflows. The repo uses immutable subjects (owner@id/name@id), so it survives renames. Read it with: gh api repos/<owner>/<repo>/actions/oidc/customization/sub"
 }
 
 variable "app_instance_id" {

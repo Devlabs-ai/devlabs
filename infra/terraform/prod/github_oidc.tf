@@ -11,13 +11,13 @@
 
 locals {
   github_oidc_host = "token.actions.githubusercontent.com"
-  repo             = var.github_repository
+  sub              = var.github_oidc_subject_prefix
 
   github_role_subjects = {
-    build           = ["repo:${local.repo}:ref:refs/heads/main"]
-    deploy          = ["repo:${local.repo}:environment:production"]
-    terraform-plan  = ["repo:${local.repo}:pull_request"]
-    terraform-apply = ["repo:${local.repo}:environment:infra"]
+    build           = ["${local.sub}:ref:refs/heads/main"]
+    deploy          = ["${local.sub}:environment:production"]
+    terraform-plan  = ["${local.sub}:pull_request"]
+    terraform-apply = ["${local.sub}:environment:infra"]
   }
 
   state_bucket_arn = "arn:aws:s3:::devlabs-tfstate-${var.account_id}"
