@@ -1,0 +1,173 @@
+# Push to main → CI checks → build images + release bundle → deploy to the app host.
+#
+# No long-lived credentials: each job assumes an IAM role through GitHub OIDC
+# (infra/terraform/prod/github_oidc.tf). The deploy job runs in the "production"
+# environment and can only run the `devlabs-deploy` SSM document on the app instance;
+# there is no SSH.
+#
+# Rollback: Actions → Deploy → Run workflow on main with `sha` = an earlier commit
+# (full 40-char SHA, still within ECR / release-bucket retention). Skips the build.
+# See docs/cicd-and-aws-access.md.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Redeploy this earlier commit SHA (rollback). Empty = build and deploy main."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-2
+  AWS_ACCOUNT_ID: "204098850303"
+  ECR_REGISTRY: 204098850303.dkr.ecr.ap-south-2.amazonaws.com
+  RELEASE_BUCKET: devlabs-releases-204098850303
+  APP_INSTANCE_ID: i-0bb3a844fac9d0563
+  DEPLOY_DOCUMENT: devlabs-deploy
+  DEPLOY_LOG_GROUP: /devlabs/deploy
+
+jobs:
+  checks:
+    if: github.event_name == 'push' || inputs.sha == ''
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/devlabs-gha-build
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build and push backend
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/Dockerfile.backend
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/devlabs/backend:${{ github.sha }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Build and push lab-shell
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/Dockerfile.labshell
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/devlabs/lab-shell:${{ github.sha }}
+          cache-from: type=gha,scope=lab-shell
+          cache-to: type=gha,scope=lab-shell,mode=max
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci && npm run build
+
+      - name: Upload release bundle
+        run: |
+          tar -czf release.tar.gz \
+            docker-compose.prod.yml \
+            deploy/nginx/devlabs.conf \
+            scripts/deploy-release.sh \
+            scripts/prod-restart.sh \
+            frontend/dist
+          aws s3 cp --only-show-errors release.tar.gz \
+            "s3://${RELEASE_BUCKET}/releases/${GITHUB_SHA}.tar.gz"
+
+  deploy:
+    needs: build
+    if: >-
+      always() &&
+      (needs.build.result == 'success' ||
+       (github.event_name == 'workflow_dispatch' && inputs.sha != '' && needs.build.result == 'skipped'))
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ inputs.sha || github.sha }}
+    steps:
+      - name: Validate SHA
+        run: |
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be a full 40-char commit SHA"; exit 1; }
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/devlabs-gha-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check release artifacts exist
+        run: |
+          aws s3api head-object --bucket "$RELEASE_BUCKET" --key "releases/${RELEASE_SHA}.tar.gz" >/dev/null
+          for repo in devlabs/backend devlabs/lab-shell; do
+            aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$RELEASE_SHA" >/dev/null
+          done
+
+      - name: Run devlabs-deploy on the app instance
+        run: |
+          command_id="$(aws ssm send-command \
+            --document-name "$DEPLOY_DOCUMENT" \
+            --instance-ids "$APP_INSTANCE_ID" \
+            --parameters "ReleaseSha=$RELEASE_SHA" \
+            --comment "gh run ${GITHUB_RUN_ID} by ${GITHUB_ACTOR}" \
+            --cloud-watch-output-config "CloudWatchOutputEnabled=true,CloudWatchLogGroupName=$DEPLOY_LOG_GROUP" \
+            --query Command.CommandId --output text)"
+          echo "SSM command $command_id (logs: CloudWatch $DEPLOY_LOG_GROUP)"
+
+          status=Pending
+          for _ in $(seq 1 200); do
+            sleep 5
+            status="$(aws ssm get-command-invocation \
+              --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || echo Pending)"
+            case "$status" in
+              Pending|InProgress|Delayed) continue ;;
+              *) break ;;
+            esac
+          done
+
+          aws ssm get-command-invocation \
+            --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" \
+            --query '[StandardOutputContent, StandardErrorContent]' --output text || true
+
+          echo "status: $status"
+          [[ "$status" == "Success" ]]
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy ${RELEASE_SHA:0:12}"
+            echo "- instance: \`$APP_INSTANCE_ID\`"
+            echo "- trigger: ${{ github.event_name }} by @${GITHUB_ACTOR}"
+          } >> "$GITHUB_STEP_SUMMARY"
