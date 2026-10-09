@@ -93,9 +93,14 @@ Do **not** expose Postgres (5432) or Redis (6379) to the internet; they stay on 
 
 Restrict 6000–7999 to your IP if you can; opening them worldwide is convenient for demos but widens the attack surface.
 
-## 3. Backend image (GitHub Actions → Docker Hub)
+## 3. CI/CD (GitHub Actions → ECR → SSM)
 
-The **backend** is built in CI and published to a **public** Docker Hub repo:
+**Current pipeline:** merge to `main` builds the backend and lab-shell images into private ECR and
+deploys through SSM (no SSH, no stored AWS keys). Setup, roles and rollback:
+**[docs/cicd-and-aws-access.md](../docs/cicd-and-aws-access.md)**. The rest of this section
+describes the old Docker Hub flow and is kept until the cutover is done.
+
+The **backend** used to be built in CI and published to a **public** Docker Hub repo:
 
 **[rithvikreddyalkanti/devlabs-backend](https://hub.docker.com/r/rithvikreddyalkanti/devlabs-backend)**
 
@@ -129,8 +134,8 @@ EC2 pulls the backend image over the public internet — **no `docker login` req
 ## 4. Deploy on the server
 
 ```bash
-git clone https://github.com/Rithvik89/Devlabs.git
-cd Devlabs
+git clone https://github.com/Devsetu-Org/Devsetu.git
+cd Devsetu
 git checkout main
 
 # Secrets

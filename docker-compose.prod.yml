@@ -1,12 +1,10 @@
 # Production stack for a single EC2 host.
-# Backend image is built in GitHub Actions and published to Docker Hub:
-#   rithvikreddyalkanti/devlabs-backend:latest
+# Backend and lab-shell images are built by GitHub Actions and pushed to private ECR
+# (.github/workflows/deploy.yml); scripts/deploy-release.sh installs a release and
+# writes release.env with the image refs below. See docs/cicd-and-aws-access.md.
 #
-# Usage (on server, from repo root):
-#   cp deploy/env.production.example .env   # edit secrets + PUBLIC_HOST
-#   cd frontend && npm ci && npm run build && cd ..
-#   docker compose -f docker-compose.prod.yml pull
-#   docker compose -f docker-compose.prod.yml up -d
+# Manual restart on the server (uses the images in release.env):
+#   ./scripts/prod-restart.sh
 
 services:
   postgres:
@@ -42,9 +40,7 @@ services:
       - devlabs_internal
 
   backend:
-    image: rithvikreddyalkanti/devlabs-backend:${DEVLABS_BACKEND_TAG:-latest}
-    # Prefer building on the host until Hub :latest is rebuilt from this Dockerfile:
-    #   docker compose -f docker-compose.prod.yml build backend
+    image: ${DEVLABS_BACKEND_IMAGE:-rithvikreddyalkanti/devlabs-backend}:${DEVLABS_BACKEND_TAG:-latest}
     build:
       context: .
       dockerfile: deploy/Dockerfile.backend
@@ -82,7 +78,7 @@ services:
       # Lab terminals run in isolated per-terminal containers (image: lab-shell below).
       # Host paths must match the bind mounts above, since the host daemon mounts them.
       K8S_LAB_SHELL_MODE: container
-      K8S_LAB_SHELL_IMAGE: devlabs-lab-shell:latest
+      K8S_LAB_SHELL_IMAGE: ${DEVLABS_LAB_SHELL_IMAGE:-devlabs-lab-shell:latest}
       K8S_LAB_HOST_HOME_ROOT: ${DEVLABS_ROOT:-/opt/devlabs}/kube/homes
       K8S_LAB_HOST_KUBE_ROOT: ${DEVLABS_ROOT:-/opt/devlabs}/kube/learner
     depends_on:
@@ -95,10 +91,10 @@ services:
     ports:
       - "127.0.0.1:4000:4000"
 
-  # Build-only: image for isolated lab terminals, started on demand by the backend.
-  #   docker compose -f docker-compose.prod.yml build lab-shell
+  # Image for isolated lab terminals, started on demand by the backend. CI builds it;
+  # deploy-release.sh pulls it. Local build: docker compose -f docker-compose.prod.yml build lab-shell
   lab-shell:
-    image: devlabs-lab-shell:latest
+    image: ${DEVLABS_LAB_SHELL_IMAGE:-devlabs-lab-shell:latest}
     build:
       context: .
       dockerfile: deploy/Dockerfile.labshell

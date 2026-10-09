@@ -1,0 +1,7 @@
+# Changes here can grant AWS access or change what reaches production.
+# Enforced once branch protection on main requires code-owner review.
+/.github/                     @Rithvik89
+/infra/                       @Rithvik89
+/scripts/deploy-release.sh    @Rithvik89
+/docker-compose.prod.yml      @Rithvik89
+/deploy/                      @Rithvik89
